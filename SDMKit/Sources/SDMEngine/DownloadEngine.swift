@@ -7,21 +7,44 @@ public struct EngineSettings: Sendable {
     /// Carried for the UI and for Phase 3; not enforced here yet.
     public var globalMaxConnections: Int
     public var downloadFolder: URL
+    /// Bytes written per worker between sidecar checkpoints (spec §4.3's byte
+    /// half). Settable so a test can drive the checkpoint path without moving
+    /// eight megabytes.
+    public var checkpointIntervalBytes: Int64
+    /// Ticks of the 1 Hz heartbeat that must pass with no further change
+    /// before durable state is written. Spec §4.2's "~2 s after the last
+    /// change" debounce.
+    public var persistDebounceTicks: Int
 
     public init(
         maxConcurrent: Int,
         segmentsPerItem: Int,
         globalMaxConnections: Int,
-        downloadFolder: URL
+        downloadFolder: URL,
+        checkpointIntervalBytes: Int64 = 8 * 1024 * 1024,
+        persistDebounceTicks: Int = 2
     ) {
         precondition(maxConcurrent >= 1, "maxConcurrent must be at least 1")
         precondition(segmentsPerItem >= 1, "segmentsPerItem must be at least 1")
         precondition(globalMaxConnections >= 1, "globalMaxConnections must be at least 1")
+        precondition(checkpointIntervalBytes > 0, "checkpointIntervalBytes must be positive")
+        precondition(persistDebounceTicks >= 1, "persistDebounceTicks must be at least 1")
         self.maxConcurrent = maxConcurrent
         self.segmentsPerItem = segmentsPerItem
         self.globalMaxConnections = globalMaxConnections
         self.downloadFolder = downloadFolder
+        self.checkpointIntervalBytes = checkpointIntervalBytes
+        self.persistDebounceTicks = persistDebounceTicks
     }
+}
+
+/// Failures the engine itself produces, as opposed to the transport or the
+/// per-download task. Routed through `RetryPolicy.classify` like any other
+/// error so they reach a terminal `.failed(reason:)` instead of a retry loop.
+public enum EngineError: Error, Equatable {
+    /// The per-package output folder could not be created — permissions, a
+    /// read-only volume, a file sitting where the folder should be.
+    case destinationFolderUnavailable(path: String, underlying: String)
 }
 
 /// Owns the package list, the running `DownloadTask`s, and the scheduler.
@@ -30,7 +53,10 @@ public struct EngineSettings: Sendable {
 /// timer, so the engine is fully deterministic under test. It is also what
 /// picks up newly runnable work: a finished download does not reschedule from
 /// inside its own completion path, because a transient failure would then
-/// re-attempt itself in a hot loop, and Phase 1 deliberately does not retry.
+/// re-attempt itself with no gap at all. Re-attempts are governed by
+/// `RetryPolicy` — a per-item attempt counter, tick-counted backoff before an
+/// item may be re-desired, and a terminal `.failed(reason:)` once
+/// `maxAttempts` consecutive attempts have failed.
 public actor DownloadEngine {
     /// One in-flight item: the task doing the work and the job awaiting it.
     ///
@@ -73,14 +99,32 @@ public actor DownloadEngine {
     private var isShutDown = false
     private var hasRestored = false
 
+    private let retryPolicy: RetryPolicy
+    /// Consecutive failed attempts per item, reset by any attempt that made
+    /// real progress and by success.
+    private var failedAttempts: [UUID: Int] = [:]
+    /// Ticks of backoff an item still owes before it may be re-desired.
+    /// Counted in heartbeat ticks rather than measured against a clock, which
+    /// is the same idiom `checkpointTick()` uses and keeps the engine
+    /// deterministic under test.
+    private var retryHoldTicks: [UUID: Int] = [:]
+    /// Bytes an attempt started from, so a failure that nevertheless moved
+    /// bytes can clear the attempt counter.
+    private var attemptStartBytes: [UUID: Int64] = [:]
+    /// Ticks elapsed since the first unflushed change, or `nil` when the store
+    /// has nothing pending. Spec §4.2's debounce.
+    private var ticksSincePendingChange: Int?
+
     public init(
         transport: any HTTPTransport,
         stateStore: any StateStore,
-        settings: EngineSettings
+        settings: EngineSettings,
+        retryPolicy: RetryPolicy = RetryPolicy()
     ) {
         self.transport = transport
         self.stateStore = stateStore
         self.settings = settings
+        self.retryPolicy = retryPolicy
     }
 
     // MARK: - Mutations
@@ -173,7 +217,8 @@ public actor DownloadEngine {
 
     /// One-second heartbeat: folds the window's bytes into the samplers,
     /// drives the wall-clock half of the sidecar checkpoint trigger, closes
-    /// the speed window, and reschedules.
+    /// the speed window, ages retry backoff, writes debounced durable state,
+    /// and reschedules.
     public func tick() async {
         for (itemID, runner) in runners where !runner.isRetiring {
             let transferred = await runner.task.completedRanges.totalBytes
@@ -186,7 +231,42 @@ public actor DownloadEngine {
         }
         for itemID in Array(samplers.keys) { samplers[itemID]?.tick() }
         globalSampler.tick()
+
+        for (itemID, remaining) in retryHoldTicks {
+            if remaining <= 1 {
+                retryHoldTicks[itemID] = nil
+            } else {
+                retryHoldTicks[itemID] = remaining - 1
+            }
+        }
+
+        await flushIfDebounceElapsed()
         await reconcile()
+    }
+
+    /// Spec §4.2: durable state is written "~2 s after the last change".
+    ///
+    /// `save()` only stores into the store's in-memory `pending`; `flush()` is
+    /// the only thing that writes `state.json`. Before this existed the sole
+    /// caller of `flush()` anywhere was `shutdown()`, which in the ordinary
+    /// quit path never ran — so nothing was ever written, `.incomplete` files
+    /// survived with no record of the item owning them, and the next launch
+    /// restored an empty list.
+    ///
+    /// Counted from the *first* unflushed change rather than the last, so a
+    /// download that changes something every tick still gets written every two
+    /// seconds instead of being starved forever. Cheap when nothing is dirty:
+    /// `ticksSincePendingChange` is nil and this returns without touching the
+    /// store.
+    private func flushIfDebounceElapsed() async {
+        guard let elapsed = ticksSincePendingChange else { return }
+        let next = elapsed + 1
+        guard next >= settings.persistDebounceTicks else {
+            ticksSincePendingChange = next
+            return
+        }
+        ticksSincePendingChange = nil
+        await stateStore.flush()
     }
 
     public func snapshot() async -> EngineSnapshot {
@@ -241,22 +321,30 @@ public actor DownloadEngine {
     /// Stops everything and writes durable state. Jobs are awaited rather than
     /// merely cancelled, so no file descriptor outlives the call and each
     /// item's final state reaches the snapshot before it is flushed.
+    ///
+    /// Idempotent. The app now shuts down from two places — the heartbeat's
+    /// `.task` continuation and `applicationWillTerminate` — and on a ⌘Q both
+    /// can fire. Guarding here rather than only at the call site makes "call
+    /// it once" a property of the engine instead of an invariant every caller
+    /// has to uphold.
     public func shutdown() async {
+        guard !isShutDown else { return }
         isShutDown = true
         let live = runners.values.map { $0 }
         for runner in live { runner.job.cancel() }
         for runner in live { await runner.task.pause() }
         for runner in live { _ = await runner.job.value }
         await persist()
+        ticksSincePendingChange = nil
         await stateStore.flush()
     }
 
     /// Test helper: pumps the engine until nothing is left running.
     ///
-    /// Bounded rather than open-ended. Phase 1 does not retry, but a
-    /// transiently failing item still returns to `queued` and stays eligible,
-    /// so an unbounded loop would spin forever on an origin that never
-    /// succeeds instead of failing the test.
+    /// Does not tick, so retry backoff never ages: a transiently failing item
+    /// is held out of the desired set and this returns rather than looping.
+    /// Still bounded, as a backstop against any future path that could keep
+    /// re-desiring an item without a tick.
     func runUntilIdle() async throws {
         await reconcile()
         for _ in 0..<1000 {
@@ -291,19 +379,21 @@ public actor DownloadEngine {
 
         let desired = Scheduler.desiredRunningSet(
             SchedulerInput(
-                packages: packages,
+                packages: schedulablePackages(),
                 runningNow: Set(runners.keys),
                 startedRecently: [],
                 maxConcurrent: settings.maxConcurrent
             )
         )
 
+        var changed = false
         var retiring: [DownloadTask] = []
         for (itemID, runner) in runners where !desired.contains(itemID) && !runner.isRetiring {
             runners[itemID]?.isRetiring = true
             runner.job.cancel()
             retiring.append(runner.task)
             mutateItem(itemID) { $0.state = .queued }
+            changed = true
         }
 
         // Two tasks writing the same destination would interleave at absolute
@@ -312,9 +402,24 @@ public actor DownloadEngine {
         // unwound yet.
         var claimed = Set(runners.values.map(\.destinationURL))
         for itemID in desired where runners[itemID] == nil {
-            guard let context = context(for: itemID) else { continue }
-            guard claimed.insert(context.destinationURL).inserted else { continue }
+            let runContext: RunContext
+            do {
+                guard let resolved = try context(for: itemID) else { continue }
+                runContext = resolved
+            } catch {
+                // Creating the package folder failed. Left as `try?` this was
+                // invisible: `SparseFile` then failed to open, the failure
+                // classified transient, and the item re-attempted once a
+                // second forever with nothing anywhere saying why.
+                mutateItem(itemID) { $0.state = failureState(for: error, itemID: itemID) }
+                failedAttempts[itemID] = nil
+                changed = true
+                continue
+            }
+            guard claimed.insert(runContext.destinationURL).inserted else { continue }
             mutateItem(itemID) { $0.state = .running }
+            changed = true
+            attemptStartBytes[itemID] = completedBytes(of: itemID)
             // The one place a byte total may legitimately go backwards: a new
             // task starts over from whatever the sidecar lets it resume at.
             // Seeding the sampler baseline here — rather than letting
@@ -325,13 +430,13 @@ public actor DownloadEngine {
             sampledBytes[itemID] = completedBytes(of: itemID)
             let task = DownloadTask(
                 id: itemID,
-                sourceURL: context.sourceURL,
-                destinationURL: context.destinationURL,
+                sourceURL: runContext.sourceURL,
+                destinationURL: runContext.destinationURL,
                 transport: transport,
                 configuration: DownloadTask.Configuration(
-                    workerCount: context.segments,
+                    workerCount: runContext.segments,
                     minChunk: 64 * 1024,
-                    checkpointInterval: 8 * 1024 * 1024
+                    checkpointInterval: settings.checkpointIntervalBytes
                 )
             )
             let job = Task { [weak self] in
@@ -341,11 +446,31 @@ public actor DownloadEngine {
             runners[itemID] = Runner(
                 task: task,
                 job: job,
-                destinationURL: context.destinationURL
+                destinationURL: runContext.destinationURL
             )
         }
 
         for task in retiring { await task.pause() }
+        if changed { await persist() }
+    }
+
+    /// The package graph as the scheduler should see it right now.
+    ///
+    /// An item serving retry backoff is presented as disabled, so it drops out
+    /// of `rank` entirely and its slot goes to the next item by rank rather
+    /// than being held empty. Doing it here — rather than subtracting from the
+    /// scheduler's answer afterwards — keeps `Scheduler.desiredRunningSet` a
+    /// pure function of its input, which is what makes spec §6 table-testable.
+    private func schedulablePackages() -> [DownloadPackage] {
+        guard !retryHoldTicks.isEmpty else { return packages }
+        var held = packages
+        for packageIndex in held.indices {
+            for itemIndex in held[packageIndex].items.indices
+            where retryHoldTicks[held[packageIndex].items[itemIndex].id] != nil {
+                held[packageIndex].items[itemIndex].isEnabled = false
+            }
+        }
+        return held
     }
 
     /// Mirrors each running task's probe result onto its item.
@@ -372,11 +497,27 @@ public actor DownloadEngine {
         let segments: Int
     }
 
-    private func context(for itemID: UUID) -> RunContext? {
+    /// Resolves where an item's bytes go, creating the package folder.
+    ///
+    /// Throws rather than swallowing a `createDirectory` failure: a read-only
+    /// volume or a permission problem is not something re-attempting fixes,
+    /// and hiding it behind `try?` turned it into an undiagnosable retry loop
+    /// one layer down.
+    private func context(for itemID: UUID) throws -> RunContext? {
         for package in packages {
             guard let item = package.items.first(where: { $0.id == itemID }) else { continue }
             let folder = settings.downloadFolder.appendingPathComponent(package.name)
-            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            do {
+                try FileManager.default.createDirectory(
+                    at: folder,
+                    withIntermediateDirectories: true
+                )
+            } catch {
+                throw EngineError.destinationFolderUnavailable(
+                    path: folder.path,
+                    underlying: error.localizedDescription
+                )
+            }
             return RunContext(
                 sourceURL: item.url,
                 destinationURL: folder.appendingPathComponent(item.filename),
@@ -391,13 +532,22 @@ public actor DownloadEngine {
         do {
             _ = try await task.start()
             state = .completed
+            failedAttempts[itemID] = nil
+            retryHoldTicks[itemID] = nil
         } catch {
-            // Phase 1 does not retry. A transient failure returns the item to
-            // `queued`; the next `tick()` decides whether to attempt it again.
-            if case .permanent(let reason) = RetryPolicy().classify(error) {
-                state = .failed(reason: reason)
-            } else {
+            if runners[itemID]?.isRetiring == true {
+                // Preemption, not failure. `reconcile()` cancelled this job
+                // and paused its task, so `start()` throwing here is the
+                // expected shape of a scheduler decision — charging it to the
+                // item's retry budget would eventually mark a perfectly
+                // healthy download `.failed` for having been outranked too
+                // often, and holding it in backoff would stop it resuming the
+                // moment a slot frees up.
                 state = .queued
+            } else {
+                let progressed =
+                    await task.completedRanges.totalBytes > (attemptStartBytes[itemID] ?? 0)
+                state = failureState(for: error, itemID: itemID, madeProgress: progressed)
             }
         }
 
@@ -439,6 +589,63 @@ public actor DownloadEngine {
             if let isResumable { $0.isResumable = isResumable }
             $0.state = state
         }
+    }
+
+    // MARK: - Failure handling
+
+    /// Turns a thrown error into the item's next state, applying spec §6.4's
+    /// backoff and attempt cap.
+    ///
+    /// Before this existed, `run()` returned every transient failure to
+    /// `.queued` and `tick()` re-desired it one second later, forever: against
+    /// an origin that 500s, truncates, or drops the connection that is an
+    /// unbounded request storm at one attempt per second per item. `run()` and
+    /// `reconcile()` both route through here so a folder that cannot be
+    /// created is capped the same way a hostile origin is.
+    ///
+    /// A permanent failure is terminal immediately. A transient one holds the
+    /// item out of the desired running set for `RetryPolicy.delay` — counted
+    /// in heartbeat ticks, no clock — and becomes terminal once `maxAttempts`
+    /// consecutive attempts have failed. An attempt that moved real bytes
+    /// clears the counter first: a download that is genuinely progressing,
+    /// however unreliably, should not exhaust a budget meant for one that
+    /// cannot start at all.
+    private func failureState(
+        for error: any Error,
+        itemID: UUID,
+        madeProgress: Bool = false
+    ) -> ItemState {
+        if case .permanent(let reason) = retryPolicy.classify(error) {
+            failedAttempts[itemID] = nil
+            retryHoldTicks[itemID] = nil
+            return .failed(reason: reason)
+        }
+
+        if madeProgress { failedAttempts[itemID] = nil }
+        let attempt = (failedAttempts[itemID] ?? 0) + 1
+        failedAttempts[itemID] = attempt
+
+        guard attempt < retryPolicy.maxAttempts else {
+            failedAttempts[itemID] = nil
+            retryHoldTicks[itemID] = nil
+            return .failed(
+                reason:
+                    "Gave up after \(attempt) attempts: \(Self.describe(error))"
+            )
+        }
+
+        // `delay(forAttempt:)` is seconds; the heartbeat is 1 Hz, so seconds
+        // and ticks are the same unit. At least one tick, so a sub-second
+        // backoff still costs a beat rather than re-attempting immediately.
+        let seconds = retryPolicy.delay(forAttempt: attempt - 1).components.seconds
+        retryHoldTicks[itemID] = Swift.max(1, Int(seconds))
+        return .queued
+    }
+
+    private static func describe(_ error: any Error) -> String {
+        if let download = error as? DownloadError { return "\(download)" }
+        if let transport = error as? TransportError { return "\(transport)" }
+        return error.localizedDescription
     }
 
     // MARK: - Telemetry
@@ -486,7 +693,10 @@ public actor DownloadEngine {
         }
     }
 
+    /// Queues the current package graph for durable storage and starts (or
+    /// leaves running) the debounce window `tick()` drains.
     private func persist() async {
         await stateStore.save(PersistedState(packages: packages))
+        if ticksSincePendingChange == nil { ticksSincePendingChange = 0 }
     }
 }

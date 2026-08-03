@@ -149,10 +149,23 @@ public actor DownloadTask {
         }
 
         guard let file else { throw DownloadError.incompleteAfterWorkersFinished }
-        let result = try file.finalize()
-        self.file = nil
-        ResumeSidecar.remove(at: sidecarURL)
-        return result
+        do {
+            let result = try file.finalize()
+            self.file = nil
+            ResumeSidecar.remove(at: sidecarURL)
+            return result
+        } catch {
+            // The rename failed — almost always because something already
+            // occupies the destination. Refusing to overwrite is the intended
+            // behavior, but the descriptor must still be released and `file`
+            // cleared, or a later `pause()` would checkpoint a sidecar
+            // claiming the whole file is complete while the bytes have not
+            // been moved into place. The `.incomplete` file and its existing
+            // sidecar stay, so nothing already downloaded is lost.
+            file.close()
+            self.file = nil
+            throw error
+        }
     }
 
     /// Probes the resource and opens the destination file.

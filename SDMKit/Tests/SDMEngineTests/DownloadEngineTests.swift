@@ -244,7 +244,8 @@ private func makeGatedEngine(
     folder: URL,
     gate: Gate,
     phase: GatePhase,
-    ignoresRanges: Bool = false
+    ignoresRanges: Bool = false,
+    retryPolicy: RetryPolicy = RetryPolicy()
 ) -> DownloadEngine {
     DownloadEngine(
         transport: GatedOrigin(
@@ -259,7 +260,56 @@ private func makeGatedEngine(
             segmentsPerItem: 1,
             globalMaxConnections: 8,
             downloadFolder: folder
-        )
+        ),
+        retryPolicy: retryPolicy
+    )
+}
+
+/// Preemption unwinds a runner by cancelling its job and pausing its task, so
+/// `start()` throws — exactly the shape a real failure has. Charging it to the
+/// retry budget would let a perfectly healthy download be marked `.failed` for
+/// having been outranked too often, and would hold it in backoff instead of
+/// letting it resume the moment a slot frees up.
+///
+/// `maxAttempts: 1` makes any charge at all immediately terminal, so the
+/// assertion cannot pass by accident.
+@Test func preemptionIsNotChargedToTheRetryBudget() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let payload = testPayload(4000)
+
+    let gate = Gate()
+    let engine = makeGatedEngine(
+        payload: payload,
+        folder: dir,
+        gate: gate,
+        phase: .body,
+        retryPolicy: RetryPolicy(maxAttempts: 1, baseDelay: .seconds(30))
+    )
+
+    let package = packageOf(["a.bin"])
+    let itemID = package.items[0].id
+    await engine.add(package)
+
+    await gate.waitForArrival()
+    // Disabling retires the in-flight runner through the preemption path.
+    await engine.setEnabled(false, for: itemID)
+    await gate.open()
+    try await engine.runUntilIdle()
+
+    #expect(await snapshotItem(itemID, in: engine)?.state == .queued)
+
+    // A 30 s backoff would keep it out of the desired set for 30 ticks; a
+    // charged attempt against maxAttempts 1 would have made it terminal. It
+    // must simply start again on the very next reconcile.
+    await engine.setEnabled(true, for: itemID)
+    try await engine.runUntilIdle()
+
+    #expect(await snapshotItem(itemID, in: engine)?.state == .completed)
+    #expect(
+        try Data(
+            contentsOf: dir.appendingPathComponent("Batch").appendingPathComponent("a.bin")
+        ) == payload
     )
 }
 

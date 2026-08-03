@@ -42,6 +42,41 @@ public struct RetryPolicy: Sendable {
                 return .transient
             }
         }
+        // A destination that already exists is the one local failure that
+        // re-attempting can never clear. `DownloadTask.finalize()` refuses to
+        // overwrite (deliberately — that behavior is tested), so without this
+        // the resulting NSError fell through to `.transient`, the item went
+        // back to `queued`, the next tick resumed it to "complete" instantly
+        // from its sidecar, and it failed at the same rename again. Forever.
+        if let cocoa = error as? CocoaError, cocoa.code == .fileWriteFileExists {
+            return .permanent(reason: "A file already exists at the destination")
+        }
+        // Likewise for a destination folder that cannot be opened or created:
+        // permissions and read-only volumes do not fix themselves, and
+        // retrying produces a request storm with no diagnosis.
+        if let file = error as? SparseFile.FileError {
+            switch file {
+            case .couldNotOpen(let path, let errno):
+                return .permanent(
+                    reason: "Could not open \(path) (errno \(errno))"
+                )
+            case .truncateFailed(let errno):
+                return .permanent(reason: "Could not preallocate the file (errno \(errno))")
+            case .writeFailed(let errno):
+                // Could be a full disk that the user then frees up.
+                return errno == ENOSPC
+                    ? .permanent(reason: "The disk is full")
+                    : .transient
+            }
+        }
+        if let engine = error as? EngineError {
+            switch engine {
+            case .destinationFolderUnavailable(let path, let underlying):
+                return .permanent(
+                    reason: "Could not create the folder \(path): \(underlying)"
+                )
+            }
+        }
         return .transient
     }
 
