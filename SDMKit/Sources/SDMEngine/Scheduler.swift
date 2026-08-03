@@ -57,7 +57,6 @@ public enum Scheduler {
     /// window, then the highest-ranked remainder.
     public static func desiredRunningSet(_ input: SchedulerInput) -> Set<UUID> {
         let ranked = rank(input.packages)
-        let eligibleIDs = Set(ranked.map(\.id))
         var slots = input.maxConcurrent
         var desired: Set<UUID> = []
 
@@ -92,7 +91,9 @@ public enum Scheduler {
         // Pass 3: fill whatever remains by rank.
         reserve(ranked)
 
-        return desired.intersection(eligibleIDs)
+        // Every pass draws from `ranked`, and `ranked` contains only eligible
+        // items, so no ineligible id can be in `desired` to begin with.
+        return desired
     }
 
     private static func isEligible(_ item: DownloadItem) -> Bool {
