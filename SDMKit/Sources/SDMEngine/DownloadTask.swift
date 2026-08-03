@@ -5,6 +5,11 @@ public enum DownloadError: Error, Equatable {
     case unknownSize
     case serverError(status: Int)
     case incompleteAfterWorkersFinished
+    /// The origin's response body ended before the claimed range was fully
+    /// delivered, without the transport throwing — a clean short read. Bytes
+    /// already written for the claim remain on disk and recorded in
+    /// `completedRanges`; only the unwritten remainder is lost.
+    case truncatedResponse(expected: Int64, received: Int64)
 }
 
 /// Downloads one file using a pool of ephemeral workers that claim gaps from a
@@ -62,10 +67,21 @@ public actor DownloadTask {
     /// Probes the origin, then runs the worker pool until the file is complete.
     public func start() async throws -> URL {
         try await prepare()
-        try await runWorkers()
 
-        guard completed.isComplete(total: totalBytes) else {
-            throw DownloadError.incompleteAfterWorkersFinished
+        do {
+            try await runWorkers()
+            guard completed.isComplete(total: totalBytes) else {
+                throw DownloadError.incompleteAfterWorkersFinished
+            }
+        } catch {
+            // Close the descriptor on any failure path so a caller that
+            // retains a failed task (e.g. to inspect completedRanges before
+            // retrying) doesn't leak the fd until the task deallocates.
+            // `.incomplete` and the sidecar are left in place — a failed
+            // download must stay resumable. SparseFile.close() is
+            // idempotent, so this can't fight with Task 10's pause().
+            file?.close()
+            throw error
         }
 
         guard let file else { throw DownloadError.incompleteAfterWorkersFinished }
@@ -139,6 +155,18 @@ public actor DownloadTask {
             try file?.write(Data(slice), at: offset)
             record(ByteRange(start: offset, end: offset + writable))
             offset += writable
+        }
+
+        // The stream ended cleanly (no throw) but didn't cover the whole
+        // claim — a truncated body. Bytes written so far are already on
+        // disk and folded into `completed` above; make the short read a
+        // defined failure instead of silently re-handing the same gap back
+        // to `nextClaim` forever.
+        guard offset >= claim.end else {
+            throw DownloadError.truncatedResponse(
+                expected: claim.end - claim.start,
+                received: offset - claim.start
+            )
         }
     }
 

@@ -11,6 +11,10 @@ public actor FakeOrigin: HTTPTransport {
         public var reportedSizeOverride: Int64?
         /// Throw `.connectionDropped` after emitting this many bytes.
         public var dropAfterBytes: Int?
+        /// End the body stream cleanly (no error) after emitting this many
+        /// bytes — simulates a server that closes the connection without
+        /// signaling failure, short of the requested range.
+        public var truncateAfterBytes: Int?
         /// Return this status instead of 200/206.
         public var statusOverride: Int?
         /// Value reported as the `ETag`.
@@ -68,6 +72,7 @@ public actor FakeOrigin: HTTPTransport {
 
         let chunkSize = behavior.chunkSize
         let dropAfter = behavior.dropAfterBytes
+        let truncateAfter = behavior.truncateAfterBytes
         let body = AsyncThrowingStream<Data, any Error> { continuation in
             var emitted = 0
             var offset = 0
@@ -79,6 +84,14 @@ public actor FakeOrigin: HTTPTransport {
                         continuation.yield(slice.subdata(in: offset..<(offset + allowed)))
                     }
                     continuation.finish(throwing: TransportError.connectionDropped)
+                    return
+                }
+                if let limit = truncateAfter, emitted + (end - offset) > limit {
+                    let allowed = limit - emitted
+                    if allowed > 0 {
+                        continuation.yield(slice.subdata(in: offset..<(offset + allowed)))
+                    }
+                    continuation.finish()
                     return
                 }
                 continuation.yield(slice.subdata(in: offset..<end))
