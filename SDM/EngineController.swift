@@ -14,14 +14,20 @@ final class EngineController {
         globalHistory: []
     )
 
-    private let engine: DownloadEngine
+    /// `nonisolated` so `applicationWillTerminate` — which runs on the main
+    /// thread and cannot await anything — can still reach the engine. Safe
+    /// because `DownloadEngine` is an actor, and therefore `Sendable`.
+    private nonisolated let engine: DownloadEngine
     /// Guards against a second `shutdown()` call, since SwiftUI's
     /// `WindowGroup` does not guarantee the process exits when its window
     /// closes: the `@State` controller can survive a close/reopen and
-    /// `.task { startHeartbeat() }` can re-fire. `DownloadEngine.shutdown()`
-    /// is not documented as safe to call twice, so this makes "call it once"
-    /// an explicit invariant here rather than an accident of the engine's
-    /// current implementation.
+    /// `.task { startHeartbeat() }` can re-fire.
+    ///
+    /// `DownloadEngine.shutdown()` is now itself idempotent, which is what
+    /// makes the two shutdown paths (this one and the terminate hook) safe to
+    /// compose — they can and on ⌘Q do both fire. This flag stays as the
+    /// main-actor-side half of that: it stops the heartbeat path from
+    /// re-entering at all.
     private var hasShutDown = false
 
     init() {
@@ -91,5 +97,37 @@ final class EngineController {
     func setEnabled(_ enabled: Bool, for itemID: UUID) async {
         await engine.setEnabled(enabled, for: itemID)
         snapshot = await engine.snapshot()
+    }
+
+    /// Shuts the engine down from `applicationWillTerminate`, blocking the
+    /// main thread until durable state has actually reached disk.
+    ///
+    /// This exists because the heartbeat's shutdown never ran on a normal
+    /// quit. `startHeartbeat()` only reaches its `shutdown()` call after the
+    /// `while !Task.isCancelled` loop exits, i.e. only if the cancelled
+    /// `.task` continuation gets scheduled before the process dies. On ⌘Q it
+    /// does not. Combined with `flush()` having been the sole writer of
+    /// `state.json`, that meant nothing was ever written in the ordinary case:
+    /// `.incomplete` files survived with no record of the item owning them and
+    /// the next launch restored an empty list.
+    ///
+    /// Blocking is the point — `applicationWillTerminate` returning ends the
+    /// process, so an unawaited `Task` would be killed mid-write. It is
+    /// deliberately `nonisolated` and goes straight to the engine rather than
+    /// through `self`: hopping to the main actor from a blocked main thread
+    /// would deadlock. The engine's own `shutdown()` is idempotent, so this
+    /// composes with the heartbeat path rather than double-shutting-down.
+    ///
+    /// The timeout is a backstop, not an expectation: `shutdown()` awaits
+    /// every runner's job, and a wedged origin should still not hold the quit
+    /// forever.
+    nonisolated func shutdownBlocking(timeout: TimeInterval = 5) {
+        let engine = self.engine
+        let done = DispatchSemaphore(value: 0)
+        Task.detached(priority: .userInitiated) {
+            await engine.shutdown()
+            done.signal()
+        }
+        _ = done.wait(timeout: .now() + timeout)
     }
 }
