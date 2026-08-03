@@ -71,6 +71,7 @@ public actor DownloadEngine {
     /// is turned into per-window deltas exactly once.
     private var sampledBytes: [UUID: Int64] = [:]
     private var isShutDown = false
+    private var hasRestored = false
 
     public init(
         transport: any HTTPTransport,
@@ -88,6 +89,63 @@ public actor DownloadEngine {
         packages.append(package)
         for item in package.items where samplers[item.id] == nil {
             samplers[item.id] = SpeedSampler()
+        }
+        await persist()
+        await reconcile()
+    }
+
+    /// Loads whatever `stateStore` has durably and installs it as the
+    /// starting package list. Call once, before the first `tick()`.
+    ///
+    /// Idempotent via `hasRestored` rather than "call only when `packages` is
+    /// empty": a second call (e.g. `EngineController`'s heartbeat re-firing
+    /// after a window close/reopen that didn't end the process) is a no-op
+    /// rather than dropping whatever `add()` may have contributed in the
+    /// meantime. The expected call order is `restore()` once, at the head of
+    /// the heartbeat, before any UI-driven `add()` can occur — calling
+    /// `add()` first is not a case this method defends against, since the
+    /// store itself only ever holds the latest full snapshot `persist()` last
+    /// wrote, and an `add()`-triggered `persist()` before `restore()` has run
+    /// would already have overwritten whatever `restore()` was going to read.
+    ///
+    /// Two adjustments are made to what comes back from the store, because
+    /// both fields describe the *previous* process's runtime state, not
+    /// anything true of this one:
+    ///
+    /// - `.running` becomes `.queued`. Nothing in this process is actually
+    ///   running it — the runner that made it `.running` died with the last
+    ///   process — and leaving it `.running` would make the scheduler believe
+    ///   a slot is occupied that is not, while telling the UI a download is
+    ///   in flight when no worker exists.
+    /// - `isResumable` resets to `nil`. It records what the *previous*
+    ///   process's probe found; this process has probed nothing yet. The
+    ///   byte-level safety net is `DownloadTask.prepare()`'s validator check
+    ///   against the `.sdmpart` sidecar, which runs unconditionally on every
+    ///   restart regardless of this flag — so resetting it costs nothing
+    ///   there. What it does buy: a stale persisted `false` would otherwise
+    ///   hand the item spec §6.3's unconditional-claim rule before this
+    ///   process has verified anything, making it unpreemptible on faith.
+    ///   `nil` puts it through the same probe-then-decide path a freshly
+    ///   grabbed item takes.
+    public func restore() async {
+        guard !hasRestored else { return }
+        hasRestored = true
+
+        var restored = await stateStore.load().packages
+        for packageIndex in restored.indices {
+            for itemIndex in restored[packageIndex].items.indices {
+                if restored[packageIndex].items[itemIndex].state == .running {
+                    restored[packageIndex].items[itemIndex].state = .queued
+                }
+                restored[packageIndex].items[itemIndex].isResumable = nil
+            }
+        }
+
+        packages.append(contentsOf: restored)
+        for package in restored {
+            for item in package.items where samplers[item.id] == nil {
+                samplers[item.id] = SpeedSampler()
+            }
         }
         await persist()
         await reconcile()

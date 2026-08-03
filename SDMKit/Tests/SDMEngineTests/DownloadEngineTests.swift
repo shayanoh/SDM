@@ -551,3 +551,104 @@ private func snapshotItem(_ id: UUID, in engine: DownloadEngine) async -> ItemSn
             == payload
     )
 }
+
+// MARK: - Restore
+
+/// Engine-level mirror of the `DownloadTask` resume tests: a package graph
+/// with partial progress and a `.running` item is placed directly in the
+/// store — the shape a hard crash (no graceful `shutdown()`) would leave
+/// behind, since `shutdown()` itself pauses every runner before persisting
+/// and so never writes `.running` back out. A fresh engine over that same
+/// store must bring the package back with its progress intact and land the
+/// previously-`.running` item somewhere sane, not replay it as still running.
+///
+/// The item starts disabled so `restore()`'s internal `reconcile()` does not
+/// immediately spin up a runner and overwrite the very snapshot fields this
+/// test is asserting on — `setEnabled(true, ...)` flips it live afterward, to
+/// prove the restored progress is real (the previously "completed" 1000
+/// bytes are not backed by any on-disk `.sdmpart`/`.incomplete`, per
+/// `DownloadTask.prepare()`'s validator guard, so the resumed run legitimately
+/// restarts that item from zero and still has to reach byte identity).
+@Test func restoreRepopulatesPackagesWithProgressIntact() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let payload = testPayload(4000)
+
+    var package = packageOf(["a.bin", "b.bin"])
+    let itemID = package.items[0].id
+    package.items[0].state = .running
+    package.items[0].isEnabled = false
+    package.items[0].completed = RangeSet([ByteRange(start: 0, end: 1000)])
+    package.items[0].totalBytes = 4000
+    package.items[0].isResumable = true
+
+    let store = InMemoryStateStore()
+    await store.save(PersistedState(packages: [package]))
+
+    let engine = DownloadEngine(
+        transport: FakeOrigin(payload: payload),
+        stateStore: store,
+        settings: EngineSettings(
+            maxConcurrent: 1,
+            segmentsPerItem: 2,
+            globalMaxConnections: 8,
+            downloadFolder: dir
+        )
+    )
+    await engine.restore()
+
+    let restoredPackages = await engine.snapshot().packages
+    #expect(restoredPackages.map(\.name) == ["Batch"])
+    let restoredItem = try #require(restoredPackages.first?.items.first { $0.id == itemID })
+    // Landing state: never `.running` on arrival — nothing in this process is
+    // actually running it, and reporting otherwise would misinform both the
+    // scheduler and the UI.
+    #expect(restoredItem.state == .queued)
+    // Progress from the store survives the round trip verbatim (no runner
+    // exists for a disabled item, so this reads straight from the restored
+    // item rather than a live task).
+    #expect(restoredItem.completed.totalBytes == 1000)
+    // isResumable resets for re-probing rather than trusting the previous
+    // process's answer, which could otherwise make the item unpreemptible
+    // before this process has verified anything about the origin.
+    #expect(restoredItem.isResumable == nil)
+
+    await engine.setEnabled(true, for: itemID)
+    try await engine.runUntilIdle()
+    let batch = dir.appendingPathComponent("Batch")
+    #expect(try Data(contentsOf: batch.appendingPathComponent("a.bin")) == payload)
+    #expect(try Data(contentsOf: batch.appendingPathComponent("b.bin")) == payload)
+}
+
+/// `restore()` is idempotent (a second call does not duplicate the restored
+/// package) and composes with `add()` called afterward, which is the order
+/// `EngineController` actually uses — `restore()` runs once at the head of
+/// `startHeartbeat()`, before any user-driven `add()` can occur.
+@Test func restoreIsIdempotentAndComposesWithSubsequentAdds() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let store = InMemoryStateStore()
+    await store.save(PersistedState(packages: [packageOf(["stored.bin"])]))
+
+    let engine = DownloadEngine(
+        transport: FakeOrigin(payload: testPayload(10)),
+        stateStore: store,
+        settings: EngineSettings(
+            maxConcurrent: 1,
+            segmentsPerItem: 1,
+            globalMaxConnections: 8,
+            downloadFolder: dir
+        )
+    )
+
+    await engine.restore()
+    await engine.restore()  // must not duplicate the first call's work
+
+    let afterRestore = await engine.snapshot().packages.flatMap(\.items).map(\.filename)
+    #expect(afterRestore == ["stored.bin"])
+
+    await engine.add(packageOf(["live.bin"]))
+    let names = await engine.snapshot().packages.flatMap(\.items).map(\.filename).sorted()
+    #expect(names == ["live.bin", "stored.bin"])
+}
