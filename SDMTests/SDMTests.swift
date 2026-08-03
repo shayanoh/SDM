@@ -6,12 +6,10 @@
 //
 
 import Testing
+
 @testable import SDM
 
-struct SDMTests {
-
-    @Test func example() async throws {
-        // Write your test here and use APIs like `#expect(...)` to check expected conditions.
-    }
-
+@Test func appTargetLinksAgainstSDMKit() {
+    _ = EngineController.self
+    #expect(Bool(true))
 }
