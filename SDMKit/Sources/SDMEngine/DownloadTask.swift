@@ -45,6 +45,13 @@ public actor DownloadTask {
     private var file: SparseFile?
     private var bytesSinceCheckpoint: Int64 = 0
 
+    /// The number of workers the pool is currently trying to keep running.
+    private var targetWorkerCount: Int = 1
+    /// Indices of workers currently inside `workerLoop`.
+    private var liveWorkerIndices: Set<Int> = []
+    /// Monotonic source of worker indices; never reused.
+    private var nextWorkerIndex: Int = 0
+
     public init(
         id: UUID,
         sourceURL: URL,
@@ -107,26 +114,75 @@ public actor DownloadTask {
     }
 
     private func runWorkers() async throws {
+        targetWorkerCount = configuration.workerCount
+
         try await withThrowingTaskGroup(of: Void.self) { group in
-            for _ in 0..<configuration.workerCount {
-                group.addTask { [weak self] in
-                    guard let self else { return }
-                    try await self.workerLoop()
+            var spawned = 0
+            while spawned < targetWorkerCount {
+                spawnWorker(into: &group)
+                spawned += 1
+            }
+
+            // Drain finished workers, spawning replacements when the target
+            // rises above the number still running.
+            while try await group.next() != nil {
+                while liveWorkerIndices.count < targetWorkerCount, hasWorkRemaining() {
+                    spawnWorker(into: &group)
                 }
             }
-            try await group.waitForAll()
         }
     }
 
-    /// One worker: claim a gap, stream it to disk, repeat until nothing is left.
-    private func workerLoop() async throws {
-        let workerID = UUID()
-        defer { reserved[workerID] = nil }
+    private func spawnWorker(into group: inout ThrowingTaskGroup<Void, any Error>) {
+        let index = nextWorkerIndex
+        nextWorkerIndex += 1
+        liveWorkerIndices.insert(index)
+        group.addTask { [weak self] in
+            guard let self else { return }
+            try await self.workerLoop(index: index)
+        }
+    }
 
-        while let claim = claimNext(for: workerID) {
+    private func hasWorkRemaining() -> Bool {
+        completed.nextClaim(
+            total: totalBytes,
+            reserved: Array(reserved.values),
+            minChunk: configuration.minChunk
+        ) != nil
+    }
+
+    /// One worker: claim a gap, stream it to disk, repeat until the file is
+    /// done or this worker is retired by a lowered target count.
+    private func workerLoop(index: Int) async throws {
+        let workerID = UUID()
+        defer {
+            reserved[workerID] = nil
+            liveWorkerIndices.remove(index)
+        }
+
+        while !shouldRetire(index: index) {
+            guard let claim = claimNext(for: workerID) else { return }
             try await download(claim)
             reserved[workerID] = nil
         }
+    }
+
+    /// Retires the highest-indexed workers first, so lowering the target from
+    /// 100 to 3 keeps three long-lived workers rather than churning all of them.
+    private func shouldRetire(index: Int) -> Bool {
+        let rank = liveWorkerIndices.sorted().firstIndex(of: index) ?? 0
+        return rank >= targetWorkerCount
+    }
+
+    /// Changes the number of concurrent workers mid-download.
+    ///
+    /// Raising it spawns more as slots free; lowering it retires surplus
+    /// workers after they finish their current claim. Their partial progress is
+    /// already in `completed`, so survivors simply pick up the resulting gaps.
+    public func setWorkerCount(_ count: Int) {
+        precondition(count >= 1, "workerCount must be at least 1")
+        targetWorkerCount = count
+        configuration.workerCount = count
     }
 
     private func claimNext(for workerID: UUID) -> ByteRange? {
