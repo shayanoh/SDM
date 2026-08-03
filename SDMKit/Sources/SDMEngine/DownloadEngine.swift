@@ -37,8 +37,20 @@ public actor DownloadEngine {
     /// A preempted runner is marked `isRetiring` and kept here until its job
     /// has actually unwound. That is what stops a second `DownloadTask` from
     /// being pointed at a destination file the first one has not finished
-    /// with, and it keeps the item counted against `maxConcurrent` for as
-    /// long as it really holds a slot.
+    /// with.
+    ///
+    /// It does *not* bound `runners.count` by `maxConcurrent`. A retiring
+    /// runner is still reported to the scheduler in `runningNow`, but
+    /// `runningNow` only feeds passes 1 and 2, and a resumable (or not yet
+    /// probed) item is eligible for neither — pass 1 covers only
+    /// `isResumable == false`, and pass 2 is empty while hysteresis is
+    /// unwired. So a retiring resumable item can be outranked, leaving
+    /// `runners` transiently holding the retiring runner *plus* a full
+    /// complement of new ones. That is benign: a retiring runner has already
+    /// been paused, so its worker target is zero and its descriptor is
+    /// closed, and it issues no further requests. What is bounded at all
+    /// times is the number of items in state `.running`, since preemption
+    /// sets `.queued` synchronously.
     private struct Runner {
         let task: DownloadTask
         let job: Task<Void, Never>
@@ -206,8 +218,18 @@ public actor DownloadEngine {
     /// suspension in between, so two overlapping calls can never both decide
     /// to start the same item. `startedRecently` is empty: hysteresis needs a
     /// clock and is deferred to Phase 3.
+    ///
+    /// `refreshResumability()` runs *before* that block, and does suspend.
+    /// That is safe for a different reason than the block itself: a call that
+    /// suspends there and finds another `reconcile()` has run to completion in
+    /// the meantime simply recomputes from the state that call left behind and
+    /// applies it, which is indistinguishable from the two having run in
+    /// sequence. What must not happen — and does not — is a suspension between
+    /// deciding the desired set and acting on it.
     private func reconcile() async {
         guard !isShutDown else { return }
+
+        await refreshResumability()
 
         let desired = Scheduler.desiredRunningSet(
             SchedulerInput(
@@ -235,6 +257,14 @@ public actor DownloadEngine {
             guard let context = context(for: itemID) else { continue }
             guard claimed.insert(context.destinationURL).inserted else { continue }
             mutateItem(itemID) { $0.state = .running }
+            // The one place a byte total may legitimately go backwards: a new
+            // task starts over from whatever the sidecar lets it resume at.
+            // Seeding the sampler baseline here — rather than letting
+            // `recordProgress` rebase itself — keeps the delta strictly
+            // monotonic everywhere else, so a tick that reads a stale total
+            // while a job completes underneath it cannot cause the same span
+            // to be counted twice across a preempt/resume cycle.
+            sampledBytes[itemID] = completedBytes(of: itemID)
             let task = DownloadTask(
                 id: itemID,
                 sourceURL: context.sourceURL,
@@ -258,6 +288,24 @@ public actor DownloadEngine {
         }
 
         for task in retiring { await task.pause() }
+    }
+
+    /// Mirrors each running task's probe result onto its item.
+    ///
+    /// The scheduler reads `isResumable` straight off `packages`, so the
+    /// answer has to live there rather than in a side table. This is the
+    /// earliest point the engine can observe it without blocking the
+    /// decision block below: a task reports `nil` until its probe lands, and
+    /// the true value from then on. The `nil → false` transition is the one
+    /// that matters — it is what stops a genuinely non-resumable download
+    /// from being preempted and losing every byte it has — and running this
+    /// at the head of every `reconcile()` means the very scheduling decision
+    /// that could preempt it is already looking at the real value.
+    private func refreshResumability() async {
+        for (itemID, runner) in runners where !runner.isRetiring {
+            guard let supportsRanges = await runner.task.probedSupportsRanges else { continue }
+            mutateItem(itemID) { $0.isResumable = supportsRanges }
+        }
     }
 
     private struct RunContext: Sendable {
@@ -297,8 +345,18 @@ public actor DownloadEngine {
 
         let completed = await task.completedRanges
         let totalBytes = await task.expectedTotalBytes
+        // Also captured here, not only in `refreshResumability()`: a download
+        // short enough to finish before any reconcile happens would otherwise
+        // never record what its probe found.
+        let isResumable = await task.probedSupportsRanges
         finish(
-            itemID: itemID, task: task, completed: completed, totalBytes: totalBytes, state: state)
+            itemID: itemID,
+            task: task,
+            completed: completed,
+            totalBytes: totalBytes,
+            isResumable: isResumable,
+            state: state
+        )
         await persist()
     }
 
@@ -309,6 +367,7 @@ public actor DownloadEngine {
         task: DownloadTask,
         completed: RangeSet,
         totalBytes: Int64?,
+        isResumable: Bool?,
         state: ItemState
     ) {
         recordProgress(completed.totalBytes, for: itemID)
@@ -319,6 +378,7 @@ public actor DownloadEngine {
         mutateItem(itemID) {
             $0.completed = completed
             if let totalBytes { $0.totalBytes = totalBytes }
+            if let isResumable { $0.isResumable = isResumable }
             $0.state = state
         }
     }
@@ -327,14 +387,17 @@ public actor DownloadEngine {
 
     /// Folds a monotonically growing byte total into the per-item and global
     /// samplers as a delta, so the same bytes are never counted twice.
+    ///
+    /// A total lower than the baseline is ignored rather than rebased onto.
+    /// `tick()` suspends while reading a task's total, and the job can finish
+    /// during that suspension — `finish()` then records the final figure, and
+    /// `tick()` resumes holding a smaller, stale one. Rebasing down there
+    /// would let a preempted item's later resume re-record the span between
+    /// the two. The baseline is instead seeded deliberately in `reconcile()`,
+    /// the only place progress can legitimately go backwards.
     private func recordProgress(_ transferred: Int64, for itemID: UUID) {
         let previous = sampledBytes[itemID] ?? 0
-        guard transferred > previous else {
-            // A restart that could not resume goes backwards; rebase rather
-            // than record a negative delta.
-            if transferred < previous { sampledBytes[itemID] = transferred }
-            return
-        }
+        guard transferred > previous else { return }
         sampledBytes[itemID] = transferred
         samplers[itemID]?.record(bytes: transferred - previous)
         globalSampler.record(bytes: transferred - previous)
@@ -344,6 +407,16 @@ public actor DownloadEngine {
 
     private func segmentCount(for itemID: UUID) -> Int {
         segmentOverrides[itemID] ?? settings.segmentsPerItem
+    }
+
+    /// What a fresh `DownloadTask` for this item is expected to resume from.
+    private func completedBytes(of itemID: UUID) -> Int64 {
+        for package in packages {
+            if let item = package.items.first(where: { $0.id == itemID }) {
+                return item.completed.totalBytes
+            }
+        }
+        return 0
     }
 
     private func mutateItem(_ itemID: UUID, _ transform: (inout DownloadItem) -> Void) {

@@ -116,6 +116,15 @@ public actor DownloadTask {
     /// `prepare()` has run. The engine folds this into its snapshots so the
     /// UI can show a fraction rather than a bare byte count.
     public var expectedTotalBytes: Int64? { totalBytes > 0 ? totalBytes : nil }
+    /// `supportsRanges`, but `nil` until the probe has actually answered.
+    ///
+    /// `acceptsRanges` starts optimistically `true`, so reading it before
+    /// `prepare()` returns would report a resumability the origin has never
+    /// confirmed. `totalBytes` is assigned in the same actor-isolated,
+    /// suspension-free run of statements that assigns `acceptsRanges`, so a
+    /// non-zero size is an exact witness that the probe landed. The engine
+    /// mirrors this onto `DownloadItem.isResumable`.
+    public var probedSupportsRanges: Bool? { totalBytes > 0 ? acceptsRanges : nil }
 
     private var sidecarURL: URL { ResumeSidecar.url(for: destinationURL) }
 

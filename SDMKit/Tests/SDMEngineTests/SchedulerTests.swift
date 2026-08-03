@@ -9,7 +9,7 @@ private func item(
     priority: Priority? = nil,
     position: Int = 0,
     enabled: Bool = true,
-    resumable: Bool = true,
+    resumable: Bool? = true,
     state: ItemState = .queued
 ) -> DownloadItem {
     DownloadItem(

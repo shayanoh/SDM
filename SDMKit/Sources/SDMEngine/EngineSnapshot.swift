@@ -10,7 +10,11 @@ public struct ItemSnapshot: Sendable, Equatable, Identifiable {
     public let completed: RangeSet
     public let state: ItemState
     public let isEnabled: Bool
-    public let isResumable: Bool
+    /// Three-state, mirroring `DownloadItem.isResumable`: `nil` means the
+    /// origin has not been probed yet. Not flattened, because the UI badge
+    /// has to distinguish "cannot be resumed" from "don't know yet" — they
+    /// warrant different affordances, and only the first is a warning.
+    public let isResumable: Bool?
     public let activeSegments: Int
     public let configuredSegments: Int
     public let bytesPerSecond: Double
@@ -23,7 +27,7 @@ public struct ItemSnapshot: Sendable, Equatable, Identifiable {
         completed: RangeSet,
         state: ItemState,
         isEnabled: Bool,
-        isResumable: Bool,
+        isResumable: Bool?,
         activeSegments: Int,
         configuredSegments: Int,
         bytesPerSecond: Double,

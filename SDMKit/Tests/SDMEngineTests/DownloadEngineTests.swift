@@ -185,6 +185,9 @@ private struct GatedOrigin: HTTPTransport {
     let payload: Data
     let gate: Gate
     let phase: GatePhase
+    /// Serve the whole body regardless of the requested range, and advertise
+    /// no `Range` support — the shape that makes a download non-resumable.
+    var ignoresRanges: Bool = false
 
     func fetch(_ request: RangeRequest) async throws -> RangeResponse {
         let total = Int64(payload.count)
@@ -197,16 +200,16 @@ private struct GatedOrigin: HTTPTransport {
                 await gate.waitUntilOpen()
             }
             return RangeResponse(
-                statusCode: 206,
+                statusCode: ignoresRanges ? 200 : 206,
                 totalSize: total,
-                acceptsRanges: true,
+                acceptsRanges: !ignoresRanges,
                 validator: "etag-gated",
                 body: AsyncThrowingStream { $0.finish() }
             )
         }
 
-        let lower = Int(Swift.min(range.start, total))
-        let upper = Int(Swift.min(range.end, total))
+        let lower = ignoresRanges ? 0 : Int(Swift.min(range.start, total))
+        let upper = ignoresRanges ? payload.count : Int(Swift.min(range.end, total))
         let slice = payload.subdata(in: lower..<upper)
         let gate = self.gate
         let phase = self.phase
@@ -227,9 +230,9 @@ private struct GatedOrigin: HTTPTransport {
         }
 
         return RangeResponse(
-            statusCode: 206,
+            statusCode: ignoresRanges ? 200 : 206,
             totalSize: total,
-            acceptsRanges: true,
+            acceptsRanges: !ignoresRanges,
             validator: "etag-gated",
             body: body
         )
@@ -240,10 +243,16 @@ private func makeGatedEngine(
     payload: Data,
     folder: URL,
     gate: Gate,
-    phase: GatePhase
+    phase: GatePhase,
+    ignoresRanges: Bool = false
 ) -> DownloadEngine {
     DownloadEngine(
-        transport: GatedOrigin(payload: payload, gate: gate, phase: phase),
+        transport: GatedOrigin(
+            payload: payload,
+            gate: gate,
+            phase: phase,
+            ignoresRanges: ignoresRanges
+        ),
         stateStore: InMemoryStateStore(),
         settings: EngineSettings(
             maxConcurrent: 1,
@@ -272,8 +281,20 @@ private func makeGatedEngine(
         gate: gate,
         phase: .body
     )
-    await engine.add(packageOf(["a.bin"]))
+    let package = packageOf(["a.bin"])
+    let itemID = package.items[0].id
+    await engine.add(package)
+
+    // `waitForArrival` only proves the *producer* reached the gate. Spin until
+    // the worker has actually consumed and recorded the first slice, so the
+    // sidecar assertions below cannot depend on scheduler luck.
     await gate.waitForArrival()
+    var spins = 0
+    while await snapshotItem(itemID, in: engine)?.completed.totalBytes == 0, spins < 100_000 {
+        await Task.yield()
+        spins += 1
+    }
+    #expect(spins < 100_000)
 
     let destination = dir.appendingPathComponent("Batch").appendingPathComponent("a.bin")
     let sidecarURL = ResumeSidecar.url(for: destination)
@@ -334,11 +355,15 @@ private func snapshotItem(_ id: UUID, in engine: DownloadEngine) async -> ItemSn
     await engine.snapshot().packages.flatMap(\.items).first { $0.id == id }
 }
 
-/// A preempted item must come back as `queued`, keep the bytes it already had
-/// (so the later attempt resumes rather than restarts), and must not be
-/// reported as `failed`. Preemption here is by priority: `b.bin` outranks the
-/// running `a.bin` with only one slot available. `a.bin` is marked resumable
-/// because spec §6 pass 1 makes running *non*-resumable items unpreemptible.
+/// Preemption in production shape: nothing here hand-sets `isResumable`. The
+/// items are built exactly as a grabber would hand them over — flag `nil`,
+/// meaning "not probed yet" — and it is the engine that learns the origin
+/// honors `Range` and writes `true` onto the item, which is what lets spec §6
+/// pass 1 fall through and the higher-priority `b.bin` take the only slot.
+///
+/// A preempted item must come back as `queued` and keep the bytes it already
+/// had, so the later attempt resumes rather than restarts — proved by the
+/// byte-identity assertion after the drain.
 @Test func preemptedItemReturnsToQueuedAndResumesLater() async throws {
     let dir = try makeScratchDirectory()
     defer { try? FileManager.default.removeItem(at: dir) }
@@ -347,9 +372,9 @@ private func snapshotItem(_ id: UUID, in engine: DownloadEngine) async -> ItemSn
     let gate = Gate()
     let engine = makeGatedEngine(payload: payload, folder: dir, gate: gate, phase: .body)
 
-    var first = packageOf(["a.bin"])
-    first.items[0].isResumable = true
+    let first = packageOf(["a.bin"])
     let itemID = first.items[0].id
+    #expect(first.items[0].isResumable == nil)
     await engine.add(first)
 
     // Wait for genuine mid-flight progress — a reserved claim alone would let
@@ -379,6 +404,8 @@ private func snapshotItem(_ id: UUID, in engine: DownloadEngine) async -> ItemSn
     let midway = try #require(await snapshotItem(itemID, in: engine))
     #expect(midway.state == .queued)
     #expect(midway.completed.totalBytes > 0)
+    // The engine, not the test, discovered this.
+    #expect(midway.isResumable == true)
 
     await gate.open()
     try await engine.runUntilIdle()
@@ -387,4 +414,140 @@ private func snapshotItem(_ id: UUID, in engine: DownloadEngine) async -> ItemSn
     let urgent = dir.appendingPathComponent("Urgent")
     #expect(try Data(contentsOf: batch.appendingPathComponent("a.bin")) == payload)
     #expect(try Data(contentsOf: urgent.appendingPathComponent("b.bin")) == payload)
+
+    // Telemetry must account for the payload exactly once across the whole
+    // preempt/resume cycle. Seeding the sampler baseline from the item's
+    // resumed progress is what prevents the pre-preemption span being counted
+    // a second time by the second attempt; seeding it at zero would report
+    // 6000 bytes moved for a 4000-byte file.
+    await engine.tick()
+    let finished = try #require(await snapshotItem(itemID, in: engine))
+    #expect(finished.speedHistory.reduce(0, +) == Double(payload.count))
+}
+
+/// The other half of the ruling, and the transition that actually matters:
+/// `nil → false`. Against an origin that ignores `Range`, the download cannot
+/// be resumed, so preempting it would throw away every byte it has. The engine
+/// must learn that from the probe and write it onto the item, at which point
+/// spec §6.3 pass 1 gives it an unconditional claim on its slot and the
+/// higher-priority `b.bin` has to wait — the exact opposite outcome to
+/// `preemptedItemReturnsToQueuedAndResumesLater`, from the same setup and with
+/// the flag again never touched by the test.
+@Test func nonResumableRunningItemIsNotPreemptedOnceProbed() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let payload = testPayload(4000)
+
+    let gate = Gate()
+    let engine = makeGatedEngine(
+        payload: payload,
+        folder: dir,
+        gate: gate,
+        phase: .body,
+        ignoresRanges: true
+    )
+
+    let first = packageOf(["a.bin"])
+    let itemID = first.items[0].id
+    #expect(first.items[0].isResumable == nil)
+    await engine.add(first)
+
+    await gate.waitForArrival()
+    var spins = 0
+    while await snapshotItem(itemID, in: engine)?.completed.totalBytes == 0, spins < 100_000 {
+        await Task.yield()
+        spins += 1
+    }
+    #expect(spins < 100_000)
+
+    let second = DownloadPackage(
+        name: "Urgent",
+        items: [
+            DownloadItem(
+                url: URL(string: "https://example.com/b.bin")!,
+                filename: "b.bin",
+                position: 0
+            )
+        ],
+        priority: .highest,
+        position: 1
+    )
+    let urgentID = second.items[0].id
+    await engine.add(second)
+
+    let held = try #require(await snapshotItem(itemID, in: engine))
+    #expect(held.isResumable == false)
+    #expect(held.state == .running)
+    let waiting = try #require(await snapshotItem(urgentID, in: engine))
+    #expect(waiting.state == .queued)
+
+    await gate.open()
+    try await engine.runUntilIdle()
+
+    #expect(
+        try Data(contentsOf: dir.appendingPathComponent("Batch").appendingPathComponent("a.bin"))
+            == payload
+    )
+    #expect(
+        try Data(contentsOf: dir.appendingPathComponent("Urgent").appendingPathComponent("b.bin"))
+            == payload
+    )
+}
+
+/// Isolates the scheduler rule itself. `refreshResumability()` normally lands
+/// before any scheduling decision, so both `isResumable == false` and the
+/// naive `!= true` produce the same answer once a probe has returned. They
+/// differ only in the window this test occupies: a runner exists but its probe
+/// has not answered, so the flag is genuinely `nil`. Treating unknown as
+/// non-resumable would hand that item an unconditional claim on the only slot
+/// and make it unpreemptible — for a download that has not transferred a
+/// single byte and has nothing to lose.
+@Test func unprobedRunningItemIsStillPreemptible() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let payload = testPayload(4000)
+
+    let gate = Gate()
+    let engine = makeGatedEngine(payload: payload, folder: dir, gate: gate, phase: .probe)
+
+    let first = packageOf(["a.bin"])
+    let itemID = first.items[0].id
+    await engine.add(first)
+
+    // Parked inside prepare(); the probe has not answered, so nothing knows
+    // yet whether this download is resumable.
+    await gate.waitForArrival()
+
+    let second = DownloadPackage(
+        name: "Urgent",
+        items: [
+            DownloadItem(
+                url: URL(string: "https://example.com/b.bin")!,
+                filename: "b.bin",
+                position: 0
+            )
+        ],
+        priority: .highest,
+        position: 1
+    )
+    let urgentID = second.items[0].id
+    await engine.add(second)
+
+    let unprobed = try #require(await snapshotItem(itemID, in: engine))
+    #expect(unprobed.isResumable == nil)
+    #expect(unprobed.state == .queued)
+    let urgent = try #require(await snapshotItem(urgentID, in: engine))
+    #expect(urgent.state == .running)
+
+    await gate.open()
+    try await engine.runUntilIdle()
+
+    #expect(
+        try Data(contentsOf: dir.appendingPathComponent("Batch").appendingPathComponent("a.bin"))
+            == payload
+    )
+    #expect(
+        try Data(contentsOf: dir.appendingPathComponent("Urgent").appendingPathComponent("b.bin"))
+            == payload
+    )
 }

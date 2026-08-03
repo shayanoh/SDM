@@ -287,8 +287,10 @@ private func encodedJSON(for state: PersistedState) throws -> String {
 /// - `ItemState` (an enum with an associated-value case) is a single-key
 ///   object per case, e.g. `{"queued": {}}` / `{"failed": {"reason": "..."}}`.
 /// - `RangeSet` is `{"ranges": [{"start", "end"}]}`.
-/// - `Optional` fields (`totalBytes`, `validator`, item `priority` when
-///   `nil`) are omitted entirely rather than encoded as `null`.
+/// - `Optional` fields (`totalBytes`, `validator`, item `priority` and
+///   `isResumable` when `nil`) are omitted entirely rather than encoded as
+///   `null` — which is what makes an older snapshot, written before
+///   `isResumable` became three-state, still decode.
 ///
 /// This test types that format out literally — independent of whatever
 /// `JSONEncoder` happens to produce today — so a future change to the
@@ -331,4 +333,107 @@ private func encodedJSON(for state: PersistedState) throws -> String {
     try Data(json.utf8).write(to: url)
 
     #expect(await JSONStateStore(fileURL: url).load().packages.isEmpty)
+}
+
+/// `DownloadItem.isResumable` widened from `Bool` to `Bool?` (`nil` = "not
+/// probed yet"), which changes the on-disk shape. `JSONStateStore.load()`
+/// fails closed — any decode error returns an empty `PersistedState` — so a
+/// regression here would silently wipe a user's entire download list on the
+/// first launch after upgrading. These two tests pin both directions of the
+/// compatibility question with literal JSON rather than encoder round-trips,
+/// which would agree with themselves either way.
+///
+/// Case 1: a snapshot written by the older build, carrying an explicit
+/// `"isResumable": false`.
+@Test func snapshotWithLiteralIsResumableStillDecodes() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let url = dir.appendingPathComponent("state.json")
+
+    let json = """
+        {
+          "formatVersion": 1,
+          "packages": [
+            {
+              "id": "8B687F15-C739-421D-9E0F-1D2EFD8AC989",
+              "name": "Season 1",
+              "position": 0,
+              "priority": 2,
+              "items": [
+                {
+                  "id": "37B1C7A5-EDCF-4DA5-8849-FED5AC7AF237",
+                  "url": "https://example.com/a.bin",
+                  "filename": "a.bin",
+                  "totalBytes": 100,
+                  "completed": { "ranges": [ { "start": 0, "end": 10 } ] },
+                  "state": { "queued": {} },
+                  "isEnabled": true,
+                  "isResumable": false,
+                  "position": 0
+                },
+                {
+                  "id": "1E1D0B4A-3A2C-4E2B-9C1D-2F3A4B5C6D7E",
+                  "url": "https://example.com/b.bin",
+                  "filename": "b.bin",
+                  "completed": { "ranges": [] },
+                  "state": { "queued": {} },
+                  "isEnabled": true,
+                  "isResumable": true,
+                  "position": 1
+                }
+              ]
+            }
+          ]
+        }
+        """
+    try Data(json.utf8).write(to: url)
+
+    let loaded = await JSONStateStore(fileURL: url).load()
+    let items = try #require(loaded.packages.first?.items)
+    #expect(items.count == 2)
+    #expect(items[0].isResumable == false)
+    #expect(items[1].isResumable == true)
+    // The rest of the item must survive too, not just the flag under test.
+    #expect(items[0].completed.ranges == [ByteRange(start: 0, end: 10)])
+    #expect(items[0].totalBytes == 100)
+}
+
+/// Case 2: the key omitted entirely — what the current encoder writes for an
+/// unprobed item, and what a hand-edited or partially written snapshot may
+/// contain. It must decode as `nil`, not fail the whole load.
+@Test func snapshotOmittingIsResumableDecodesAsNotYetProbed() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let url = dir.appendingPathComponent("state.json")
+
+    let json = """
+        {
+          "formatVersion": 1,
+          "packages": [
+            {
+              "id": "8B687F15-C739-421D-9E0F-1D2EFD8AC989",
+              "name": "Season 1",
+              "position": 0,
+              "priority": 2,
+              "items": [
+                {
+                  "id": "37B1C7A5-EDCF-4DA5-8849-FED5AC7AF237",
+                  "url": "https://example.com/a.bin",
+                  "filename": "a.bin",
+                  "completed": { "ranges": [] },
+                  "state": { "queued": {} },
+                  "isEnabled": true,
+                  "position": 0
+                }
+              ]
+            }
+          ]
+        }
+        """
+    try Data(json.utf8).write(to: url)
+
+    let loaded = await JSONStateStore(fileURL: url).load()
+    let item = try #require(loaded.packages.first?.items.first)
+    #expect(item.isResumable == nil)
+    #expect(item.filename == "a.bin")
 }

@@ -16,7 +16,7 @@ import Testing
     #expect(item.priority == nil)
     #expect(item.completed.ranges.isEmpty)
     #expect(item.totalBytes == nil)
-    #expect(item.isResumable == false)
+    #expect(item.isResumable == nil)
 }
 
 @Test func itemProgressIsZeroWhenSizeUnknown() {

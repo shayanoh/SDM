@@ -8,7 +8,15 @@ public struct DownloadItem: Identifiable, Equatable, Codable, Sendable {
     public var completed: RangeSet
     public var state: ItemState
     public var isEnabled: Bool
-    public var isResumable: Bool
+    /// Whether the origin honors `Range` requests, or `nil` when it has not
+    /// been probed yet.
+    ///
+    /// Three-state on purpose. Only the engine can answer this, and only after
+    /// a probe, so a freshly grabbed item genuinely does not know. Collapsing
+    /// "unknown" into `false` would make every new item look non-resumable,
+    /// and spec §6.3 gives running non-resumable items an unconditional claim
+    /// on their slot — which would make nothing in the list preemptible.
+    public var isResumable: Bool?
     public var priority: Priority?
     /// Position within the owning package. Lower sorts earlier.
     public var position: Int
@@ -23,7 +31,7 @@ public struct DownloadItem: Identifiable, Equatable, Codable, Sendable {
         completed: RangeSet = RangeSet(),
         state: ItemState = .queued,
         isEnabled: Bool = true,
-        isResumable: Bool = false,
+        isResumable: Bool? = nil,
         priority: Priority? = nil,
         position: Int = 0,
         validator: String? = nil

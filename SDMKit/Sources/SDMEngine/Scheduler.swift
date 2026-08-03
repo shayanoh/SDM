@@ -68,10 +68,17 @@ public enum Scheduler {
             }
         }
 
-        // Pass 1: running non-resumable items keep their slots unconditionally.
+        // Pass 1: running non-resumable items keep their slots unconditionally
+        // — preempting one throws away every byte it has, since it cannot be
+        // resumed.
+        //
+        // Keyed on `== false`, not `!isResumable`: an item that has not been
+        // probed yet is `nil`, and treating unknown as non-resumable would
+        // hand an unconditional claim to every item the engine has just
+        // started, making the list effectively unpreemptible.
         reserve(
             ranked.filter {
-                input.runningNow.contains($0.id) && !$0.isResumable
+                input.runningNow.contains($0.id) && $0.isResumable == false
             }
         )
 
