@@ -115,6 +115,11 @@ public actor DownloadTask {
     }
 
     /// Probes the resource and opens the destination file.
+    ///
+    /// Resume only happens when the sidecar is present, readable, and still
+    /// describes the same remote resource (spec §5.3). Anything else — no
+    /// sidecar, a corrupt one, or a validator mismatch — restarts at zero
+    /// rather than risk stitching new bytes onto stale ones.
     private func prepare() async throws {
         let probe = try await transport.fetch(
             RangeRequest(url: sourceURL, range: ByteRange(start: 0, end: 1))
@@ -126,7 +131,33 @@ public actor DownloadTask {
 
         totalBytes = size
         validator = probe.validator
+
+        if let sidecar = ResumeSidecar.load(from: sidecarURL),
+            sidecar.matches(totalBytes: size, validator: probe.validator)
+        {
+            completed = sidecar.completed
+        } else {
+            completed = RangeSet()
+            ResumeSidecar.remove(at: sidecarURL)
+            try? FileManager.default.removeItem(at: SparseFile.incompleteURL(for: destinationURL))
+        }
+
         file = try SparseFile(finalURL: destinationURL, totalBytes: size)
+    }
+
+    /// Stops workers and flushes resume state to disk.
+    ///
+    /// The partial file and its sidecar are left in place; a later `start()`
+    /// on a fresh task resumes from them. Closing the descriptor here can
+    /// race a worker mid-`download(_:)`; that loop re-checks `file` on every
+    /// chunk and stops writing (and stops recording) the moment it goes nil,
+    /// so no byte is ever marked complete without having actually landed on
+    /// disk.
+    public func pause() {
+        targetWorkerCount = 0
+        checkpoint()
+        file?.close()
+        file = nil
     }
 
     /// What a finished child task was, so the drain loop can tell a worker
@@ -293,9 +324,18 @@ public actor DownloadTask {
         var offset = claim.start
         for try await chunk in response.body {
             guard offset < claim.end else { break }
+            // `file` goes nil the instant `pause()` runs; that's an
+            // actor-isolated assignment, so it can only land between
+            // iterations of this loop, never inside one. Bind it locally so
+            // there is no gap between the presence check and the write: a
+            // byte is folded into `completed` (via `record`) only if this
+            // exact write to disk just succeeded. Optional-chaining
+            // `file?.write` here would silently no-op while `record` still
+            // ran — recording bytes that were never durably written.
+            guard let file else { break }
             let writable = Swift.min(Int64(chunk.count), claim.end - offset)
             let slice = chunk.prefix(Int(writable))
-            try file?.write(Data(slice), at: offset)
+            try file.write(Data(slice), at: offset)
             record(ByteRange(start: offset, end: offset + writable))
             offset += writable
         }
