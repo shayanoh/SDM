@@ -4236,7 +4236,7 @@ Deliberately **not** in Phase 1, to keep it shippable:
 
 - Per-host connection caps and the global connection ceiling actually throttling worker pools (§6.4) — `globalMaxConnections` is carried in settings but not yet enforced. **Phase 3.**
 - Hysteresis wiring — `Scheduler` supports `startedRecently` and is tested, but `DownloadEngine` passes an empty set. Needs a clock. **Phase 3.**
-- Retry loop — `RetryPolicy` classifies and computes backoff, but the engine does not yet re-attempt transient failures; it returns them to `queued`. **Phase 3.**
+- Full retry design — the engine now wires the *guard* from `RetryPolicy`: a per-item attempt counter, a tick-counted hold that keeps an item out of the desired running set until the computed backoff has elapsed, and a terminal `.failed(reason:)` once `maxAttempts` consecutive attempts have failed. (This paragraph previously claimed the engine did not re-attempt transient failures at all. It did — it returned them to `queued` and `tick()` re-desired them one second later, forever, which is a request storm, not an absence of retry.) Still deferred: a manual retry action in the UI, per-error-class policies, and surfacing remaining attempts. **Phase 3.**
 - Signed-URL refresh on 403 (§5.3) — `RetryPolicy` already classifies 403 as transient, which is the hook, but there is no resolver to refresh from yet. **Phase 5.**
 - Drag-and-drop reordering, sparklines, bandwidth graph, menu bar, notifications. **Phase 3.**
 - Linkgrabber, clipboard watching. **Phase 2.**

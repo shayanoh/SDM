@@ -15,7 +15,6 @@ xcuserdata/
 ## Swift Package Manager
 .build/
 .swiftpm/
-Packages/
 
 ## Misc
 *.log
