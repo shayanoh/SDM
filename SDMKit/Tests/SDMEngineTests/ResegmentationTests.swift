@@ -84,8 +84,23 @@ import Testing
     )
 
     async let result = task.start()
+
+    // Raise only once both initial workers hold claims, so this exercises a
+    // genuine mid-flight raise rather than a target changed before the pool
+    // starts. Bounded so a pool that never reaches 2 fails instead of hanging.
+    var spins = 0
+    while await task.activeWorkerCount < 2, spins < 100_000 {
+        await Task.yield()
+        spins += 1
+    }
+    #expect(spins < 100_000)
+
     await task.setWorkerCount(16)
     #expect(try await Data(contentsOf: result) == payload)
+
+    // Byte identity alone would pass even if the raise were a no-op; the peak
+    // is what proves extra workers were actually spawned and ran.
+    #expect(await task.peakWorkerCount > 2)
 }
 
 @Test(arguments: [1, 2, 3, 7, 13, 32])

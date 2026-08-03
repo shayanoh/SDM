@@ -51,6 +51,18 @@ public actor DownloadTask {
     private var liveWorkerIndices: Set<Int> = []
     /// Monotonic source of worker indices; never reused.
     private var nextWorkerIndex: Int = 0
+    /// High-water mark of `liveWorkerIndices.count` for the current run.
+    private var peakLiveWorkerCount: Int = 0
+
+    /// Wake channel the sentinel child task parks on. `setWorkerCount` yields
+    /// to it when the target rises, which returns the sentinel and unblocks
+    /// the drain loop so it can spawn the extra workers immediately.
+    private var wakeContinuation: AsyncStream<Void>.Continuation?
+    /// A raise that arrived before the sentinel installed its continuation.
+    private var pendingWake = false
+    /// Set once the download is finished; makes the sentinel return rather
+    /// than park, so the task group can drain to empty.
+    private var wakeClosed = false
 
     public init(
         id: UUID,
@@ -68,6 +80,10 @@ public actor DownloadTask {
 
     public var completedRanges: RangeSet { completed }
     public var activeWorkerCount: Int { reserved.count }
+    /// The most workers that were ever live at once during this run. Lets a
+    /// caller (and the tests) observe the concurrency a `setWorkerCount` raise
+    /// actually achieved, which byte identity alone cannot show.
+    public var peakWorkerCount: Int { peakLiveWorkerCount }
 
     private var sidecarURL: URL { ResumeSidecar.url(for: destinationURL) }
 
@@ -113,34 +129,100 @@ public actor DownloadTask {
         file = try SparseFile(finalURL: destinationURL, totalBytes: size)
     }
 
+    /// What a finished child task was, so the drain loop can tell a worker
+    /// that ran out of work from the sentinel that woke it up.
+    private enum GroupOutcome: Sendable {
+        case worker
+        case sentinel
+    }
+
     private func runWorkers() async throws {
         targetWorkerCount = configuration.workerCount
+        wakeClosed = false
+        pendingWake = false
 
-        try await withThrowingTaskGroup(of: Void.self) { group in
-            var spawned = 0
-            while spawned < targetWorkerCount {
+        try await withThrowingTaskGroup(of: GroupOutcome.self) { group in
+            while liveWorkerIndices.count < targetWorkerCount {
                 spawnWorker(into: &group)
-                spawned += 1
             }
+            addSentinel(to: &group)
 
-            // Drain finished workers, spawning replacements when the target
-            // rises above the number still running.
-            while try await group.next() != nil {
+            // Drain finished children. A child finishes either because it ran
+            // out of claimable work / was retired, or because it is the
+            // sentinel and `setWorkerCount` raised the target. Both cases want
+            // the same response: top the pool back up to the current target.
+            while let outcome = try await group.next() {
                 while liveWorkerIndices.count < targetWorkerCount, hasWorkRemaining() {
                     spawnWorker(into: &group)
+                }
+
+                if liveWorkerIndices.isEmpty {
+                    // No worker is live and the top-up spawned none, so
+                    // `hasWorkRemaining()` was false with an empty `reserved`
+                    // — the file is done. Close the wake channel so the
+                    // sentinel returns and is not replaced; the group can then
+                    // drain to empty and `group.next()` yields nil.
+                    closeWakeChannel()
+                } else if outcome == .sentinel {
+                    addSentinel(to: &group)
                 }
             }
         }
     }
 
-    private func spawnWorker(into group: inout ThrowingTaskGroup<Void, any Error>) {
+    private func spawnWorker(into group: inout ThrowingTaskGroup<GroupOutcome, any Error>) {
         let index = nextWorkerIndex
         nextWorkerIndex += 1
         liveWorkerIndices.insert(index)
+        peakLiveWorkerCount = Swift.max(peakLiveWorkerCount, liveWorkerIndices.count)
         group.addTask { [weak self] in
-            guard let self else { return }
+            guard let self else { return .worker }
             try await self.workerLoop(index: index)
+            return .worker
         }
+    }
+
+    /// Adds the child task that parks until the worker count is raised.
+    private func addSentinel(to group: inout ThrowingTaskGroup<GroupOutcome, any Error>) {
+        group.addTask { [weak self] in
+            guard let self else { return .sentinel }
+            await self.awaitWorkerCountRaise()
+            return .sentinel
+        }
+    }
+
+    /// Suspends until `setWorkerCount` raises the target or the download
+    /// finishes. Returns immediately if either already happened.
+    private func awaitWorkerCountRaise() async {
+        if wakeClosed { return }
+        if pendingWake {
+            pendingWake = false
+            return
+        }
+
+        let stream = AsyncStream<Void> { continuation in
+            wakeContinuation = continuation
+        }
+        for await _ in stream { break }
+        wakeContinuation = nil
+    }
+
+    private func signalWake() {
+        guard !wakeClosed else { return }
+        if let wakeContinuation {
+            wakeContinuation.yield()
+        } else {
+            // The sentinel has not installed its continuation yet; make sure
+            // it does not park on a raise that already happened.
+            pendingWake = true
+        }
+    }
+
+    private func closeWakeChannel() {
+        wakeClosed = true
+        pendingWake = false
+        wakeContinuation?.finish()
+        wakeContinuation = nil
     }
 
     private func hasWorkRemaining() -> Bool {
@@ -181,8 +263,13 @@ public actor DownloadTask {
     /// already in `completed`, so survivors simply pick up the resulting gaps.
     public func setWorkerCount(_ count: Int) {
         precondition(count >= 1, "workerCount must be at least 1")
+        let isRaise = count > targetWorkerCount
         targetWorkerCount = count
         configuration.workerCount = count
+        // Lowering needs no nudge: retiring workers return on their own and
+        // that already drives the drain loop. Raising has to wake it, since
+        // busy workers never return between claims.
+        if isRaise { signalWake() }
     }
 
     private func claimNext(for workerID: UUID) -> ByteRange? {
