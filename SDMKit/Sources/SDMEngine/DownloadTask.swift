@@ -59,6 +59,16 @@ public actor DownloadTask {
     /// trigger driven by `checkpointTick()`.
     private var ticksSinceCheckpoint: Int = 0
     private var acceptsRanges = true
+    /// Set by `pause()` and never cleared. `start()` awaits `transport.fetch`
+    /// inside `prepare()`; a `pause()` landing on that suspension point used
+    /// to be lost, because it set `targetWorkerCount = 0` (or, with `file`
+    /// still nil, returned before even doing that) and `runWorkers()` then
+    /// reset the target to the configured count and downloaded the whole file
+    /// anyway. The engine preempts items by pausing them, so it reaches that
+    /// window for real. Recording the request in a flag `runWorkers()`
+    /// consults closes it. Terminal by design: a paused task is finished, and
+    /// the engine builds a fresh `DownloadTask` for the next attempt.
+    private var isPaused = false
 
     /// The number of workers the pool is currently trying to keep running.
     private var targetWorkerCount: Int = 1
@@ -102,6 +112,10 @@ public actor DownloadTask {
     /// Whether the origin honored `Range` requests on the probe. `false`
     /// forces the pool to a single worker (spec §5.3).
     public var supportsRanges: Bool { acceptsRanges }
+    /// The resource's total size as reported by the probe, or `nil` before
+    /// `prepare()` has run. The engine folds this into its snapshots so the
+    /// UI can show a fraction rather than a bare byte count.
+    public var expectedTotalBytes: Int64? { totalBytes > 0 ? totalBytes : nil }
 
     private var sidecarURL: URL { ResumeSidecar.url(for: destinationURL) }
 
@@ -225,6 +239,11 @@ public actor DownloadTask {
     /// (user hits Pause just as the transfer completes), so it is guarded
     /// here rather than relying solely on `prepare()`'s backing-file check.
     public func pause() {
+        // Recorded before the `file != nil` guard on purpose: a pause that
+        // lands while `prepare()` is still awaiting `transport.fetch` finds
+        // `file` nil and would otherwise leave no trace at all, letting
+        // `runWorkers()` proceed as if nothing had happened.
+        isPaused = true
         guard file != nil else { return }
         targetWorkerCount = 0
         checkpoint()
@@ -240,6 +259,18 @@ public actor DownloadTask {
     }
 
     private func runWorkers() async throws {
+        // A pause that arrived while `prepare()` was suspended must not be
+        // undone by the target reset below. Close the descriptor `prepare()`
+        // just opened and spawn nothing; `start()` then finds the file
+        // incomplete and throws, which the engine classifies as transient and
+        // returns to `queued`. The `.incomplete` file and any sidecar stay on
+        // disk, so the next attempt resumes.
+        if isPaused {
+            file?.close()
+            file = nil
+            return
+        }
+
         targetWorkerCount = configuration.workerCount
         wakeClosed = false
         pendingWake = false
