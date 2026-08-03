@@ -116,10 +116,18 @@ public actor DownloadTask {
 
     /// Probes the resource and opens the destination file.
     ///
-    /// Resume only happens when the sidecar is present, readable, and still
-    /// describes the same remote resource (spec §5.3). Anything else — no
-    /// sidecar, a corrupt one, or a validator mismatch — restarts at zero
-    /// rather than risk stitching new bytes onto stale ones.
+    /// Resume only happens when the sidecar is present, readable, still
+    /// describes the same remote resource (spec §5.3), *and* the
+    /// `.incomplete` file it refers to actually exists and is large enough to
+    /// back the byte ranges it claims. That last check is a second line of
+    /// defense against a stale or poisoned sidecar (e.g. one written after
+    /// the real `.incomplete` file was already renamed away by a successful
+    /// `finalize()`) — trusting such a sidecar would mark the whole file
+    /// "complete" over a freshly-created, all-zero `.incomplete` file and
+    /// silently finalize garbage. Anything that fails any of these checks —
+    /// no sidecar, a corrupt one, a validator mismatch, or a missing/short
+    /// backing file — restarts at zero rather than risk stitching new bytes
+    /// onto stale (or nonexistent) ones.
     private func prepare() async throws {
         let probe = try await transport.fetch(
             RangeRequest(url: sourceURL, range: ByteRange(start: 0, end: 1))
@@ -132,17 +140,27 @@ public actor DownloadTask {
         totalBytes = size
         validator = probe.validator
 
+        let incompleteURL = SparseFile.incompleteURL(for: destinationURL)
         if let sidecar = ResumeSidecar.load(from: sidecarURL),
-            sidecar.matches(totalBytes: size, validator: probe.validator)
+            sidecar.matches(totalBytes: size, validator: probe.validator),
+            let onDiskSize = Self.fileSize(at: incompleteURL),
+            onDiskSize >= size
         {
             completed = sidecar.completed
         } else {
             completed = RangeSet()
             ResumeSidecar.remove(at: sidecarURL)
-            try? FileManager.default.removeItem(at: SparseFile.incompleteURL(for: destinationURL))
+            try? FileManager.default.removeItem(at: incompleteURL)
         }
 
         file = try SparseFile(finalURL: destinationURL, totalBytes: size)
+    }
+
+    private static func fileSize(at url: URL) -> Int64? {
+        guard let values = try? url.resourceValues(forKeys: [.fileSizeKey]),
+            let size = values.fileSize
+        else { return nil }
+        return Int64(size)
     }
 
     /// Stops workers and flushes resume state to disk.
@@ -153,7 +171,26 @@ public actor DownloadTask {
     /// chunk and stops writing (and stops recording) the moment it goes nil,
     /// so no byte is ever marked complete without having actually landed on
     /// disk.
+    ///
+    /// A no-op when nothing is in flight (`file == nil`): once `start()` has
+    /// already finished — successfully or not — there is nothing to stop,
+    /// and calling `checkpoint()` unconditionally here would resurrect a
+    /// sidecar describing a finished (or never-started) download. For a
+    /// successful completion in particular, `file` is nil and `completed` /
+    /// `totalBytes` / `validator` still hold their *finished* values, so an
+    /// unconditional checkpoint would write a `.sdmpart` claiming the whole
+    /// file is a complete in-progress download, even though the
+    /// `.incomplete` file backing it no longer exists (it was already
+    /// renamed to the final destination). A later `start()` against the same
+    /// destination would then trust that sidecar, open a fresh all-zero
+    /// `.incomplete` file, believe it complete without downloading anything,
+    /// and either fail to finalize (destination already exists) or — if the
+    /// destination was deleted in the meantime — silently move an all-zero
+    /// file into place. This is a UI race that's reachable in production
+    /// (user hits Pause just as the transfer completes), so it is guarded
+    /// here rather than relying solely on `prepare()`'s backing-file check.
     public func pause() {
+        guard file != nil else { return }
         targetWorkerCount = 0
         checkpoint()
         file?.close()

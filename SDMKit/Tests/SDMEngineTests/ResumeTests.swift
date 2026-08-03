@@ -139,11 +139,12 @@ private func downloadPartially(
 
     var changed = FakeOrigin.Behavior()
     changed.validator = "etag-2"
+    let secondOrigin = FakeOrigin(payload: payload, behavior: changed)
     let resumed = DownloadTask(
         id: UUID(),
         sourceURL: testSourceURL,
         destinationURL: destination,
-        transport: FakeOrigin(payload: payload, behavior: changed),
+        transport: secondOrigin,
         configuration: .test(workers: 1)
     )
     _ = try await resumed.start()
@@ -151,6 +152,19 @@ private func downloadPartially(
     let restarted = await resumed.completedRanges
     #expect(restarted.ranges == [ByteRange(start: 0, end: 4000)])
     #expect(try Data(contentsOf: destination) == payload)
+
+    // Both origins serve the identical payload, so byte identity and the
+    // coalesced completed-range assertions above would also pass under a
+    // wrongly-*resumed* download that trusted the stale sidecar — they are
+    // not proof the validator guard actually did anything. What can't be
+    // faked: a wrong resume would only ask the second origin for the
+    // remaining gap [1000, 4000); a correct restart-from-zero must genuinely
+    // re-fetch the discarded prefix [0, 1000) too. Assert the second origin
+    // actually saw requests covering the whole file, not just the tail.
+    let secondOriginClaims = await secondOrigin.requestedRanges.filter { $0.length > 1 }
+    var refetched = RangeSet()
+    for claim in secondOriginClaims { refetched.insert(claim) }
+    #expect(refetched.isComplete(total: 4000))
 }
 
 /// Hazard: `pause()` sets `file = nil` while workers may still be mid-write.
@@ -211,4 +225,124 @@ private func downloadPartially(
         let expected = payload.subdata(in: Int(range.start)..<Int(range.end))
         #expect(recorded == expected)
     }
+}
+
+/// Hazard: `pause()` used to call `checkpoint()` unconditionally, including
+/// after `start()` had already finished successfully. At that point `file`
+/// is nil (the `.incomplete` file was already renamed to the destination),
+/// but `completed` / `totalBytes` / `validator` still hold their *finished*
+/// values, so the unconditional checkpoint would resurrect a `.sdmpart`
+/// claiming the whole file is a complete in-progress download — with no
+/// `.incomplete` file left to back that claim. A later `start()` against the
+/// same destination would trust that sidecar, open a fresh all-zero
+/// `.incomplete` file, consider it already complete, and try to finalize
+/// garbage over (or in place of) the real file. This is a realistic UI race:
+/// the user hits Pause just as the transfer completes.
+@Test func pausingAfterSuccessfulCompletionDoesNotPoisonNextStart() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let destination = dir.appendingPathComponent("out.bin")
+    let payload = testPayload(4000)
+
+    let task = DownloadTask(
+        id: UUID(),
+        sourceURL: testSourceURL,
+        destinationURL: destination,
+        transport: FakeOrigin(payload: payload),
+        configuration: .test(workers: 1)
+    )
+    let result = try await task.start()
+    #expect(try Data(contentsOf: result) == payload)
+
+    // The race: pause() lands just after start() already finished.
+    await task.pause()
+    #expect(ResumeSidecar.load(from: ResumeSidecar.url(for: destination)) == nil)
+
+    // A fresh task pointed at the same, already-finished destination has no
+    // poisoned sidecar to trust, so it genuinely re-downloads the whole
+    // file — and since `destination` still exists, `finalize()` correctly
+    // refuses to overwrite it rather than silently replacing (or zero-
+    // filling) it. That's a separate, pre-existing invariant of
+    // `SparseFile.finalize()`, not something Task 10 changes; what matters
+    // here is that the failure is loud and the original, correct file is
+    // left completely untouched — never that a second `start()` on a live
+    // destination should succeed.
+    let again = DownloadTask(
+        id: UUID(),
+        sourceURL: testSourceURL,
+        destinationURL: destination,
+        transport: FakeOrigin(payload: payload),
+        configuration: .test(workers: 1)
+    )
+    await #expect(throws: (any Error).self) {
+        _ = try await again.start()
+    }
+    #expect(try Data(contentsOf: destination) == payload)
+}
+
+/// The deleted-destination variant of the same race: if a stray `pause()`
+/// after completion ever did resurrect a sidecar, and the user then deleted
+/// the finished file, the next `start()` would have nothing to fail loudly
+/// against — `finalize()` would succeed and silently install an all-zero
+/// file. Verifying byte identity here closes that path.
+@Test func pausingAfterCompletionThenDeletingDestinationStillRestartsCleanly() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let destination = dir.appendingPathComponent("out.bin")
+    let payload = testPayload(4000)
+
+    let task = DownloadTask(
+        id: UUID(),
+        sourceURL: testSourceURL,
+        destinationURL: destination,
+        transport: FakeOrigin(payload: payload),
+        configuration: .test(workers: 1)
+    )
+    _ = try await task.start()
+    await task.pause()
+
+    try FileManager.default.removeItem(at: destination)
+
+    let again = DownloadTask(
+        id: UUID(),
+        sourceURL: testSourceURL,
+        destinationURL: destination,
+        transport: FakeOrigin(payload: payload),
+        configuration: .test(workers: 4)
+    )
+    let result = try await again.start()
+    #expect(try Data(contentsOf: result) == payload)
+}
+
+/// Isolates `prepare()`'s second line of defense from `pause()`'s guard:
+/// even if a sidecar on disk claims the whole file is complete (matching
+/// totalBytes and validator), if there is no `.incomplete` file backing that
+/// claim, `prepare()` must not trust it — it must restart from zero rather
+/// than mark the download complete over nonexistent bytes.
+@Test func sidecarClaimingCompleteWithoutBackingFileRestartsFromZero() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let destination = dir.appendingPathComponent("out.bin")
+    let payload = testPayload(4000)
+
+    var full = RangeSet()
+    full.insert(ByteRange(start: 0, end: 4000))
+    let poisoned = ResumeSidecar(
+        sourceURL: testSourceURL,
+        totalBytes: 4000,
+        validator: nil,
+        completed: full
+    )
+    try poisoned.save(to: ResumeSidecar.url(for: destination))
+    // No `.incomplete` file exists at all — the poisoned case.
+
+    let task = DownloadTask(
+        id: UUID(),
+        sourceURL: testSourceURL,
+        destinationURL: destination,
+        transport: FakeOrigin(payload: payload),
+        configuration: .test(workers: 1)
+    )
+    let result = try await task.start()
+    #expect(try Data(contentsOf: result) == payload)
 }
