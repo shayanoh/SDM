@@ -20,14 +20,25 @@ public actor DownloadTask {
         public var minChunk: Int64
         /// Bytes written per worker between sidecar checkpoints.
         public var checkpointInterval: Int64
+        /// Elapsed 1 Hz ticks without a checkpoint before `checkpointTick()`
+        /// forces one — the wall-clock half of spec §4.3's "every ~8 MB per
+        /// worker or every 5 s, whichever comes first". Five seconds at 1 Hz.
+        public var checkpointStalenessTicks: Int
 
-        public init(workerCount: Int, minChunk: Int64, checkpointInterval: Int64) {
+        public init(
+            workerCount: Int,
+            minChunk: Int64,
+            checkpointInterval: Int64,
+            checkpointStalenessTicks: Int = 5
+        ) {
             precondition(workerCount >= 1, "workerCount must be at least 1")
             precondition(minChunk > 0, "minChunk must be positive")
             precondition(checkpointInterval > 0, "checkpointInterval must be positive")
+            precondition(checkpointStalenessTicks > 0, "checkpointStalenessTicks must be positive")
             self.workerCount = workerCount
             self.minChunk = minChunk
             self.checkpointInterval = checkpointInterval
+            self.checkpointStalenessTicks = checkpointStalenessTicks
         }
     }
 
@@ -44,6 +55,9 @@ public actor DownloadTask {
     private var validator: String?
     private var file: SparseFile?
     private var bytesSinceCheckpoint: Int64 = 0
+    /// Elapsed 1 Hz ticks since the last checkpoint, for the wall-clock
+    /// trigger driven by `checkpointTick()`.
+    private var ticksSinceCheckpoint: Int = 0
     private var acceptsRanges = true
 
     /// The number of workers the pool is currently trying to keep running.
@@ -437,8 +451,30 @@ public actor DownloadTask {
         }
     }
 
+    /// Drives the wall-clock half of spec §4.3's checkpoint trigger: "every
+    /// ~8 MB per worker or every 5 s, whichever comes first." `record`
+    /// already implements the byte half; this is meant to be called once per
+    /// second by the engine's tick (Task 16), so a slow or drip-feeding
+    /// server that never reaches `checkpointInterval` bytes still gets a
+    /// sidecar written periodically instead of losing unbounded wall-clock
+    /// progress on a crash.
+    ///
+    /// A no-op once the download has finished or never started (`file ==
+    /// nil`) — same guard as `pause()` — so a stray tick can't resurrect a
+    /// sidecar for a completed, failed-and-abandoned, or never-started
+    /// download. `checkpoint()` itself resets this counter, whether it fired
+    /// from here or from the byte trigger in `record`, so the two triggers
+    /// can never both write for the same span of progress.
+    public func checkpointTick() {
+        guard file != nil else { return }
+        ticksSinceCheckpoint += 1
+        guard ticksSinceCheckpoint >= configuration.checkpointStalenessTicks else { return }
+        checkpoint()
+    }
+
     private func checkpoint() {
         bytesSinceCheckpoint = 0
+        ticksSinceCheckpoint = 0
         // Spec §5.3: no Range support means no checkpointing. A sidecar
         // written here would later be trusted by `prepare()`'s resume path
         // (were it not itself gated on `acceptsRanges`) and hand `claimNext`
