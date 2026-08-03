@@ -145,7 +145,15 @@ public actor DownloadTask {
         validator = probe.validator
 
         // A server that ignores Range cannot be segmented: every worker would
-        // receive the whole body and overwrite the others' offsets.
+        // receive the whole body and overwrite the others' offsets. It also
+        // cannot be resumed: every fetch against it returns the whole body
+        // starting at byte 0, so a later run stitching new bytes onto an
+        // old, non-zero `completed` set would misalign the write offset
+        // against the response and corrupt the file — the same failure mode
+        // `claimNext` guards against within a single run, but a sidecar
+        // reintroduces it across runs. Per spec §5.3, no Range support means
+        // no checkpointing, so `acceptsRanges` gates the resume decision
+        // below and `checkpoint()` is a no-op for the rest of this run.
         acceptsRanges = probe.acceptsRanges
         if !acceptsRanges {
             configuration.workerCount = 1
@@ -153,7 +161,8 @@ public actor DownloadTask {
         }
 
         let incompleteURL = SparseFile.incompleteURL(for: destinationURL)
-        if let sidecar = ResumeSidecar.load(from: sidecarURL),
+        if acceptsRanges,
+            let sidecar = ResumeSidecar.load(from: sidecarURL),
             sidecar.matches(totalBytes: size, validator: probe.validator),
             let onDiskSize = Self.fileSize(at: incompleteURL),
             onDiskSize >= size
@@ -305,11 +314,25 @@ public actor DownloadTask {
         wakeContinuation = nil
     }
 
+    /// The `minChunk` passed to `nextClaim`. Ordinarily the configured
+    /// value, so large gaps get split across multiple in-flight claims; but
+    /// when the origin doesn't honor `Range`, every response starts at byte
+    /// 0 regardless of what was requested, so a non-zero-start claim would
+    /// misalign the write offset against the response and corrupt the file.
+    /// Forcing this up to `totalBytes` makes `nextClaim` hand back exactly
+    /// one claim spanning the whole remaining gap — always starting at 0 for
+    /// a fresh (never-resumed, per `prepare()`) download. Shared by
+    /// `claimNext` and `hasWorkRemaining` so the two can't drift out of sync
+    /// on the same nil-vs-non-nil decision.
+    private var effectiveMinChunk: Int64 {
+        acceptsRanges ? configuration.minChunk : totalBytes
+    }
+
     private func hasWorkRemaining() -> Bool {
         completed.nextClaim(
             total: totalBytes,
             reserved: Array(reserved.values),
-            minChunk: configuration.minChunk
+            minChunk: effectiveMinChunk
         ) != nil
     }
 
@@ -353,18 +376,6 @@ public actor DownloadTask {
     }
 
     private func claimNext(for workerID: UUID) -> ByteRange? {
-        // A Range-ignoring origin always returns the *whole* body starting
-        // at byte 0, no matter what range was requested. Normal claims are
-        // deliberately smaller than the full gap (nextClaim halves large
-        // gaps) so several claims can be in flight and checkpointed
-        // independently; but here the response body's byte 0 always maps to
-        // file offset 0, not to `claim.start`. A second, non-zero-start
-        // claim would write that same leading slice of the body at the
-        // wrong file offset and corrupt the file. Forcing minChunk up to
-        // the whole remaining size makes nextClaim hand back exactly one
-        // claim spanning the entire gap, so `claim.start` for a fresh
-        // download is always 0 and the response body lines up with it.
-        let effectiveMinChunk = acceptsRanges ? configuration.minChunk : totalBytes
         guard
             let claim = completed.nextClaim(
                 total: totalBytes,
@@ -428,6 +439,14 @@ public actor DownloadTask {
 
     private func checkpoint() {
         bytesSinceCheckpoint = 0
+        // Spec §5.3: no Range support means no checkpointing. A sidecar
+        // written here would later be trusted by `prepare()`'s resume path
+        // (were it not itself gated on `acceptsRanges`) and hand `claimNext`
+        // a non-zero-start claim against an origin whose responses always
+        // start at byte 0 — corrupting the file. Simplest to never write the
+        // sidecar in the first place, rather than rely solely on the
+        // resume-side guard.
+        guard acceptsRanges else { return }
         let sidecar = ResumeSidecar(
             sourceURL: sourceURL,
             totalBytes: totalBytes,

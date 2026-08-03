@@ -22,6 +22,11 @@ import Testing
     let result = try await task.start()
     #expect(try Data(contentsOf: result) == payload)
     #expect(await task.supportsRanges == false)
+    // The clamp itself: without it, 16 workers would spawn, one would
+    // reserve the whole gap, and the other 15 would simply get `nil` from
+    // `claimNext` and return — byte identity and `supportsRanges` alone
+    // don't prove the pool was ever actually held to 1.
+    #expect(await task.peakWorkerCount == 1)
 }
 
 @Test func serverOverstatingSizeFailsRatherThanTruncating() async throws {
@@ -95,4 +100,46 @@ import Testing
 
     _ = try? await task.start()
     #expect(!FileManager.default.fileExists(atPath: destination.path))
+}
+
+/// Regression test for Finding 1 (round 1 review): a `Range`-ignoring
+/// origin cannot be resumed. If an interrupted run against such an origin
+/// were allowed to checkpoint a sidecar, a second run against the same
+/// destination would trust that sidecar's non-zero `completed` set, hand
+/// `claimNext` a non-zero-start claim, and then splice a clean origin's
+/// from-byte-0 body into the middle of the file — a silent, unflagged
+/// corruption that still finalizes successfully. Confirmed this test fails
+/// (byte-identity mismatch) without the `prepare()`/`checkpoint()` fix; see
+/// the task report.
+@Test func ignoresRangesResumeNeverProducesCorruptFile() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let destination = dir.appendingPathComponent("out.bin")
+    let payload = testPayload(5000)
+
+    var dropBehavior = FakeOrigin.Behavior()
+    dropBehavior.ignoresRanges = true
+    dropBehavior.dropAfterBytes = 500
+    dropBehavior.chunkSize = 64
+    let firstTask = DownloadTask(
+        id: UUID(),
+        sourceURL: testSourceURL,
+        destinationURL: destination,
+        transport: FakeOrigin(payload: payload, behavior: dropBehavior),
+        configuration: .test(workers: 1)
+    )
+    _ = try? await firstTask.start()
+    await firstTask.pause()
+
+    var cleanBehavior = FakeOrigin.Behavior()
+    cleanBehavior.ignoresRanges = true
+    let secondTask = DownloadTask(
+        id: UUID(),
+        sourceURL: testSourceURL,
+        destinationURL: destination,
+        transport: FakeOrigin(payload: payload, behavior: cleanBehavior),
+        configuration: .test(workers: 1)
+    )
+    let result = try await secondTask.start()
+    #expect(try Data(contentsOf: result) == payload)
 }
