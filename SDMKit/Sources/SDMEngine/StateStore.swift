@@ -35,6 +35,17 @@ public protocol StateStore: Sendable {
     func load() async -> PersistedState
     func save(_ state: PersistedState) async
     /// Writes any pending state immediately. Call on quit and on a debounce timer.
+    ///
+    /// `flush()` stays non-throwing by design: in Phase 1 there is no
+    /// caller yet that could do anything useful with a save error (no UI
+    /// feedback loop, no retry policy above this layer), so making it
+    /// `throws` would only push the "now what" decision onto call sites
+    /// that can't act on it. What is not acceptable is losing the pending
+    /// save silently. `JSONStateStore` honors that by only discarding
+    /// `pending` once the write has actually succeeded — a failed write
+    /// (disk full, permission denied, encode failure) leaves the save
+    /// queued so the next `flush()` call retries it. Surfacing failures to
+    /// a caller can be added later once one exists that would use it.
     func flush() async
 }
 
@@ -74,13 +85,21 @@ public actor JSONStateStore: StateStore {
 
     public func flush() {
         guard let state = pending else { return }
-        pending = nil
+        // Encode/write failures leave `pending` untouched, so the next
+        // `flush()` retries the very same save rather than losing it.
         guard let data = try? JSONEncoder().encode(state) else { return }
-        try? FileManager.default.createDirectory(
-            at: fileURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        try? data.write(to: fileURL, options: .atomic)
+        do {
+            try FileManager.default.createDirectory(
+                at: fileURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try data.write(to: fileURL, options: .atomic)
+            pending = nil
+        } catch {
+            // Write failed (disk full, permission denied, etc.). Keep
+            // `pending` so this save is retried on the next flush() rather
+            // than silently discarded.
+        }
     }
 }
 
