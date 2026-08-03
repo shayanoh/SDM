@@ -6,6 +6,11 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		5FAA0004A0B0C0D0E0F00004 /* SDMCore in Frameworks */ = {isa = PBXBuildFile; productRef = 5FAA0002A0B0C0D0E0F00002 /* SDMCore */; };
+		5FAA0005A0B0C0D0E0F00005 /* SDMEngine in Frameworks */ = {isa = PBXBuildFile; productRef = 5FAA0003A0B0C0D0E0F00003 /* SDMEngine */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		5F02DD013020DAA3009E61DC /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -52,6 +57,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5FAA0004A0B0C0D0E0F00004 /* SDMCore in Frameworks */,
+				5FAA0005A0B0C0D0E0F00005 /* SDMEngine in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +119,8 @@
 			);
 			name = SDM;
 			packageProductDependencies = (
+				5FAA0002A0B0C0D0E0F00002 /* SDMCore */,
+				5FAA0003A0B0C0D0E0F00003 /* SDMEngine */,
 			);
 			productName = SDM;
 			productReference = 5F02DCF13020DAA0009E61DC /* SDM.app */;
@@ -195,6 +204,9 @@
 			);
 			mainGroup = 5F02DCE83020DAA0009E61DC;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				5FAA0001A0B0C0D0E0F00001 /* XCLocalSwiftPackageReference "SDMKit" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 5F02DCF23020DAA0009E61DC /* Products */;
 			projectDirPath = "";
@@ -573,6 +585,24 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		5FAA0001A0B0C0D0E0F00001 /* XCLocalSwiftPackageReference "SDMKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = SDMKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		5FAA0002A0B0C0D0E0F00002 /* SDMCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SDMCore;
+		};
+		5FAA0003A0B0C0D0E0F00003 /* SDMEngine */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SDMEngine;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 5F02DCE93020DAA0009E61DC /* Project object */;
 }
