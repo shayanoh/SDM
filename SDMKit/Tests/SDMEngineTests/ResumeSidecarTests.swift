@@ -4,13 +4,6 @@ import Testing
 
 @testable import SDMEngine
 
-private func makeScratchDirectory() throws -> URL {
-    let url = FileManager.default.temporaryDirectory
-        .appendingPathComponent("sdm-tests-\(UUID().uuidString)")
-    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-    return url
-}
-
 private func sampleSidecar() -> ResumeSidecar {
     ResumeSidecar(
         sourceURL: URL(string: "https://example.com/a.bin")!,
