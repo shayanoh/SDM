@@ -44,6 +44,7 @@ public actor DownloadTask {
     private var validator: String?
     private var file: SparseFile?
     private var bytesSinceCheckpoint: Int64 = 0
+    private var acceptsRanges = true
 
     /// The number of workers the pool is currently trying to keep running.
     private var targetWorkerCount: Int = 1
@@ -84,6 +85,9 @@ public actor DownloadTask {
     /// caller (and the tests) observe the concurrency a `setWorkerCount` raise
     /// actually achieved, which byte identity alone cannot show.
     public var peakWorkerCount: Int { peakLiveWorkerCount }
+    /// Whether the origin honored `Range` requests on the probe. `false`
+    /// forces the pool to a single worker (spec §5.3).
+    public var supportsRanges: Bool { acceptsRanges }
 
     private var sidecarURL: URL { ResumeSidecar.url(for: destinationURL) }
 
@@ -139,6 +143,14 @@ public actor DownloadTask {
 
         totalBytes = size
         validator = probe.validator
+
+        // A server that ignores Range cannot be segmented: every worker would
+        // receive the whole body and overwrite the others' offsets.
+        acceptsRanges = probe.acceptsRanges
+        if !acceptsRanges {
+            configuration.workerCount = 1
+            targetWorkerCount = 1
+        }
 
         let incompleteURL = SparseFile.incompleteURL(for: destinationURL)
         if let sidecar = ResumeSidecar.load(from: sidecarURL),
@@ -341,11 +353,23 @@ public actor DownloadTask {
     }
 
     private func claimNext(for workerID: UUID) -> ByteRange? {
+        // A Range-ignoring origin always returns the *whole* body starting
+        // at byte 0, no matter what range was requested. Normal claims are
+        // deliberately smaller than the full gap (nextClaim halves large
+        // gaps) so several claims can be in flight and checkpointed
+        // independently; but here the response body's byte 0 always maps to
+        // file offset 0, not to `claim.start`. A second, non-zero-start
+        // claim would write that same leading slice of the body at the
+        // wrong file offset and corrupt the file. Forcing minChunk up to
+        // the whole remaining size makes nextClaim hand back exactly one
+        // claim spanning the entire gap, so `claim.start` for a fresh
+        // download is always 0 and the response body lines up with it.
+        let effectiveMinChunk = acceptsRanges ? configuration.minChunk : totalBytes
         guard
             let claim = completed.nextClaim(
                 total: totalBytes,
                 reserved: Array(reserved.values),
-                minChunk: configuration.minChunk
+                minChunk: effectiveMinChunk
             )
         else { return nil }
         reserved[workerID] = claim
@@ -360,6 +384,8 @@ public actor DownloadTask {
 
         var offset = claim.start
         for try await chunk in response.body {
+            // A Range-ignoring origin sends the whole body; discard anything
+            // past the claim rather than writing outside it.
             guard offset < claim.end else { break }
             // `file` goes nil the instant `pause()` runs; that's an
             // actor-isolated assignment, so it can only land between
