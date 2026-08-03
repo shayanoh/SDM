@@ -114,6 +114,10 @@ public actor DownloadEngine {
     /// Ticks elapsed since the first unflushed change, or `nil` when the store
     /// has nothing pending. Spec §4.2's debounce.
     private var ticksSincePendingChange: Int?
+    /// The last checkpoint failure reported by each item's task, kept after
+    /// the runner retires so the reason does not vanish from the UI the
+    /// instant the download stops.
+    private var checkpointFailures: [UUID: String] = [:]
 
     public init(
         transport: any HTTPTransport,
@@ -228,6 +232,7 @@ public actor DownloadEngine {
             // the only caller of the wall-clock half, so without it a slow
             // origin would never checkpoint at all.
             await runner.task.checkpointTick()
+            checkpointFailures[itemID] = await runner.task.lastCheckpointFailure
         }
         for itemID in Array(samplers.keys) { samplers[itemID]?.tick() }
         globalSampler.tick()
@@ -277,10 +282,12 @@ public actor DownloadEngine {
                 var completed = item.completed
                 var totalBytes = item.totalBytes
                 var active = 0
+                var checkpointFailure = checkpointFailures[item.id]
                 if let runner = runners[item.id] {
                     completed = await runner.task.completedRanges
                     totalBytes = await runner.task.expectedTotalBytes ?? totalBytes
                     active = await runner.task.activeWorkerCount
+                    checkpointFailure = await runner.task.lastCheckpointFailure
                 }
                 let sampler = samplers[item.id] ?? SpeedSampler()
                 items.append(
@@ -295,7 +302,8 @@ public actor DownloadEngine {
                         activeSegments: active,
                         configuredSegments: segmentCount(for: item.id),
                         bytesPerSecond: sampler.bytesPerSecond,
-                        speedHistory: sampler.history
+                        speedHistory: sampler.history,
+                        checkpointFailure: checkpointFailure
                     )
                 )
             }
@@ -557,6 +565,10 @@ public actor DownloadEngine {
         // short enough to finish before any reconcile happens would otherwise
         // never record what its probe found.
         let isResumable = await task.probedSupportsRanges
+        // Kept after the runner retires: "this download's resume state could
+        // not be written" is exactly the thing a user must still see once the
+        // download has stopped.
+        checkpointFailures[itemID] = await task.lastCheckpointFailure
         finish(
             itemID: itemID,
             task: task,

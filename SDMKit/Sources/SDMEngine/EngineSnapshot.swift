@@ -19,6 +19,11 @@ public struct ItemSnapshot: Sendable, Equatable, Identifiable {
     public let configuredSegments: Int
     public let bytesPerSecond: Double
     public let speedHistory: [Double]
+    /// Why this download's resume state could not be written, or `nil` when
+    /// checkpointing is healthy. Surfaced because a sidecar that silently
+    /// fails to write means a crash loses all progress with no signal — the
+    /// user needs to know the download is not actually resumable right now.
+    public let checkpointFailure: String?
 
     public init(
         id: UUID,
@@ -31,8 +36,10 @@ public struct ItemSnapshot: Sendable, Equatable, Identifiable {
         activeSegments: Int,
         configuredSegments: Int,
         bytesPerSecond: Double,
-        speedHistory: [Double]
+        speedHistory: [Double],
+        checkpointFailure: String? = nil
     ) {
+        self.checkpointFailure = checkpointFailure
         self.id = id
         self.filename = filename
         self.totalBytes = totalBytes

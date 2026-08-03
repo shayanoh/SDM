@@ -59,6 +59,13 @@ public actor DownloadTask {
     /// trigger driven by `checkpointTick()`.
     private var ticksSinceCheckpoint: Int = 0
     private var acceptsRanges = true
+    /// Why the most recent checkpoint failed, or `nil` if the last one
+    /// succeeded. A sidecar that cannot be written means a crash loses all
+    /// progress for this download, which the user has to be able to see.
+    public private(set) var lastCheckpointFailure: String?
+    /// How many checkpoints have failed during this run. A single failure can
+    /// be a transient hiccup; a rising count is a broken destination.
+    public private(set) var checkpointFailureCount: Int = 0
     /// Set by `pause()` and never cleared. `start()` awaits `transport.fetch`
     /// inside `prepare()`; a `pause()` landing on that suspension point used
     /// to be lost, because it set `targetWorkerCount = 0` (or, with `file`
@@ -525,6 +532,23 @@ public actor DownloadTask {
         checkpoint()
     }
 
+    /// Writes the sidecar describing what is durably on disk.
+    ///
+    /// The `fsync` is load-bearing and must come first. The sidecar is written
+    /// with `Data.write(options: .atomic)` — a temp file plus a rename, which
+    /// macOS orders aggressively — so without it, under power loss or a kernel
+    /// panic, the sidecar can land while the `pwrite`s it describes have not.
+    /// The next launch then trusts a `RangeSet` covering zero-filled blocks;
+    /// `prepare()`'s backing-file size check passes (the file was `ftruncate`d
+    /// to full size at creation), and the download finalizes silently corrupt.
+    /// Against a mere process crash the page cache covers for you, which is
+    /// why this was invisible in testing. One fsync per 8 MB per worker is
+    /// negligible.
+    ///
+    /// Failures used to be swallowed by `try?`. A sidecar that silently fails
+    /// to write means a crash loses all progress with no signal anywhere, so
+    /// the reason is recorded in `lastCheckpointFailure` and surfaced through
+    /// the engine's snapshot to the UI.
     private func checkpoint() {
         bytesSinceCheckpoint = 0
         ticksSinceCheckpoint = 0
@@ -536,12 +560,25 @@ public actor DownloadTask {
         // sidecar in the first place, rather than rely solely on the
         // resume-side guard.
         guard acceptsRanges else { return }
-        let sidecar = ResumeSidecar(
-            sourceURL: sourceURL,
-            totalBytes: totalBytes,
-            validator: validator,
-            completed: completed
-        )
-        try? sidecar.save(to: sidecarURL)
+        // Same guard the callers already apply: no descriptor means there is
+        // nothing durable for a sidecar to describe.
+        guard let file else { return }
+
+        do {
+            try file.sync()
+            let sidecar = ResumeSidecar(
+                sourceURL: sourceURL,
+                totalBytes: totalBytes,
+                validator: validator,
+                completed: completed
+            )
+            try sidecar.save(to: sidecarURL)
+            lastCheckpointFailure = nil
+        } catch {
+            checkpointFailureCount += 1
+            lastCheckpointFailure =
+                "Could not save resume state for \(destinationURL.lastPathComponent): "
+                + "\(error.localizedDescription)"
+        }
     }
 }

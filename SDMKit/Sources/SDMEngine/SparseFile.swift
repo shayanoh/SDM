@@ -63,9 +63,16 @@ public final class SparseFile: @unchecked Sendable {
         }
     }
 
+    /// Forces everything written so far out to the storage device.
+    ///
+    /// A no-op once closed, and legitimately so: `close()` fsyncs before
+    /// releasing the descriptor, and no write can follow it. Throwing `EBADF`
+    /// there instead would make `DownloadTask.checkpoint()`'s "sync, then
+    /// write the sidecar" sequence fail on an already-finished task.
     public func sync() throws {
         lock.lock()
         defer { lock.unlock() }
+        guard !isClosed else { return }
         guard fsync(descriptor) == 0 else { throw FileError.writeFailed(errno: errno) }
     }
 
@@ -77,15 +84,26 @@ public final class SparseFile: @unchecked Sendable {
         return finalURL
     }
 
+    /// Flushes and releases the descriptor. Idempotent.
+    ///
+    /// The `fsync` is best-effort (there is no caller that could act on a
+    /// failure here) but it is what makes `sync()` safe to treat as a no-op
+    /// once closed: `close(2)` alone does not push anything to the device, so
+    /// without it a descriptor closed on a failure path would leave bytes in
+    /// the page cache that a later sidecar might claim are durable.
     public func close() {
         lock.lock()
         defer { lock.unlock() }
         guard !isClosed else { return }
+        _ = fsync(descriptor)
         _ = Foundation.close(descriptor)
         isClosed = true
     }
 
     deinit {
-        if !isClosed { _ = Foundation.close(descriptor) }
+        if !isClosed {
+            _ = fsync(descriptor)
+            _ = Foundation.close(descriptor)
+        }
     }
 }
