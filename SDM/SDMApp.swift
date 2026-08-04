@@ -6,6 +6,7 @@
 //
 
 import AppKit
+import SDMGrabber
 import SwiftUI
 
 /// Exists for one reason: to flush durable state on quit.
@@ -36,14 +37,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct SDMApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var controller = EngineController()
+    @State private var grabberController = GrabberController()
+    @State private var clipboardWatcher = ClipboardWatcher()
+    /// Link ids already handed to the download engine by auto-add-and-start,
+    /// so a later snapshot change (e.g. an unrelated link finishing its
+    /// probe) does not re-add the same package a second time — `addPackage`
+    /// has no idempotency of its own.
+    @State private var autoAddedLinkIDs: Set<UUID> = []
 
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environment(controller)
+                .environment(grabberController)
                 .task {
                     appDelegate.controller = controller
                     await controller.startHeartbeat()
+                }
+                .onAppear {
+                    clipboardWatcher.onLinksDetected = { urls in
+                        guard GrabberSettings.clipboardWatchingEnabled else { return }
+                        Task { await grabberController.ingest(urls: urls) }
+                    }
+                    if GrabberSettings.clipboardWatchingEnabled { clipboardWatcher.start() }
+                }
+                .onDisappear { clipboardWatcher.stop() }
+                .onChange(of: grabberController.snapshot) { _, newSnapshot in
+                    guard GrabberSettings.autoAddAndStartOnGrab else { return }
+                    for package in newSnapshot.packages {
+                        let ids = Set(package.linkIDs)
+                        guard ids.isDisjoint(with: autoAddedLinkIDs) else { continue }
+                        let links = newSnapshot.links.filter { ids.contains($0.id) }
+                        guard !links.isEmpty, links.allSatisfy({ $0.verdict == .online }) else { continue }
+                        autoAddedLinkIDs.formUnion(ids)
+                        let name = package.name
+                        let urls = links.map(\.originalURL)
+                        Task { await controller.addPackage(name: name, urls: urls, startImmediately: true) }
+                    }
                 }
         }
     }

@@ -1,5 +1,6 @@
 import SDMGrabber
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct LinkGrabberView: View {
     @Environment(GrabberController.self) private var controller
