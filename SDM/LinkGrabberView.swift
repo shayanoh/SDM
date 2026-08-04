@@ -3,6 +3,7 @@ import SwiftUI
 
 struct LinkGrabberView: View {
     @Environment(GrabberController.self) private var controller
+    @Environment(EngineController.self) private var engineController
     @State private var activeFilter: VerdictFilter = .all
     @State private var isShowingAddSheet = false
 
@@ -12,13 +13,24 @@ struct LinkGrabberView: View {
             Divider()
             List {
                 ForEach(controller.snapshot.packages, id: \.name) { package in
-                    Section(package.name) {
+                    Section {
                         ForEach(links(in: package)) { link in
                             LinkRow(link: link, controller: controller)
                         }
+                    } header: {
+                        packageHeader(package)
                     }
                 }
             }
+        }
+        .onDrop(of: [.url, .plainText], isTargeted: nil) { providers in
+            for provider in providers {
+                _ = provider.loadObject(ofClass: NSString.self) { object, _ in
+                    guard let text = object as? String else { return }
+                    Task { @MainActor in await controller.ingest(text: text) }
+                }
+            }
+            return true
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -29,6 +41,26 @@ struct LinkGrabberView: View {
             AddLinksSheet()
         }
         .frame(minWidth: 640, minHeight: 420)
+    }
+
+    @ViewBuilder
+    private func packageHeader(_ package: PackageCandidate) -> some View {
+        HStack {
+            Text(package.name)
+            Spacer()
+            Button("Add to downloads") {
+                let urls = controller.urls(inPackageNamed: package.name)
+                let name = package.name
+                Task { await engineController.addPackage(name: name, urls: urls, startImmediately: false) }
+            }
+            .controlSize(.small)
+            Button("Add and start") {
+                let urls = controller.urls(inPackageNamed: package.name)
+                let name = package.name
+                Task { await engineController.addPackage(name: name, urls: urls, startImmediately: true) }
+            }
+            .controlSize(.small)
+        }
     }
 
     private var header: some View {
