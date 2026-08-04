@@ -77,6 +77,16 @@ public struct LinkProber: Sendable {
 
 extension LinkProber {
     fileprivate func sniffIfNeeded(_ link: inout ProbedLink) async {
-        // Stage 2 lands in Task 5.
+        guard deepSniffEnabled, let status = link.statusCode, (200...299).contains(status) else {
+            return
+        }
+        link.stage = .sniffing
+        guard
+            let response = try? await transport.send(
+                ProbeRequest(
+                    url: link.finalURL, method: .get, range: ByteRange(start: 0, end: 65536))
+            )
+        else { return }
+        link.sniffedSignature = FileSignature.detect(in: response.body)
     }
 }
