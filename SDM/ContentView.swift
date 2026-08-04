@@ -11,9 +11,24 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(EngineController.self) private var controller
+    @Environment(GrabberController.self) private var grabberController
     @State private var urlText = ""
 
     var body: some View {
+        TabView {
+            downloadsTab
+                .tabItem { Label("Downloads", systemImage: "arrow.down.circle") }
+            LinkGrabberView()
+                .tabItem { Label("Linkgrabber", systemImage: "link") }
+        }
+        .frame(minWidth: 640, minHeight: 420)
+        .onChange(of: controller.snapshot) { _, newSnapshot in
+            let urls = Set(newSnapshot.packages.flatMap { $0.items.map(\.url) })
+            Task { await grabberController.setKnownDownloadURLs(urls) }
+        }
+    }
+
+    private var downloadsTab: some View {
         VStack(spacing: 0) {
             HStack {
                 TextField("https://example.com/file.bin", text: $urlText)
@@ -50,7 +65,6 @@ struct ContentView: View {
             }
             .padding()
         }
-        .frame(minWidth: 640, minHeight: 420)
     }
 }
 

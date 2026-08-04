@@ -99,6 +99,21 @@ final class EngineController {
         snapshot = await engine.snapshot()
     }
 
+    /// Hands a grabbed package off to the download engine. Spec §7.5's "Add
+    /// to downloads" / "Add and start".
+    func addPackage(name: String, urls: [URL], startImmediately: Bool) async {
+        guard !urls.isEmpty else { return }
+        let items = urls.map { url in
+            DownloadItem(
+                url: url,
+                filename: url.lastPathComponent.isEmpty ? "download" : url.lastPathComponent,
+                isEnabled: startImmediately
+            )
+        }
+        await engine.add(DownloadPackage(name: name, items: items))
+        snapshot = await engine.snapshot()
+    }
+
     /// Shuts the engine down from `applicationWillTerminate`, blocking the
     /// main thread until durable state has actually reached disk.
     ///

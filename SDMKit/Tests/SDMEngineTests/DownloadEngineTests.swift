@@ -702,3 +702,16 @@ private func snapshotItem(_ id: UUID, in engine: DownloadEngine) async -> ItemSn
     let names = await engine.snapshot().packages.flatMap(\.items).map(\.filename).sorted()
     #expect(names == ["live.bin", "stored.bin"])
 }
+
+@Test func snapshotItemCarriesItsSourceURL() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let engine = makeEngine(payload: testPayload(100), folder: dir)
+
+    let url = URL(string: "https://example.com/a.bin")!
+    await engine.add(
+        DownloadPackage(name: "Pkg", items: [DownloadItem(url: url, filename: "a.bin")]))
+
+    let snapshot = await engine.snapshot()
+    #expect(snapshot.packages.first?.items.first?.url == url)
+}

@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		5FAA0004A0B0C0D0E0F00004 /* SDMCore in Frameworks */ = {isa = PBXBuildFile; productRef = 5FAA0002A0B0C0D0E0F00002 /* SDMCore */; };
 		5FAA0005A0B0C0D0E0F00005 /* SDMEngine in Frameworks */ = {isa = PBXBuildFile; productRef = 5FAA0003A0B0C0D0E0F00003 /* SDMEngine */; };
+		5FAA0006A0B0C0D0E0F00006 /* SDMGrabber in Frameworks */ = {isa = PBXBuildFile; productRef = 5FAA0007A0B0C0D0E0F00007 /* SDMGrabber */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -59,6 +60,7 @@
 			files = (
 				5FAA0004A0B0C0D0E0F00004 /* SDMCore in Frameworks */,
 				5FAA0005A0B0C0D0E0F00005 /* SDMEngine in Frameworks */,
+				5FAA0006A0B0C0D0E0F00006 /* SDMGrabber in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -121,6 +123,7 @@
 			packageProductDependencies = (
 				5FAA0002A0B0C0D0E0F00002 /* SDMCore */,
 				5FAA0003A0B0C0D0E0F00003 /* SDMEngine */,
+				5FAA0007A0B0C0D0E0F00007 /* SDMGrabber */,
 			);
 			productName = SDM;
 			productReference = 5F02DCF13020DAA0009E61DC /* SDM.app */;
@@ -601,6 +604,10 @@
 		5FAA0003A0B0C0D0E0F00003 /* SDMEngine */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = SDMEngine;
+		};
+		5FAA0007A0B0C0D0E0F00007 /* SDMGrabber */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SDMGrabber;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

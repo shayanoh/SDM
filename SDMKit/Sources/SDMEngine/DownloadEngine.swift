@@ -293,6 +293,7 @@ public actor DownloadEngine {
                 items.append(
                     ItemSnapshot(
                         id: item.id,
+                        url: item.url,
                         filename: item.filename,
                         totalBytes: totalBytes,
                         completed: completed,
