@@ -6,7 +6,11 @@ macOS download manager. Segmented transfers, resume, clipboard link grabbing, Yo
 
 ## Current state
 
-Pre-implementation. The repo still contains unmodified Xcode boilerplate (`SDM/Item.swift`, the `ModelContainer` in `SDM/SDMApp.swift`, the default `ContentView`). All three are slated for deletion in Phase 1.
+**Phase 1 is complete** (merged 2026-08-04). The engine, scheduler, persistence, and a plain driver UI all work end to end: 163 tests, no network and no real clock anywhere in the suite. The Xcode boilerplate is gone — `SDM/Item.swift`, the `ModelContainer`, and the default `ContentView` were all deleted.
+
+`SDMKit/` is a local SPM package with `SDMCore` and `SDMEngine`, linked into the app target. `SDMGrabber` does not exist yet — it arrives with Phase 2.
+
+Carried but deliberately not enforced yet, all Phase 3: `globalMaxConnections` and per-host caps (settings only), hysteresis (`Scheduler` supports `startedRecently`; `DownloadEngine` passes an empty set), and the full retry design (`RetryPolicy` classifies and computes backoff, and the engine now caps attempts and holds items in backoff, but nothing refreshes an expired URL). Signed-URL refresh on 403 waits on Phase 5's resolver.
 
 ## Fixed decisions
 
@@ -38,9 +42,9 @@ Everything else falls out of this: changing the segment count mid-flight, resumi
 ### Other load-bearing invariants
 
 - **Scheduling is a pure function** re-evaluated on every change, not a queue that's kept in sync. Reordering, priority changes, additions, and completions all flow through it.
-- **Running non-resumable items reserve their slots before rank-based filling.** Skipping this produces unsatisfiable desired sets and thrash.
+- **Running non-resumable items reserve their slots before rank-based filling.** Skipping this produces unsatisfiable desired sets and thrash. `isResumable` is three-state (`Bool?`): `nil` means not yet probed, and the scheduler keys on `== false`, so an unprobed item stays preemptible. Collapsing unknown into "not resumable" makes every running item unpreemptible and silently kills preemption — that bug shipped once already.
 - **Verdict rules and package clustering are pure functions** over value types, with fixture tables. Tune the data, not the control flow.
-- **Views never touch engine actors.** They consume a coalesced snapshot stream (~4 Hz).
+- **Views never touch engine actors.** They consume a coalesced snapshot stream (~4 Hz per spec §4.1; the Phase 1 driver UI republishes at 1 Hz off the heartbeat — raise it when the real UI lands).
 - **Colors come from theme roles, never literals.** macOS-26-only APIs live in one `ViewModifier` file, never inline in views.
 
 ## Phasing
@@ -51,13 +55,15 @@ Everything else falls out of this: changing the segment count mid-flight, resumi
 4. Theming, activation policy modes, Liquid Glass
 5. yt-dlp resolver
 
-Each phase gets its own implementation plan. Currently: **Phase 1 not yet started.**
+Each phase gets its own implementation plan. Currently: **Phase 1 done, Phase 2 not yet started.**
 
 ## Testing
 
 Swift Testing (`@Test` / `#expect`), not XCTest.
 
-The engine takes `HTTPTransport` and `Clock` as injected protocols — tests run against an in-process fake origin with a fake clock. **No test may touch the network or sleep on a real clock.**
+The engine takes `HTTPTransport` as an injected protocol — tests run against `FakeOrigin`, an in-process fake server programmable to misbehave (ignores `Range`, lies about `Content-Length`, drops or truncates the body, changes its `ETag`). **No test may touch the network or sleep on a real clock.**
+
+There is **no injected `Clock`, and no `FakeClock`.** Time-dependent behavior is tick-driven from outside instead: `DownloadEngine.tick()` is called once per second by the app and drives telemetry, rescheduling, checkpoint staleness, retry backoff, and the debounced state flush. Tests advance time by calling `tick()` directly, which pins "fires on tick N and not before" far more precisely than a fake clock would. Keep new time-dependent behavior on the tick rather than reaching for a clock.
 
 The two properties that must never regress:
 
