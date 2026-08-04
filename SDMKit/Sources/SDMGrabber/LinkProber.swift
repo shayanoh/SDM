@@ -12,8 +12,14 @@ public struct LinkProber: Sendable {
         self.deepSniffEnabled = deepSniffEnabled
     }
 
-    public func probe(_ url: URL) async -> ProbedLink {
-        var link = ProbedLink(originalURL: url, stage: .probing)
+    /// `id` defaults to a fresh UUID for callers that don't need continuity
+    /// with an existing record. `GrabberSession` passes its own tracking id
+    /// explicitly so the returned `ProbedLink.id` matches the dictionary key
+    /// it's merged back under — otherwise the link's own identity would
+    /// silently diverge from the id everything else (snapshots, removal,
+    /// manual overrides) uses to look it up.
+    public func probe(_ url: URL, id: UUID = UUID()) async -> ProbedLink {
+        var link = ProbedLink(id: id, originalURL: url, stage: .probing)
 
         do {
             let response = try await stageOneResponse(for: url)

@@ -22,6 +22,7 @@ public actor GrabberSession {
     private var seenURLs: Set<URL> = []
     var knownDownloadURLs: Set<URL> = []
     private var packages: [PackageCandidate] = []
+    private var manualOverrides: [UUID: String] = [:]
 
     public init(prober: LinkProber, budget: Budget = Budget()) {
         self.prober = prober
@@ -58,6 +59,32 @@ public actor GrabberSession {
         )
     }
 
+    /// Refreshes which grabbed links are already in the download list.
+    /// Spec §7.5: badged as duplicates, never silently dropped.
+    public func setKnownDownloadURLs(_ urls: Set<URL>) {
+        knownDownloadURLs = urls
+        for id in order {
+            guard let url = links[id]?.originalURL else { continue }
+            links[id]?.isDuplicate = urls.contains(url)
+        }
+    }
+
+    public func removeLink(_ id: UUID) {
+        guard let link = links.removeValue(forKey: id) else { return }
+        seenURLs.remove(link.originalURL)
+        order.removeAll { $0 == id }
+        manualOverrides[id] = nil
+        recluster()
+    }
+
+    /// Forces a link into a named package, overriding automatic clustering.
+    /// Spec §7.4: "All of it is fully overridable."
+    public func moveLink(_ id: UUID, toPackageNamed name: String) {
+        guard links[id] != nil else { return }
+        manualOverrides[id] = name
+        recluster()
+    }
+
     // MARK: - Probing
 
     /// Launches probes for `ids` under the global and per-host caps, one
@@ -91,7 +118,9 @@ public actor GrabberSession {
                     hostCounts[entry.host, default: 0] += 1
                     active += 1
                     links[entry.id]?.stage = .probing
-                    group.addTask { [prober] in (entry.id, await prober.probe(entry.url)) }
+                    group.addTask { [prober] in
+                        (entry.id, await prober.probe(entry.url, id: entry.id))
+                    }
                 }
             }
 
@@ -118,6 +147,20 @@ public actor GrabberSession {
             return ClusterableLink(
                 id: id, filename: link.effectiveFilename, host: host, directoryPath: directoryPath)
         }
-        packages = PackageClustering.cluster(clusterable)
+        var candidates = PackageClustering.cluster(clusterable)
+
+        guard !manualOverrides.isEmpty else {
+            packages = candidates
+            return
+        }
+        for (id, name) in manualOverrides {
+            for index in candidates.indices { candidates[index].linkIDs.removeAll { $0 == id } }
+            if let index = candidates.firstIndex(where: { $0.name == name }) {
+                candidates[index].linkIDs.append(id)
+            } else {
+                candidates.append(PackageCandidate(name: name, linkIDs: [id]))
+            }
+        }
+        packages = candidates.filter { !$0.linkIDs.isEmpty }
     }
 }
