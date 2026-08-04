@@ -28,47 +28,48 @@ import Testing
     #expect(!set.isComplete(total: 100))
 }
 
-@Test func firstClaimTakesFirstHalfOfWholeFile() {
-    let claim = RangeSet().nextClaim(total: 1000, reserved: [], minChunk: 10)
-    #expect(claim == ByteRange(start: 0, end: 500))
+@Test func firstClaimTakesTheWholeFile() {
+    // No pre-emptive halving: a fresh claim takes the entire free gap.
+    // Splitting only happens later, on demand, when another worker needs
+    // work and none is free — see `DownloadTask`'s stealing logic.
+    let claim = RangeSet().nextClaim(total: 1000, reserved: [])
+    #expect(claim == ByteRange(start: 0, end: 1000))
 }
 
-@Test func secondClaimAvoidsReservedRange() {
+@Test func secondClaimTakesTheWholeRemainderPastAReservedRange() {
     let claim = RangeSet().nextClaim(
         total: 1000,
-        reserved: [ByteRange(start: 0, end: 500)],
-        minChunk: 10
+        reserved: [ByteRange(start: 0, end: 500)]
     )
-    #expect(claim == ByteRange(start: 500, end: 750))
+    #expect(claim == ByteRange(start: 500, end: 1000))
 }
 
 @Test func smallGapIsTakenWhole() {
-    let claim = RangeSet().nextClaim(total: 15, reserved: [], minChunk: 10)
+    let claim = RangeSet().nextClaim(total: 15, reserved: [])
     #expect(claim == ByteRange(start: 0, end: 15))
 }
 
 @Test func claimPrefersLargestGap() {
     let set = RangeSet([ByteRange(start: 100, end: 200)])
-    let claim = set.nextClaim(total: 1000, reserved: [], minChunk: 10)
-    #expect(claim == ByteRange(start: 200, end: 600))
+    let claim = set.nextClaim(total: 1000, reserved: [])
+    #expect(claim == ByteRange(start: 200, end: 1000))
 }
 
 @Test func noClaimWhenEverythingIsDoneOrReserved() {
     let set = RangeSet([ByteRange(start: 0, end: 500)])
     let claim = set.nextClaim(
         total: 1000,
-        reserved: [ByteRange(start: 500, end: 1000)],
-        minChunk: 10
+        reserved: [ByteRange(start: 500, end: 1000)]
     )
     #expect(claim == nil)
 }
 
-@Test func claimSkipsFragmentedHolesLeftByRetiredWorkers() {
+@Test func claimSkipsFragmentedHolesLeftByRetiredWorkersPreferringTheLowerStartOnATie() {
     let set = RangeSet([
         ByteRange(start: 0, end: 100),
         ByteRange(start: 150, end: 400),
         ByteRange(start: 450, end: 1000),
     ])
-    let claim = set.nextClaim(total: 1000, reserved: [], minChunk: 10)
-    #expect(claim == ByteRange(start: 100, end: 125))
+    let claim = set.nextClaim(total: 1000, reserved: [])
+    #expect(claim == ByteRange(start: 100, end: 150))
 }

@@ -21,7 +21,16 @@ import Testing
     #expect(try Data(contentsOf: result) == payload)
 }
 
-@Test func multipleWorkersActuallyRequestDisjointRanges() async throws {
+/// A worker's *requested* HTTP range can legitimately overlap another's once
+/// claims can be split mid-flight: a claim stolen from a busy worker (see
+/// `DownloadTask.claimNext`) shrinks that worker's live write boundary
+/// without touching the wide `Range` header it already sent — the point of
+/// stealing is to avoid re-issuing that request, not to keep requests
+/// disjoint. What must stay disjoint is what actually lands on disk, which
+/// `task.writeLog` (test-only) records directly from `record()`, independent
+/// of `completedRanges` — `RangeSet.insert` would silently merge away an
+/// overlap rather than reveal one.
+@Test func multipleWorkersNeverWriteOverlappingBytes() async throws {
     let dir = try makeScratchDirectory()
     defer { try? FileManager.default.removeItem(at: dir) }
 
@@ -35,16 +44,15 @@ import Testing
     )
     _ = try await task.start()
 
-    // Drop the 1-byte probe request from prepare().
-    let claims = await origin.requestedRanges.filter { $0.length > 1 }
-    #expect(claims.count > 1)
+    let written = await task.writeLog
+    #expect(written.count > 1)
 
     var seen = RangeSet()
-    for claim in claims {
+    for range in written {
         for other in seen.ranges {
-            #expect(claim.start >= other.end || claim.end <= other.start)
+            #expect(range.start >= other.end || range.end <= other.start)
         }
-        seen.insert(claim)
+        seen.insert(range)
     }
 }
 
@@ -101,6 +109,70 @@ import Testing
     // Byte identity alone would pass even if the raise were a no-op; the peak
     // is what proves extra workers were actually spawned and ran.
     #expect(await task.peakWorkerCount > 2)
+}
+
+/// Spec §5.1: a fresh claim takes the whole free gap, so a single worker
+/// downloading a file owns *all* of it — there is no free remainder left
+/// for a raise to hand a second worker the ordinary way. The only source of
+/// work for that second worker is stealing the unwritten tail of the first
+/// worker's claim. This proves that happens, and — the part that matters
+/// most — that the original worker's in-flight request is never restarted:
+/// once its claim is stolen from, it keeps streaming the same request it
+/// already had open, just stopping early where its shrunk claim ends. Once
+/// both workers are down to small remainders they will legitimately keep
+/// stealing from each other to finish the file (spec's "a freed-up worker
+/// steals from a still-busy sibling" case), so this doesn't assert an exact
+/// request count — only that the range starting at byte 0 was ever
+/// requested once, proving that specific claim was never reissued.
+@Test func raisingFromOneWorkerStealsHalfOfTheSoleInFlightClaimWithoutRestartingIt() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+
+    let payload = testPayload(50_000)
+    var behavior = FakeOrigin.Behavior()
+    behavior.chunkSize = 256
+    let origin = FakeOrigin(payload: payload, behavior: behavior)
+    let task = DownloadTask(
+        id: UUID(),
+        sourceURL: testSourceURL,
+        destinationURL: dir.appendingPathComponent("out.bin"),
+        transport: origin,
+        configuration: .test(workers: 1, minChunk: 64)
+    )
+
+    async let result = task.start()
+
+    var spins = 0
+    while await task.activeWorkerCount < 1, spins < 100_000 {
+        await Task.yield()
+        spins += 1
+    }
+    #expect(spins < 100_000)
+
+    await task.setWorkerCount(2)
+    #expect(try await Data(contentsOf: result) == payload)
+    #expect(await task.peakWorkerCount == 2)
+
+    // At least the original claim plus the steal that split it; possibly
+    // more, from the two workers repeatedly stealing from each other as
+    // they run down to the last bytes.
+    let claims = await origin.requestedRanges.filter { $0.length > 1 }
+    #expect(claims.count >= 2)
+
+    // The byte-0 claim was requested exactly once — a restart would show up
+    // as a second, later request also starting at 0.
+    #expect(claims.filter { $0.start == 0 }.count == 1)
+
+    // What was actually written must still be strictly disjoint even though
+    // the first worker's *request* spans the whole file.
+    let written = await task.writeLog
+    var seen = RangeSet()
+    for range in written {
+        for other in seen.ranges {
+            #expect(range.start >= other.end || range.end <= other.start)
+        }
+        seen.insert(range)
+    }
 }
 
 @Test(arguments: [1, 2, 3, 7, 13, 32])

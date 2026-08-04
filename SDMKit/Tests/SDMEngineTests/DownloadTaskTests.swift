@@ -60,9 +60,9 @@ import Testing
     let dir = try makeScratchDirectory()
     defer { try? FileManager.default.removeItem(at: dir) }
 
-    // With a 100-byte payload and minChunk 64, nextClaim's `<= 2*minChunk`
-    // rule hands the whole file out as a single claim, so the truncation
-    // point below lands inside that one claim rather than at its edge.
+    // A single worker's claim is always the whole free gap now, so with a
+    // 100-byte payload the truncation point below lands inside that one
+    // claim rather than at its edge.
     var behavior = FakeOrigin.Behavior()
     behavior.truncateAfterBytes = 50
     let task = DownloadTask(

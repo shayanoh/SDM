@@ -51,13 +51,9 @@ private func downloadPartially(
     let destination = dir.appendingPathComponent("out.bin")
     let payload = testPayload(8000)
 
-    // NOTE: 3000, not 4000. With this payload/config, `RangeSet.nextClaim`'s
-    // halving policy hands the single worker a first claim of exactly
-    // [0, 4000) — 4000 bytes. `dropAfterBytes: 4000` would then equal the
-    // request length exactly, and `FakeOrigin`'s drop check
-    // (`emitted + chunkLen > limit`) is strict, so it never fires: the
-    // "partial" download would actually complete in full. 3000 is strictly
-    // inside the first claim, so the interruption is real.
+    // Any value strictly inside [0, 8000) works now that a single worker's
+    // claim is always the whole file rather than half of it; 3000 keeps a
+    // healthy margin from both ends.
     try await downloadPartially(payload: payload, destination: destination, stopAfter: 3000)
     let carried = ResumeSidecar.load(from: ResumeSidecar.url(for: destination))!
     #expect(carried.completed.totalBytes > 0)

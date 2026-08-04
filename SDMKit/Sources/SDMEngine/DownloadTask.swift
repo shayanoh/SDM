@@ -51,6 +51,13 @@ public actor DownloadTask {
 
     private var completed = RangeSet()
     private var reserved: [UUID: ByteRange] = [:]
+    /// Absolute byte offset each busy worker has written up to within its
+    /// own `reserved` claim. Lets `claimNext` compute, for any in-flight
+    /// worker, exactly how much of its claim is still unwritten — the
+    /// `RangeSet` alone cannot answer that, since `completed` only ever
+    /// records finished ranges, not a worker's live progress through a
+    /// range it has not finished yet.
+    private var writeCursor: [UUID: Int64] = [:]
     private var totalBytes: Int64 = 0
     private var validator: String?
     private var file: SparseFile?
@@ -388,41 +395,29 @@ public actor DownloadTask {
         wakeContinuation = nil
     }
 
-    /// The `minChunk` passed to `nextClaim`. Ordinarily the configured
-    /// value, so large gaps get split across multiple in-flight claims; but
-    /// when the origin doesn't honor `Range`, every response starts at byte
-    /// 0 regardless of what was requested, so a non-zero-start claim would
-    /// misalign the write offset against the response and corrupt the file.
-    /// Forcing this up to `totalBytes` makes `nextClaim` hand back exactly
-    /// one claim spanning the whole remaining gap — always starting at 0 for
-    /// a fresh (never-resumed, per `prepare()`) download. Shared by
-    /// `claimNext` and `hasWorkRemaining` so the two can't drift out of sync
-    /// on the same nil-vs-non-nil decision.
-    private var effectiveMinChunk: Int64 {
-        acceptsRanges ? configuration.minChunk : totalBytes
-    }
-
     private func hasWorkRemaining() -> Bool {
-        completed.nextClaim(
-            total: totalBytes,
-            reserved: Array(reserved.values),
-            minChunk: effectiveMinChunk
-        ) != nil
+        if completed.nextClaim(total: totalBytes, reserved: Array(reserved.values)) != nil {
+            return true
+        }
+        return stealableRemainder() != nil
     }
 
-    /// One worker: claim a gap, stream it to disk, repeat until the file is
-    /// done or this worker is retired by a lowered target count.
+    /// One worker: claim a gap (or steal one — see `claimNext`), stream it
+    /// to disk, repeat until the file is done or this worker is retired by
+    /// a lowered target count.
     private func workerLoop(index: Int) async throws {
         let workerID = UUID()
         defer {
             reserved[workerID] = nil
+            writeCursor[workerID] = nil
             liveWorkerIndices.remove(index)
         }
 
         while !shouldRetire(index: index) {
             guard let claim = claimNext(for: workerID) else { return }
-            try await download(claim)
+            try await download(claim, workerID: workerID)
             reserved[workerID] = nil
+            writeCursor[workerID] = nil
         }
     }
 
@@ -449,19 +444,58 @@ public actor DownloadTask {
         if isRaise { signalWake() }
     }
 
+    /// Hands `workerID` its next unit of work: a free gap if one exists,
+    /// otherwise a slice stolen from whichever busy worker has the largest
+    /// unwritten remainder. Spec §5.1: there should be no unclaimed,
+    /// unreserved bytes sitting idle while a worker wants work — a fresh
+    /// free gap is claimed whole (`RangeSet.nextClaim`), and once every
+    /// remaining byte is already reserved, further parallelism comes
+    /// entirely from splitting the biggest claim still in flight.
     private func claimNext(for workerID: UUID) -> ByteRange? {
-        guard
-            let claim = completed.nextClaim(
-                total: totalBytes,
-                reserved: Array(reserved.values),
-                minChunk: effectiveMinChunk
-            )
-        else { return nil }
+        if let claim = completed.nextClaim(total: totalBytes, reserved: Array(reserved.values)) {
+            reserved[workerID] = claim
+            return claim
+        }
+
+        guard let (victimID, remainder) = stealableRemainder() else { return nil }
+        let mid = remainder.start + remainder.length / 2
+        if let victimClaim = reserved[victimID] {
+            // Shrinks the victim's own claim in place; its `download` loop
+            // reads this live on every iteration (see below) and stops
+            // exactly at `mid` instead of continuing into bytes this new
+            // claim now owns. The victim's in-flight request is never
+            // touched — no restart, just an early stop once its region ends.
+            reserved[victimID] = ByteRange(start: victimClaim.start, end: mid)
+        }
+        let claim = ByteRange(start: mid, end: remainder.end)
         reserved[workerID] = claim
         return claim
     }
 
-    private func download(_ claim: ByteRange) async throws {
+    /// The largest unwritten remainder of any other busy worker's claim,
+    /// provided it is large enough to be worth splitting — same floor
+    /// `nextClaim` used to apply to fresh gaps, now applied only where
+    /// splitting actually happens. `nil` when nothing is stealable, either
+    /// because every busy worker is nearly done or because the origin
+    /// doesn't support `Range` (splitting a single non-ranged claim would
+    /// hand the new claim a non-zero start against an origin whose
+    /// responses always begin at byte 0, corrupting the file).
+    private func stealableRemainder() -> (workerID: UUID, remainder: ByteRange)? {
+        guard acceptsRanges else { return nil }
+        var best: (UUID, ByteRange)?
+        for (otherID, claim) in reserved {
+            let cursor = writeCursor[otherID] ?? claim.start
+            guard cursor < claim.end else { continue }
+            let remainder = ByteRange(start: cursor, end: claim.end)
+            guard remainder.length > configuration.minChunk * 2 else { continue }
+            if best == nil || remainder.length > best!.1.length {
+                best = (otherID, remainder)
+            }
+        }
+        return best.map { (workerID: $0.0, remainder: $0.1) }
+    }
+
+    private func download(_ claim: ByteRange, workerID: UUID) async throws {
         let response = try await transport.fetch(RangeRequest(url: sourceURL, range: claim))
         guard (200..<300).contains(response.statusCode) else {
             throw DownloadError.serverError(status: response.statusCode)
@@ -469,9 +503,15 @@ public actor DownloadTask {
 
         var offset = claim.start
         for try await chunk in response.body {
-            // A Range-ignoring origin sends the whole body; discard anything
-            // past the claim rather than writing outside it.
-            guard offset < claim.end else { break }
+            // The live end of this claim, not the one captured when the
+            // request was issued: another worker may have stolen this
+            // claim's unwritten tail since (`claimNext` above), shrinking
+            // `reserved[workerID]`. Reading it fresh each iteration is what
+            // lets this worker notice and stop exactly at the new boundary
+            // — the same mechanism a Range-ignoring origin's whole-body
+            // response already relies on to stop at the original claim end.
+            let effectiveEnd = reserved[workerID]?.end ?? claim.end
+            guard offset < effectiveEnd else { break }
             // `file` goes nil the instant `pause()` runs; that's an
             // actor-isolated assignment, so it can only land between
             // iterations of this loop, never inside one. Bind it locally so
@@ -481,21 +521,27 @@ public actor DownloadTask {
             // `file?.write` here would silently no-op while `record` still
             // ran — recording bytes that were never durably written.
             guard let file else { break }
-            let writable = Swift.min(Int64(chunk.count), claim.end - offset)
+            let writable = Swift.min(Int64(chunk.count), effectiveEnd - offset)
             let slice = chunk.prefix(Int(writable))
             try file.write(Data(slice), at: offset)
             record(ByteRange(start: offset, end: offset + writable))
             offset += writable
+            writeCursor[workerID] = offset
         }
 
         // The stream ended cleanly (no throw) but didn't cover the whole
-        // claim — a truncated body. Bytes written so far are already on
-        // disk and folded into `completed` above; make the short read a
-        // defined failure instead of silently re-handing the same gap back
-        // to `nextClaim` forever.
-        guard offset >= claim.end else {
+        // (possibly shrunk) claim — a truncated body. Bytes written so far
+        // are already on disk and folded into `completed` above; make the
+        // short read a defined failure instead of silently re-handing the
+        // same gap back to `nextClaim` forever. Reading the end live again
+        // here — rather than reusing `effectiveEnd` from inside the loop —
+        // is what tells a genuine truncation (offset short of the current
+        // live end) apart from a clean stop at a boundary another worker
+        // just stole (offset exactly at the current live end).
+        let finalEnd = reserved[workerID]?.end ?? claim.end
+        guard offset >= finalEnd else {
             throw DownloadError.truncatedResponse(
-                expected: claim.end - claim.start,
+                expected: finalEnd - claim.start,
                 received: offset - claim.start
             )
         }
@@ -505,11 +551,23 @@ public actor DownloadTask {
     /// the sidecar every `checkpointInterval` bytes.
     private func record(_ range: ByteRange) {
         completed.insert(range)
+        #if DEBUG
+            writeLog.append(range)
+        #endif
         bytesSinceCheckpoint += range.length
         if bytesSinceCheckpoint >= configuration.checkpointInterval {
             checkpoint()
         }
     }
+
+    #if DEBUG
+        /// Every byte range actually written to disk, in the order `record()`
+        /// saw them. Test-only: once claims can be split mid-flight,
+        /// `completedRanges` alone can't prove two workers never wrote the
+        /// same byte, because `RangeSet.insert` silently merges overlapping
+        /// ranges rather than rejecting them. This is the direct witness.
+        public private(set) var writeLog: [ByteRange] = []
+    #endif
 
     /// Drives the wall-clock half of spec §4.3's checkpoint trigger: "every
     /// ~8 MB per worker or every 5 s, whichever comes first." `record`

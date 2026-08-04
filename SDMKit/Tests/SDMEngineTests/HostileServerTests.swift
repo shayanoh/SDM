@@ -44,16 +44,13 @@ import Testing
     )
 
     // `reportedSizeOverride` makes the probe claim 9999 bytes while the
-    // actual payload is 1000. The single worker's first claim (half of the
-    // reported 9999) asks for 0..4999; FakeOrigin clips the slice to the
-    // real payload and ends the stream cleanly at byte 1000 — a clean short
-    // read, which `download(_:)` already reports precisely as
-    // `.truncatedResponse`. That is a more specific, and correct, failure
-    // than the generic `.incompleteAfterWorkersFinished` the original brief
-    // predates (written before Task 9 introduced `.truncatedResponse`); see
-    // the task report for details.
+    // actual payload is 1000. `nextClaim` no longer halves — the single
+    // worker's first (and only) claim is the whole reported gap, 0..9999;
+    // FakeOrigin clips the slice to the real payload and ends the stream
+    // cleanly at byte 1000 — a clean short read, which `download(_:)`
+    // reports precisely as `.truncatedResponse`.
     await #expect(
-        throws: DownloadError.truncatedResponse(expected: 4999, received: 1000)
+        throws: DownloadError.truncatedResponse(expected: 9999, received: 1000)
     ) {
         _ = try await task.start()
     }

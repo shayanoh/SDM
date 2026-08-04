@@ -76,32 +76,30 @@ extension RangeSet {
         gaps(within: total).isEmpty
     }
 
-    /// Selects the next range for an idle worker to download.
+    /// Selects the next free range for an idle worker to download.
     ///
-    /// Takes the largest gap not already reserved by an active worker. Gaps of
-    /// at most `2 * minChunk` are taken whole; larger gaps are halved so other
-    /// workers can claim the remainder.
+    /// Takes the *entire* largest gap not already reserved by an active
+    /// worker — no pre-emptive halving. There should never be free,
+    /// unclaimed bytes sitting idle while a worker wants work: everything
+    /// incomplete is either being downloaded or immediately claimed whole.
+    /// Splitting only happens on demand, when a worker needs work and every
+    /// remaining byte is already reserved by someone else — that is
+    /// `DownloadTask`'s claim-stealing logic, which needs live per-worker
+    /// write progress this pure, `completed`-only function has no way to
+    /// see.
     ///
     /// - Parameter reserved: ranges currently held by active workers.
-    /// - Returns: the claimed range, or `nil` when no work remains.
+    /// - Returns: the claimed range, or `nil` when no free gap remains.
     public func nextClaim(
         total: Int64,
-        reserved: [ByteRange],
-        minChunk: Int64
+        reserved: [ByteRange]
     ) -> ByteRange? {
-        precondition(minChunk > 0, "minChunk must be positive, got \(minChunk)")
-
         var blocked = self
         for range in reserved { blocked.insert(range) }
 
         let free = blocked.gaps(within: total)
-        guard
-            let target = free.max(by: {
-                $0.length == $1.length ? $0.start > $1.start : $0.length < $1.length
-            })
-        else { return nil }
-
-        if target.length <= minChunk * 2 { return target }
-        return ByteRange(start: target.start, end: target.start + target.length / 2)
+        return free.max(by: {
+            $0.length == $1.length ? $0.start > $1.start : $0.length < $1.length
+        })
     }
 }

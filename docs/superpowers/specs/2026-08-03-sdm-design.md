@@ -64,12 +64,18 @@ Checkpointed every ~8 MB per worker or every 5 s, whichever comes first, plus on
 
 **A file's progress is a `RangeSet` of completed byte ranges. Segments are ephemeral workers, not stored structure.** This is the load-bearing decision of the whole design.
 
-Each download owns a `RangeSet` and a **worker pool of size N** (the segment-count setting). An idle worker claims work by locating the largest remaining gap and taking a slice of it — halving it if large, taking the whole gap if under a floor of ~1 MB so the system never devolves into thousands of tiny requests. Each worker issues a ranged `GET`, writes bytes at their absolute offset via `pwrite` into the preallocated `.incomplete` file, and reports completed intervals back into the set.
+Each download owns a `RangeSet` and a **worker pool of size N** (the segment-count setting). An idle worker claims work in two steps, tried in order:
+
+1. **Claim a free gap, whole.** If any byte is neither completed nor already claimed by another worker, the idle worker takes the entire largest such gap — no pre-emptive halving. There is deliberately never a moment where claimable bytes sit idle and unclaimed while a worker wants work.
+2. **Steal, only once nothing is free.** Once every remaining byte is already claimed by someone, the idle worker splits the *largest unwritten remainder* of whichever busy worker holds the most: it takes the second half, and the victim's own claim shrinks to the first half in place. The victim's in-flight request is never restarted — its worker loop re-reads its own (possibly now-shrunk) claim boundary on every chunk and simply stops writing, and requesting, once it reaches the new edge, the same way it already has to stop early against an origin that ignores `Range` and sends the whole body. A remainder below a floor of ~1 MB is left alone rather than split, so the system never devolves into thousands of tiny requests.
+
+Each worker issues a ranged `GET`, writes bytes at their absolute offset via `pwrite` into the preallocated `.incomplete` file, and reports completed intervals back into the set.
 
 ### 5.2 Consequences
 
-- **Raising N** — new workers spawn and claim gaps immediately.
-- **Lowering N** (e.g. 100 → 3) — surplus workers finish their current claim, report it, and retire. The remaining workers chew through the fragmented holes left behind, because holes are simply gaps in the interval set; nothing records or cares which worker count produced them.
+- **Raising N** — new workers spawn. If a free gap exists they claim it directly; if every byte is already claimed (the common case once a download is under way), they steal from whichever worker holds the most, splitting its claim in place rather than waiting for it to finish.
+- **Lowering N** (e.g. 100 → 3) — surplus workers finish their current claim, report it, and retire. The remaining workers pick up whatever is left the same way any idle worker does — a free gap if one exists, otherwise stealing from a sibling — so a lowered count never leaves reachable bytes stranded in a retired worker's abandoned claim.
+- **A worker that finishes its own claim early, while others are still busy** — it loops back through the same two-step claim exactly as a newly raised worker would; nothing distinguishes "new worker" from "worker that just went idle" in this scheduling. Stealing from a still-busy sibling is how it gets more work instead of sitting retired with the pool under target.
 - **Resume after quit or crash** — identical code path. Load the set from the sidecar, spawn N workers, they claim the gaps. Resume is not a special mode; it is the normal loop starting from a non-empty set.
 - **The progress bar is a direct render of the `RangeSet`** (see §9.4).
 
