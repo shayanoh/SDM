@@ -5,6 +5,7 @@ import SDMCore
 /// rather than touching engine actors. See spec §5.4 and §9.6.
 public struct ItemSnapshot: Sendable, Equatable, Identifiable {
     public let id: UUID
+    public let url: URL
     public let filename: String
     public let totalBytes: Int64?
     public let completed: RangeSet
@@ -27,6 +28,7 @@ public struct ItemSnapshot: Sendable, Equatable, Identifiable {
 
     public init(
         id: UUID,
+        url: URL,
         filename: String,
         totalBytes: Int64?,
         completed: RangeSet,
@@ -41,6 +43,7 @@ public struct ItemSnapshot: Sendable, Equatable, Identifiable {
     ) {
         self.checkpointFailure = checkpointFailure
         self.id = id
+        self.url = url
         self.filename = filename
         self.totalBytes = totalBytes
         self.completed = completed
