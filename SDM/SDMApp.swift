@@ -124,7 +124,10 @@ struct SDMApp: App {
     /// fixed-size `NSImage` via `ImageRenderer` sidesteps that: the label
     /// only ever sees a plain bitmap at the exact size we ask for.
     private var statusItemImage: NSImage {
-        let renderer = ImageRenderer(content: MenuBarRingIcon(fraction: overallFraction))
+        let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        let theme = themeStore.resolved(for: isDark ? .dark : .light)
+        let renderer = ImageRenderer(
+            content: MenuBarRingIcon(fraction: overallFraction, theme: theme))
         renderer.scale = 2
         return renderer.nsImage ?? NSImage()
     }

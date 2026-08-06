@@ -1,3 +1,4 @@
+import SDMCore
 import SDMGrabber
 import SwiftUI
 import UniformTypeIdentifiers
@@ -5,11 +6,15 @@ import UniformTypeIdentifiers
 struct LinkGrabberView: View {
     @Environment(GrabberController.self) private var controller
     @Environment(EngineController.self) private var engineController
+    @Environment(ThemeStore.self) private var themeStore
+    @Environment(\.colorScheme) private var colorScheme
     @State private var activeFilter: VerdictFilter = .all
     @State private var isShowingAddSheet = false
     @State private var isShowingRenameAlert = false
     @State private var renamingPackage = ""
     @State private var newPackageName = ""
+
+    private var theme: Theme { themeStore.resolved(for: colorScheme) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -19,7 +24,7 @@ struct LinkGrabberView: View {
                 ForEach(controller.snapshot.packages, id: \.name) { package in
                     Section {
                         ForEach(links(in: package)) { link in
-                            LinkRow(link: link, controller: controller)
+                            LinkRow(link: link, controller: controller, theme: theme)
                                 .draggable(DraggedLinkID(linkID: link.id))
                         }
                     } header: {
@@ -109,7 +114,7 @@ struct LinkGrabberView: View {
             HStack(spacing: 12) {
                 Text("\(snapshot.checkedCount) / \(snapshot.totalCount) checked")
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.textSecondaryColor)
                 Spacer()
                 filterChip(.online, count: snapshot.onlineCount)
                 filterChip(.faulty, count: snapshot.faultyCount)
@@ -128,7 +133,7 @@ struct LinkGrabberView: View {
                 .font(.caption)
         }
         .buttonStyle(.bordered)
-        .tint(activeFilter == filter ? .accentColor : .secondary)
+        .tint(activeFilter == filter ? theme.accentColor : theme.textSecondaryColor)
     }
 
     /// Hands the package's links to the engine, then clears them out of the
@@ -184,6 +189,7 @@ enum VerdictFilter: Equatable {
 private struct LinkRow: View {
     let link: ProbedLink
     let controller: GrabberController
+    let theme: Theme
 
     var body: some View {
         HStack {
@@ -191,7 +197,7 @@ private struct LinkRow: View {
             if link.isDuplicate {
                 Text("duplicate")
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(theme.faultyColor)
             }
             Spacer()
             verdictBadge
@@ -210,20 +216,20 @@ private struct LinkRow: View {
     private var verdictBadge: some View {
         switch link.verdict {
         case .online:
-            Text("online").font(.caption).foregroundStyle(.green)
+            Text("online").font(.caption).foregroundStyle(theme.onlineColor)
         case .offline:
-            Text("offline").font(.caption).foregroundStyle(.secondary)
+            Text("offline").font(.caption).foregroundStyle(theme.offlineColor)
         case .checkFailed:
-            Text("check failed").font(.caption).foregroundStyle(.secondary)
+            Text("check failed").font(.caption).foregroundStyle(theme.failedColor)
         case .faulty(let reason):
             // Spec §7.3: the faulty reason *is* the badge text.
-            Text(reason).font(.caption).foregroundStyle(.red)
+            Text(reason).font(.caption).foregroundStyle(theme.faultyColor)
         case nil:
             // No verdict yet: spec §7.5's queued → probing → sniffing → done
             // per-link state, shown literally rather than a bare spinner.
             HStack(spacing: 4) {
                 ProgressView().controlSize(.small)
-                Text(stageLabel).font(.caption).foregroundStyle(.secondary)
+                Text(stageLabel).font(.caption).foregroundStyle(theme.textSecondaryColor)
             }
         }
     }

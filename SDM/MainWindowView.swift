@@ -21,6 +21,7 @@ struct MainWindowView: View {
     @Environment(ThemeStore.self) private var themeStore
     @Environment(\.colorScheme) private var colorScheme
     @Binding var selection: SidebarItem?
+    private var theme: Theme { themeStore.resolved(for: colorScheme) }
     @State private var selectedItemIDs: Set<UUID> = []
     @State private var selectedCompletedItemIDs: Set<UUID> = []
     @State private var collapsedPackageIDs: Set<UUID> = []
@@ -138,13 +139,17 @@ struct MainWindowView: View {
             if activeCount == 0 {
                 Text("No running downloads")
                     .font(.headline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.textSecondaryColor)
             } else {
                 Text(formatted(controller.snapshot.globalBytesPerSecond)).font(
                     .headline.monospacedDigit())
             }
-            BandwidthGraph(history: controller.snapshot.globalHistory).frame(height: 40)
-            Text("\(activeCount) active").font(.caption).foregroundStyle(.secondary)
+            BandwidthGraph(
+                history: controller.snapshot.globalHistory, strokeColor: theme.graphStrokeColor,
+                averageStrokeColor: theme.graphAverageStrokeColor
+            )
+            .frame(height: 40)
+            Text("\(activeCount) active").font(.caption).foregroundStyle(theme.textSecondaryColor)
         }
         .padding(.vertical, 4)
     }

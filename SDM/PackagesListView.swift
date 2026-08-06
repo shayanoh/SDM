@@ -26,9 +26,13 @@ struct PackagesListView: View {
     let showsPauseResumeButton: Bool
 
     @Environment(EngineController.self) private var controller
+    @Environment(ThemeStore.self) private var themeStore
+    @Environment(\.colorScheme) private var colorScheme
     @Binding var selectedItemIDs: Set<UUID>
     @Binding var collapsedPackageIDs: Set<UUID>
     @Binding var pendingDeletion: MainWindowView.PendingDeletion?
+
+    private var theme: Theme { themeStore.resolved(for: colorScheme) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -85,7 +89,7 @@ struct PackagesListView: View {
     private func itemRow(_ item: ItemSnapshot, index: Int) -> some View {
         ItemRow(
             item: item, index: index, controller: controller,
-            isSelected: selectedItemIDs.contains(item.id)
+            isSelected: selectedItemIDs.contains(item.id), theme: theme
         )
         .tag(item.id)
         .contextMenu {
@@ -147,8 +151,7 @@ struct PackagesListView: View {
     /// one shade further from the base so a header reads as visually
     /// heavier than the rows beneath it.
     private func packageHeaderBackground(index: Int) -> Color {
-        Color(nsColor: .underPageBackgroundColor)
-            .opacity(index.isMultiple(of: 2) ? 0.5 : 0.9)
+        theme.surfaceSecondaryColor.opacity(index.isMultiple(of: 2) ? 0.5 : 0.9)
     }
 
     @ViewBuilder
@@ -161,11 +164,11 @@ struct PackagesListView: View {
                         "\(formattedBytes(package.completedBytes)) / \(formattedBytes(package.totalBytes))"
                     )
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.textSecondaryColor)
                     .monospacedDigit()
                 }
                 Spacer()
-                Sparkline(samples: package.bytesPerSecondHistory)
+                Sparkline(samples: package.bytesPerSecondHistory, color: theme.graphStrokeColor)
                     .frame(width: 60, height: 20)
             }
             .padding(.vertical, 4)
@@ -297,7 +300,7 @@ struct PackagesListView: View {
                 .font(.title3.monospacedDigit())
             Spacer()
             Text("\(packages.count) packages")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.textSecondaryColor)
         }
         .padding()
     }
@@ -350,13 +353,16 @@ private func isFailedItem(_ item: ItemSnapshot) -> Bool {
         completed: RangeSet([ByteRange(start: 10000, end: 20000)]), state: state,
         isEnabled: isEnabled, isResumable: isResumable, activeSegments: 1, configuredSegments: 3,
         bytesPerSecond: 100000, speedHistory: [100000, 90000, 80000])
-    ItemRow(item: item, index: 1, controller: EngineController(), isSelected: isSelected)
+    ItemRow(
+        item: item, index: 1, controller: EngineController(), isSelected: isSelected,
+        theme: ThemeCatalog.builtInThemes()[0])
 }
 private struct ItemRow: View {
     let item: ItemSnapshot
     let index: Int
     let controller: EngineController
     let isSelected: Bool
+    let theme: Theme
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -370,23 +376,25 @@ private struct ItemRow: View {
                         .lineLimit(1)
                         .strikethrough(!item.isEnabled)
                         .foregroundStyle(
-                            item.isEnabled ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                            item.isEnabled
+                                ? AnyShapeStyle(theme.textPrimaryColor)
+                                : AnyShapeStyle(theme.textSecondaryColor))
                     resumabilityBadge
                     if item.fileMissing {
                         Label("file missing", systemImage: "exclamationmark.triangle.fill")
                             .font(.caption)
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(theme.faultyColor)
                     }
                     Spacer()
                     Text("\(item.activeSegments)/\(item.configuredSegments) seg")
                         .font(.caption.monospacedDigit())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(theme.textSecondaryColor)
                     Text(formatted(item.bytesPerSecond))
                         .font(.caption.monospacedDigit())
-                    Sparkline(samples: item.speedHistory)
+                    Sparkline(samples: item.speedHistory, color: theme.graphStrokeColor)
                         .frame(width: 48, height: 16)
                 }
-                SegmentedProgressBar(completed: item.completed, total: item.totalBytes ?? 0)
+                SegmentedProgressBar(completed: item.completed, total: item.totalBytes ?? 0, theme: theme)
                     .frame(height: 6)
                 HStack {
                     statusLine
@@ -395,7 +403,7 @@ private struct ItemRow: View {
                         "\(formattedBytes(item.completed.totalBytes)) / \(formattedBytes(item.totalBytes ?? 0))"
                     )
                     .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(theme.textSecondaryColor)
                 }
             }
         }
@@ -413,7 +421,7 @@ private struct ItemRow: View {
     /// unselected one — this substitutes an accent tint for the zebra shade
     /// whenever the row is selected, rather than losing the affordance.
     private var alternatingRowBackground: Color {
-        guard !isSelected else { return Color.accentColor.opacity(0.35) }
+        guard !isSelected else { return theme.selectionTintColor.opacity(0.35) }
         return Color(nsColor: NSColor.alternatingContentBackgroundColors[index % 2])
     }
 
@@ -423,15 +431,15 @@ private struct ItemRow: View {
     private var stateIcon: some View {
         switch item.state {
         case .running:
-            Image(systemName: "arrow.down.circle.fill").foregroundStyle(.tint)
+            Image(systemName: "arrow.down.circle.fill").foregroundStyle(theme.accentColor)
         case .completed:
-            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(theme.onlineColor)
         case .failed:
-            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(theme.failedColor)
         case .queued:
-            Image(systemName: "clock.fill").foregroundStyle(.secondary)
+            Image(systemName: "clock.fill").foregroundStyle(theme.textSecondaryColor)
         case .stopped:
-            Image(systemName: "pause.circle.fill").foregroundStyle(.secondary)
+            Image(systemName: "pause.circle.fill").foregroundStyle(theme.textSecondaryColor)
         }
     }
 
@@ -443,13 +451,16 @@ private struct ItemRow: View {
         HStack(spacing: 6) {
             Text(Self.describe(item))
                 .font(.caption)
-                .foregroundStyle(isFailed ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
+                .foregroundStyle(
+                    isFailed
+                        ? AnyShapeStyle(theme.failedColor) : AnyShapeStyle(theme.textSecondaryColor)
+                )
             if let checkpointFailure = item.checkpointFailure {
                 // Not a failure of the download, but it means a crash would
                 // lose everything transferred so far.
                 Text(checkpointFailure)
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(theme.faultyColor)
                     .lineLimit(2)
             }
         }
@@ -481,7 +492,7 @@ private struct ItemRow: View {
         case false:
             Text("not resumable")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(theme.textSecondaryColor)
         case true, nil:
             EmptyView()
         }
@@ -489,10 +500,13 @@ private struct ItemRow: View {
 }
 
 /// Renders the completed `RangeSet` directly, rasterized to the bar's pixel
-/// width so it stays correct at any segment count. See spec §9.4.
+/// width so it stays correct at any segment count. See spec §9.4. Uses
+/// spec §10.1's `progressFill` role for the fill and `surfaceTertiary` for
+/// the empty track.
 struct SegmentedProgressBar: View {
     let completed: RangeSet
     let total: Int64
+    let theme: Theme
 
     var body: some View {
         Canvas { context, size in
@@ -500,7 +514,7 @@ struct SegmentedProgressBar: View {
                 roundedRect: CGRect(origin: .zero, size: size),
                 cornerRadius: size.height / 2
             )
-            context.fill(background, with: .color(.secondary.opacity(0.25)))
+            context.fill(background, with: .color(theme.surfaceTertiaryColor.opacity(0.6)))
 
             guard total > 0 else { return }
             for range in completed.ranges {
@@ -508,7 +522,7 @@ struct SegmentedProgressBar: View {
                 let width = size.width * CGFloat(range.length) / CGFloat(total)
                 context.fill(
                     Path(CGRect(x: x, y: 0, width: max(width, 0.5), height: size.height)),
-                    with: .color(.accentColor)
+                    with: .color(theme.progressFillColor)
                 )
             }
         }

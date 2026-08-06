@@ -10,8 +10,12 @@ import SwiftUI
 struct MenuBarPopoverView: View {
     @Environment(EngineController.self) private var controller
     @Environment(GrabberController.self) private var grabberController
+    @Environment(ThemeStore.self) private var themeStore
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openWindow) private var openWindow
     @Binding var selection: MainWindowView.SidebarItem?
+
+    private var theme: Theme { themeStore.resolved(for: colorScheme) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -19,9 +23,14 @@ struct MenuBarPopoverView: View {
                 Text(formatted(controller.snapshot.globalBytesPerSecond))
                     .font(.headline.monospacedDigit())
                 Spacer()
-                Text("\(activeItems.count) active").font(.caption).foregroundStyle(.secondary)
+                Text("\(activeItems.count) active").font(.caption).foregroundStyle(
+                    theme.textSecondaryColor)
             }
-            BandwidthGraph(history: controller.snapshot.globalHistory).frame(height: 32)
+            BandwidthGraph(
+                history: controller.snapshot.globalHistory, strokeColor: theme.graphStrokeColor,
+                averageStrokeColor: theme.graphAverageStrokeColor
+            )
+            .frame(height: 32)
 
             Divider()
 
