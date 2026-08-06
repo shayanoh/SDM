@@ -11,7 +11,7 @@ struct MenuBarPopoverView: View {
     @Environment(EngineController.self) private var controller
     @Environment(GrabberController.self) private var grabberController
     @Environment(\.openWindow) private var openWindow
-    @Binding var selection: ContentView.SidebarItem?
+    @Binding var selection: MainWindowView.SidebarItem?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {

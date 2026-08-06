@@ -10,7 +10,7 @@ import SDMCore
 import SDMEngine
 import SwiftUI
 
-struct ContentView: View {
+struct MainWindowView: View {
     enum SidebarItem: Hashable {
         case downloads, linkgrabber, completed
     }
@@ -47,8 +47,8 @@ struct ContentView: View {
         NavigationSplitView {
             List(selection: $selection) {
                 Label("Downloads", systemImage: "arrow.down.circle").tag(SidebarItem.downloads)
-                Label("Linkgrabber", systemImage: "link").tag(SidebarItem.linkgrabber)
                 Label("Completed", systemImage: "checkmark.circle").tag(SidebarItem.completed)
+                Label("Linkgrabber", systemImage: "link").tag(SidebarItem.linkgrabber)
                 Section("Overview") { statsBlock }
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 220)
@@ -172,6 +172,14 @@ struct DeletionInfo {
     var count: Int { names.count }
 }
 
+#Preview {
+    let delInfo = DeletionInfo(title: "Delete files?", totalBytes: 1_000_000_000, names: ["file1","file2"])
+    let delInfo2 = DeletionInfo(title: "Delete files?", totalBytes: 1_000_000_000, names: [])
+    VStack(spacing:20) {
+        DeletionConfirmationView(info: delInfo, onCancel: { }, onDelete: { })
+        DeletionConfirmationView(info: delInfo2, onCancel: { }, onDelete: { })
+    }
+}
 /// A deliberately larger, more informative stand-in for the old one-line
 /// `confirmationDialog`: shows exactly how many files and how many bytes are
 /// about to be trashed, plus their names, rather than asking the operator to

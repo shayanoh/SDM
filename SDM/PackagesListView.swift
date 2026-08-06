@@ -27,7 +27,7 @@ struct PackagesListView: View {
     @Environment(EngineController.self) private var controller
     @Binding var selectedItemIDs: Set<UUID>
     @Binding var collapsedPackageIDs: Set<UUID>
-    @Binding var pendingDeletion: ContentView.PendingDeletion?
+    @Binding var pendingDeletion: MainWindowView.PendingDeletion?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -288,6 +288,18 @@ private func isFailedItem(_ item: ItemSnapshot) -> Bool {
     return false
 }
 
+#Preview {
+    var isEnabled = true
+    var isResumable = true
+    var state = ItemState.running
+    var isSelected = false
+    let item = ItemSnapshot(
+        id: UUID(), url: URL(fileURLWithPath: ""), filename: "Filename", totalBytes: 1_000_000,
+        completed: RangeSet([ByteRange(start: 10000, end: 20000)]), state: state,
+        isEnabled: isEnabled, isResumable: isResumable, activeSegments: 1, configuredSegments: 3,
+        bytesPerSecond: 100000, speedHistory: [100000, 90000, 80000])
+    ItemRow(item: item, index: 1, controller: EngineController(), isSelected: isSelected)
+}
 private struct ItemRow: View {
     let item: ItemSnapshot
     let index: Int
