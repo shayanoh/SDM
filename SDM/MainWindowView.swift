@@ -8,6 +8,7 @@
 import AppKit
 import SDMCore
 import SDMEngine
+import SDMGrabber
 import SwiftUI
 
 struct MainWindowView: View {
@@ -48,7 +49,9 @@ struct MainWindowView: View {
             List(selection: $selection) {
                 Label("Downloads", systemImage: "arrow.down.circle").tag(SidebarItem.downloads)
                 Label("Completed", systemImage: "checkmark.circle").tag(SidebarItem.completed)
-                Label("Linkgrabber", systemImage: "link").tag(SidebarItem.linkgrabber)
+                Label("Linkgrabber", systemImage: "link")
+                    .tag(SidebarItem.linkgrabber)
+                    .badge(grabberController.snapshot.totalCount)
                 Section("Overview") { statsBlock }
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 220)
@@ -114,8 +117,14 @@ struct MainWindowView: View {
 
     private var statsBlock: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(formatted(controller.snapshot.globalBytesPerSecond)).font(
-                .headline.monospacedDigit())
+            if activeCount == 0 {
+                Text("No running downloads")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text(formatted(controller.snapshot.globalBytesPerSecond)).font(
+                    .headline.monospacedDigit())
+            }
             BandwidthGraph(history: controller.snapshot.globalHistory).frame(height: 40)
             Text("\(activeCount) active").font(.caption).foregroundStyle(.secondary)
         }
