@@ -18,6 +18,8 @@ struct MainWindowView: View {
 
     @Environment(EngineController.self) private var controller
     @Environment(GrabberController.self) private var grabberController
+    @Environment(ThemeStore.self) private var themeStore
+    @Environment(\.colorScheme) private var colorScheme
     @Binding var selection: SidebarItem?
     @State private var selectedItemIDs: Set<UUID> = []
     @State private var selectedCompletedItemIDs: Set<UUID> = []
@@ -63,6 +65,8 @@ struct MainWindowView: View {
             }
         }
         .frame(minWidth: 760, minHeight: 480)
+        .task(id: themeStore.selectedID) { applyNativeAppearance() }
+        .onChange(of: colorScheme) { _, _ in applyNativeAppearance() }
         .onChange(of: controller.snapshot) { _, newSnapshot in
             let urls = Set(newSnapshot.packages.flatMap { $0.items.map(\.url) })
             Task { await grabberController.setKnownDownloadURLs(urls) }
@@ -77,6 +81,20 @@ struct MainWindowView: View {
                 }
             )
         }
+    }
+
+    /// Spec §10.1: "Each theme declares whether it is dark, so
+    /// `NSApp.appearance` is set correctly for native controls." `nil`
+    /// (System) leaves `NSApp.appearance` unset so native chrome simply
+    /// follows the OS; any fixed theme forces `NSApp.appearance` to match
+    /// its own `isDark`, overriding the system setting.
+    private func applyNativeAppearance() {
+        guard themeStore.selectedID != ThemeStore.systemSelectionID else {
+            NSApp.appearance = nil
+            return
+        }
+        let theme = themeStore.resolved(for: colorScheme)
+        NSApp.appearance = NSAppearance(named: theme.isDark ? .darkAqua : .aqua)
     }
 
     /// Gathers what the confirmation sheet needs to show — how many files,

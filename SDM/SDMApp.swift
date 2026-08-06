@@ -40,6 +40,7 @@ struct SDMApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var controller = EngineController()
     @State private var grabberController = GrabberController()
+    @State private var themeStore = ThemeStore()
     @State private var clipboardWatcher = ClipboardWatcher()
     /// Link ids already handed to the download engine by auto-add-and-start,
     /// so a later snapshot change (e.g. an unrelated link finishing its
@@ -55,6 +56,7 @@ struct SDMApp: App {
             MainWindowView(selection: $sidebarSelection)
                 .environment(controller)
                 .environment(grabberController)
+                .environment(themeStore)
                 .task {
                     appDelegate.controller = controller
                     await controller.startHeartbeat()
@@ -96,12 +98,14 @@ struct SDMApp: App {
         Settings {
             SettingsView()
                 .environment(controller)
+                .environment(themeStore)
         }
 
         MenuBarExtra {
             MenuBarPopoverView(selection: $sidebarSelection)
                 .environment(controller)
                 .environment(grabberController)
+                .environment(themeStore)
         } label: {
             Image(nsImage: statusItemImage)
         }
