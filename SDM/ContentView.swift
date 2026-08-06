@@ -103,15 +103,20 @@ struct ContentView: View {
                             Task { await controller.reorderItems(ids, inPackage: packageID) }
                         }
                     } header: {
-                        Text(package.name)
-                            .dropDestination(for: DraggedItemID.self) { dragged, _ in
-                                guard let dragged = dragged.first else { return false }
-                                let packageID = package.id
-                                Task {
-                                    await controller.moveItem(dragged.itemID, toPackage: packageID)
-                                }
-                                return true
+                        HStack {
+                            Text(package.name)
+                            Spacer()
+                            Sparkline(samples: package.bytesPerSecondHistory)
+                                .frame(width: 48, height: 16)
+                        }
+                        .dropDestination(for: DraggedItemID.self) { dragged, _ in
+                            guard let dragged = dragged.first else { return false }
+                            let packageID = package.id
+                            Task {
+                                await controller.moveItem(dragged.itemID, toPackage: packageID)
                             }
+                            return true
+                        }
                     }
                 }
             }
@@ -162,6 +167,8 @@ private struct ItemRow: View {
                     .foregroundStyle(.secondary)
                 Text(formatted(item.bytesPerSecond))
                     .font(.caption.monospacedDigit())
+                Sparkline(samples: item.speedHistory)
+                    .frame(width: 48, height: 16)
             }
             SegmentedProgressBar(completed: item.completed, total: item.totalBytes ?? 0)
                 .frame(height: 6)

@@ -87,6 +87,24 @@ public struct PackageSnapshot: Sendable, Equatable, Identifiable {
     public var bytesPerSecond: Double { items.reduce(0) { $0 + $1.bytesPerSecond } }
     public var completedCount: Int { items.filter { $0.state == .completed }.count }
     public var totalBytes: Int64 { items.reduce(0) { $0 + ($1.totalBytes ?? 0) } }
+
+    /// Spec §9.6's per-row sparkline data, aggregated the same way
+    /// `bytesPerSecond` is: summed from the member items, never stored
+    /// separately, so it cannot disagree with them. Shorter histories (an
+    /// item added mid-run) are aligned to the trailing edge and front-padded
+    /// with zero rather than misaligned by index.
+    public var bytesPerSecondHistory: [Double] {
+        let length = items.map { $0.speedHistory.count }.max() ?? 0
+        guard length > 0 else { return [] }
+        var summed = [Double](repeating: 0, count: length)
+        for item in items {
+            let padding = length - item.speedHistory.count
+            for (index, value) in item.speedHistory.enumerated() {
+                summed[index + padding] += value
+            }
+        }
+        return summed
+    }
 }
 
 public struct EngineSnapshot: Sendable, Equatable {
