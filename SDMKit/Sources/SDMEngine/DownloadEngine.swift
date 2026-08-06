@@ -215,6 +215,15 @@ public actor DownloadEngine {
         await reconcile()
     }
 
+    /// Applies new settings live. Spec §10.2's "changing the mode applies
+    /// immediately" precedent extends to every engine setting: the very next
+    /// `reconcile()` this call triggers picks up the new
+    /// `maxConcurrent`/connection ceilings with no restart needed.
+    public func updateSettings(_ newSettings: EngineSettings) async {
+        settings = newSettings
+        await reconcile()
+    }
+
     public func setEnabled(_ enabled: Bool, for itemID: UUID) async {
         mutateItem(itemID) { $0.isEnabled = enabled }
         await persist()

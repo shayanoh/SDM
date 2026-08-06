@@ -29,21 +29,38 @@ final class EngineController {
     /// main-actor-side half of that: it stops the heartbeat path from
     /// re-entering at all.
     private var hasShutDown = false
+    private let downloadFolder: URL
 
     init() {
         let support = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("SDM", isDirectory: true)
         let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+        downloadFolder = downloads
 
         engine = DownloadEngine(
             transport: URLSessionTransport(),
             stateStore: JSONStateStore(fileURL: support.appendingPathComponent("state.json")),
             settings: EngineSettings(
-                maxConcurrent: 3,
-                segmentsPerItem: 8,
-                globalMaxConnections: 32,
+                maxConcurrent: EngineSettingsStore.maxConcurrent,
+                segmentsPerItem: EngineSettingsStore.segmentsPerItem,
+                globalMaxConnections: EngineSettingsStore.globalMaxConnections,
+                maxConnectionsPerHost: EngineSettingsStore.maxConnectionsPerHost,
                 downloadFolder: downloads
+            )
+        )
+    }
+
+    /// Re-reads every `EngineSettingsStore` value and applies it live. Called
+    /// from `SettingsView` whenever the operator changes a value.
+    func applyStoredSettings() async {
+        await engine.updateSettings(
+            EngineSettings(
+                maxConcurrent: EngineSettingsStore.maxConcurrent,
+                segmentsPerItem: EngineSettingsStore.segmentsPerItem,
+                globalMaxConnections: EngineSettingsStore.globalMaxConnections,
+                maxConnectionsPerHost: EngineSettingsStore.maxConnectionsPerHost,
+                downloadFolder: downloadFolder
             )
         )
     }
