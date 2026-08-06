@@ -109,9 +109,13 @@ struct SDMApp: App {
     }
 
     private var overallFraction: Double {
-        let running = controller.snapshot.packages.flatMap(\.items).filter { $0.state == .running }
+        let running = controller.snapshot.packages.flatMap(\.items).filter { $0.state == .running || $0.state == .queued || $0.state == .completed}
         guard !running.isEmpty else { return 0 }
         return running.reduce(0.0) { $0 + $1.fractionCompleted } / Double(running.count)
+    }
+    
+    private var downloadsRunning: Bool {
+        return controller.snapshot.packages.flatMap(\.items).filter {$0.state == .running}.count > 0
     }
 
     /// `MenuBarExtra`'s custom label view ignores `.frame`/sizing modifiers
@@ -120,7 +124,7 @@ struct SDMApp: App {
     /// fixed-size `NSImage` via `ImageRenderer` sidesteps that: the label
     /// only ever sees a plain bitmap at the exact size we ask for.
     private var statusItemImage: NSImage {
-        let renderer = ImageRenderer(content: MenuBarRingIcon(fraction: overallFraction))
+        let renderer = ImageRenderer(content: MenuBarRingIcon(fraction: overallFraction, drawCircle: downloadsRunning))
         renderer.scale = 2
         return renderer.nsImage ?? NSImage()
     }
