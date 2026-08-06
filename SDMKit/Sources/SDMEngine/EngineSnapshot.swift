@@ -25,6 +25,10 @@ public struct ItemSnapshot: Sendable, Equatable, Identifiable {
     /// fails to write means a crash loses all progress with no signal — the
     /// user needs to know the download is not actually resumable right now.
     public let checkpointFailure: String?
+    /// Attempts left before this item becomes terminally `.failed`, or `nil`
+    /// if it has never failed. Spec §6.4's "manual retry action" needs this
+    /// to show the operator how much budget is left before giving up.
+    public let remainingAttempts: Int?
 
     public init(
         id: UUID,
@@ -39,9 +43,11 @@ public struct ItemSnapshot: Sendable, Equatable, Identifiable {
         configuredSegments: Int,
         bytesPerSecond: Double,
         speedHistory: [Double],
-        checkpointFailure: String? = nil
+        checkpointFailure: String? = nil,
+        remainingAttempts: Int? = nil
     ) {
         self.checkpointFailure = checkpointFailure
+        self.remainingAttempts = remainingAttempts
         self.id = id
         self.url = url
         self.filename = filename

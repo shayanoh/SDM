@@ -235,6 +235,34 @@ public actor DownloadEngine {
         }
     }
 
+    /// Manually retries a terminally `.failed` item. Spec §6.4 promised "a
+    /// terminal `failed` state surfaced with a reason and a manual retry
+    /// action" — this is that action.
+    ///
+    /// A no-op for any other state: `Scheduler.isEligible` excludes `.failed`
+    /// unconditionally, so `.queued` is what makes the item reachable again,
+    /// not merely re-enabling it. Guarding on state rather than acting
+    /// unconditionally means a button wired to every row cannot accidentally
+    /// hand a healthy download a fresh retry budget it never asked for.
+    public func retry(_ itemID: UUID) async {
+        guard case .failed = itemState(for: itemID) else { return }
+        mutateItem(itemID) {
+            $0.state = .queued
+            $0.isEnabled = true
+        }
+        failedAttempts[itemID] = nil
+        retryHoldTicks[itemID] = nil
+        await persist()
+        await reconcile()
+    }
+
+    private func itemState(for itemID: UUID) -> ItemState? {
+        for package in packages {
+            if let item = package.items.first(where: { $0.id == itemID }) { return item.state }
+        }
+        return nil
+    }
+
     /// One-second heartbeat: folds the window's bytes into the samplers,
     /// drives the wall-clock half of the sidecar checkpoint trigger, closes
     /// the speed window, ages retry backoff, writes debounced durable state,
@@ -321,7 +349,10 @@ public actor DownloadEngine {
                         configuredSegments: segmentCount(for: item.id),
                         bytesPerSecond: sampler.bytesPerSecond,
                         speedHistory: sampler.history,
-                        checkpointFailure: checkpointFailure
+                        checkpointFailure: checkpointFailure,
+                        remainingAttempts: failedAttempts[item.id].map {
+                            retryPolicy.maxAttempts - $0
+                        }
                     )
                 )
             }
