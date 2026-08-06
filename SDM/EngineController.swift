@@ -67,8 +67,8 @@ final class EngineController {
         )
     }
 
-    /// Loads durable state and runs the engine's 1 Hz heartbeat, refreshing
-    /// the published snapshot.
+    /// Loads durable state and runs the engine's `AppTiming.ticksPerSecond`
+    /// Hz heartbeat, refreshing the published snapshot.
     ///
     /// `restore()` runs first so packages persisted by a previous launch
     /// exist before anything is scheduled; it is `await`-only I/O against an
@@ -108,7 +108,7 @@ final class EngineController {
             snapshot = await engine.snapshot()
             notifyChanges(from: previousSnapshot, to: snapshot)
             previousSnapshot = snapshot
-            try? await Task.sleep(for: .seconds(1))
+            try? await Task.sleep(for: .seconds(1.0 / Double(AppTiming.ticksPerSecond)))
         }
 
         guard !hasShutDown else { return }
