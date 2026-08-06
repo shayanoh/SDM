@@ -103,7 +103,7 @@ struct SDMApp: App {
                 .environment(controller)
                 .environment(grabberController)
         } label: {
-            MenuBarRingIcon(fraction: overallFraction)
+            Image(nsImage: statusItemImage)
         }
         .menuBarExtraStyle(.window)
     }
@@ -112,5 +112,16 @@ struct SDMApp: App {
         let running = controller.snapshot.packages.flatMap(\.items).filter { $0.state == .running }
         guard !running.isEmpty else { return 0 }
         return running.reduce(0.0) { $0 + $1.fractionCompleted } / Double(running.count)
+    }
+
+    /// `MenuBarExtra`'s custom label view ignores `.frame`/sizing modifiers
+    /// on live SwiftUI content — the status item falls back to the image's
+    /// native pixel size, rendering oversized and cropped. Rasterizing to a
+    /// fixed-size `NSImage` via `ImageRenderer` sidesteps that: the label
+    /// only ever sees a plain bitmap at the exact size we ask for.
+    private var statusItemImage: NSImage {
+        let renderer = ImageRenderer(content: MenuBarRingIcon(fraction: overallFraction))
+        renderer.scale = 2
+        return renderer.nsImage ?? NSImage()
     }
 }
