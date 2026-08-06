@@ -13,6 +13,10 @@ struct MenuBarRingIcon: View {
                 .trim(from: 0, to: max(0.02, min(fraction, 1)))
                 .stroke(Color.primary, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                 .rotationEffect(.degrees(-90))
+            Image("MenuBarLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(width: 9, height: 9)
         }
         .frame(width: 16, height: 16)
     }
