@@ -58,6 +58,7 @@ struct MainWindowView: View {
                 Section("Overview") { statsBlock }
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 220)
+            .sdmSurface(.sidebar)
         } detail: {
             switch selection ?? .downloads {
             case .downloads: downloadsTab

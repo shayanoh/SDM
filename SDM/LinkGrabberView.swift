@@ -123,6 +123,7 @@ struct LinkGrabberView: View {
             }
         }
         .padding()
+        .sdmSurface(.toolbar)
     }
 
     private func filterChip(_ filter: VerdictFilter, count: Int) -> some View {

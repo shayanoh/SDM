@@ -303,6 +303,7 @@ struct PackagesListView: View {
                 .foregroundStyle(theme.textSecondaryColor)
         }
         .padding()
+        .sdmSurface(.toolbar)
     }
 }
 
