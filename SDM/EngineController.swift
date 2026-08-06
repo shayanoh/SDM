@@ -29,6 +29,8 @@ final class EngineController {
     /// main-actor-side half of that: it stops the heartbeat path from
     /// re-entering at all.
     private var hasShutDown = false
+    private let notifications = NotificationManager()
+    private var previousSnapshot: EngineSnapshot?
     private let downloadFolder: URL
 
     init() {
@@ -89,16 +91,49 @@ final class EngineController {
     func startHeartbeat() async {
         await engine.restore()
         snapshot = await engine.snapshot()
+        notifications.requestAuthorization()
 
         while !Task.isCancelled {
             await engine.tick()
             snapshot = await engine.snapshot()
+            notifyChanges(from: previousSnapshot, to: snapshot)
+            previousSnapshot = snapshot
             try? await Task.sleep(for: .seconds(1))
         }
 
         guard !hasShutDown else { return }
         hasShutDown = true
         await engine.shutdown()
+    }
+
+    /// Compares two heartbeats' worth of snapshot and fires exactly the
+    /// notifications spec §9.8 lists, once per transition — never a repeat
+    /// for a state that has already been announced.
+    private func notifyChanges(from old: EngineSnapshot?, to new: EngineSnapshot) {
+        guard let old else { return }
+        let oldStates = Dictionary(
+            uniqueKeysWithValues: old.packages.flatMap(\.items).map { ($0.id, $0.state) })
+        for item in new.packages.flatMap(\.items) {
+            guard oldStates[item.id] != item.state else { continue }
+            switch item.state {
+            case .completed:
+                notifications.notifyDownloadFinished(filename: item.filename)
+            case .failed(let reason):
+                notifications.notifyDownloadFailed(filename: item.filename, reason: reason)
+            default:
+                break
+            }
+        }
+
+        let oldPackagesDone = Dictionary(
+            uniqueKeysWithValues: old.packages.map {
+                ($0.id, !$0.items.isEmpty && $0.completedCount == $0.items.count)
+            })
+        for package in new.packages {
+            let isDone = !package.items.isEmpty && package.completedCount == package.items.count
+            guard isDone, oldPackagesDone[package.id] != true else { continue }
+            notifications.notifyPackageFinished(name: package.name)
+        }
     }
 
     func addDownload(urlString: String) async {

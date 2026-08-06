@@ -9,6 +9,10 @@ struct SettingsView: View {
     @State private var clipboardWatchingEnabled = GrabberSettings.clipboardWatchingEnabled
     @State private var autoAddAndStartOnGrab = GrabberSettings.autoAddAndStartOnGrab
     @State private var deepSniffEnabled = GrabberSettings.deepSniffEnabled
+    @State private var downloadFinishedEnabled = NotificationSettings.downloadFinishedEnabled
+    @State private var packageFinishedEnabled = NotificationSettings.packageFinishedEnabled
+    @State private var downloadFailedEnabled = NotificationSettings.downloadFailedEnabled
+    @State private var linksGrabbedEnabled = NotificationSettings.linksGrabbedEnabled
 
     var body: some View {
         Form {
@@ -31,6 +35,12 @@ struct SettingsView: View {
                 Toggle("Auto-add and start on grab", isOn: $autoAddAndStartOnGrab)
                 Toggle("Deep sniff (stage 2)", isOn: $deepSniffEnabled)
             }
+            Section("Notifications") {
+                Toggle("Download finished", isOn: $downloadFinishedEnabled)
+                Toggle("Package finished", isOn: $packageFinishedEnabled)
+                Toggle("Download failed", isOn: $downloadFailedEnabled)
+                Toggle("Links grabbed", isOn: $linksGrabbedEnabled)
+            }
         }
         .padding()
         .frame(width: 420)
@@ -44,6 +54,18 @@ struct SettingsView: View {
         .onChange(of: autoAddAndStartOnGrab) { _, new in GrabberSettings.autoAddAndStartOnGrab = new
         }
         .onChange(of: deepSniffEnabled) { _, new in GrabberSettings.deepSniffEnabled = new }
+        .onChange(of: downloadFinishedEnabled) { _, new in
+            NotificationSettings.downloadFinishedEnabled = new
+        }
+        .onChange(of: packageFinishedEnabled) { _, new in
+            NotificationSettings.packageFinishedEnabled = new
+        }
+        .onChange(of: downloadFailedEnabled) { _, new in
+            NotificationSettings.downloadFailedEnabled = new
+        }
+        .onChange(of: linksGrabbedEnabled) { _, new in
+            NotificationSettings.linksGrabbedEnabled = new
+        }
     }
 
     private func applyEngineSettings() {

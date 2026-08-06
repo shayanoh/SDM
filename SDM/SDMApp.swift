@@ -47,6 +47,8 @@ struct SDMApp: App {
     /// has no idempotency of its own.
     @State private var autoAddedLinkIDs: Set<UUID> = []
     @State private var sidebarSelection: ContentView.SidebarItem? = .downloads
+    @State private var linkNotifications = NotificationManager()
+    @State private var notifiedLinkIDs: Set<UUID> = []
 
     var body: some Scene {
         WindowGroup(id: "main") {
@@ -66,6 +68,12 @@ struct SDMApp: App {
                 }
                 .onDisappear { clipboardWatcher.stop() }
                 .onChange(of: grabberController.snapshot) { _, newSnapshot in
+                    let freshIDs = Set(newSnapshot.links.map(\.id)).subtracting(notifiedLinkIDs)
+                    if !freshIDs.isEmpty {
+                        notifiedLinkIDs.formUnion(freshIDs)
+                        linkNotifications.notifyLinksGrabbed(count: freshIDs.count)
+                    }
+
                     guard GrabberSettings.autoAddAndStartOnGrab else { return }
                     for package in newSnapshot.packages {
                         let ids = Set(package.linkIDs)
