@@ -83,8 +83,9 @@ struct PackagesListView: View {
         // `List`'s native selection highlight is a separate layer drawn on
         // top of `.listRowBackground`, tinted by the system control accent
         // (blue by default) — `.listRowBackground` alone can't override it.
-        // `.tint` is what SwiftUI actually threads through to that layer.
-        .tint(theme.selectionTintColor)
+        // `.tint(_:)` does not reach it despite looking like it should;
+        // `.listItemTint(.fixed(_:))` is the actual documented API.
+        .listItemTint(.fixed(theme.selectionTintColor))
     }
 
     @ViewBuilder

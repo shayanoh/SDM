@@ -4,8 +4,8 @@ import SDMCore
 import SDMEngine
 
 /// Bridges the engine actor to SwiftUI: drives the `AppTiming.ticksPerSecond`
-/// tick and republishes snapshots on the main actor, at the slower
-/// `AppTiming.uiRefreshesPerSecond` rate.
+/// tick and republishes snapshots on the main actor at that same rate —
+/// except while `suppressPublishing()` is in effect (see below).
 @MainActor
 @Observable
 final class EngineController {
@@ -33,6 +33,20 @@ final class EngineController {
     private let notifications = NotificationManager()
     private var previousSnapshot: EngineSnapshot?
     private let downloadFolder: URL
+    /// While `true`, the heartbeat keeps ticking the engine (so telemetry
+    /// and checkpointing stay accurate) but stops reassigning `snapshot` —
+    /// every reassignment invalidates any `List` reading it, and doing that
+    /// mid-drag makes AppKit reset the table's drag-and-drop session.
+    /// `MainWindowView` toggles this for exactly the span a mouse button is
+    /// held down, which covers both a `.onMove` reorder and a
+    /// `.draggable`/`.dropDestination` cross-package move without needing to
+    /// distinguish "which kind of drag" from the outside.
+    private var isPublishSuppressed = false
+    /// Safety net: if a `resumePublishing()` call is ever missed (a drag
+    /// cancelled in a way that doesn't deliver a mouse-up to our monitor),
+    /// this force-clears suppression rather than leaving the UI frozen
+    /// indefinitely.
+    private var suppressionSafetyTask: Task<Void, Never>?
 
     init() {
         let support = FileManager.default.urls(
@@ -104,20 +118,9 @@ final class EngineController {
         snapshot = await engine.snapshot()
         notifications.requestAuthorization()
 
-        // The engine ticks at `AppTiming.ticksPerSecond` regardless — that's
-        // what keeps speed sampling, checkpointing, and retry backoff
-        // accurate. Publishing the resulting snapshot to SwiftUI is
-        // throttled to the slower `uiRefreshesPerSecond` on purpose: every
-        // reassignment of `snapshot` invalidates every `List` that reads it,
-        // and doing that as often as the engine ticks was interrupting an
-        // in-flight drag-and-drop reorder.
-        let ticksPerPublish = max(1, AppTiming.ticksPerSecond / AppTiming.uiRefreshesPerSecond)
-        var ticksSincePublish = 0
         while !Task.isCancelled {
             await engine.tick()
-            ticksSincePublish += 1
-            if ticksSincePublish >= ticksPerPublish {
-                ticksSincePublish = 0
+            if !isPublishSuppressed {
                 let newSnapshot = await engine.snapshot()
                 notifyChanges(from: previousSnapshot, to: newSnapshot)
                 previousSnapshot = newSnapshot
@@ -129,6 +132,29 @@ final class EngineController {
         guard !hasShutDown else { return }
         hasShutDown = true
         await engine.shutdown()
+    }
+
+    /// Pauses snapshot publishing without pausing the engine's own tick.
+    /// `MainWindowView` calls this on mouse-down and `resumePublishing()` on
+    /// mouse-up, so an in-flight drag-and-drop reorder isn't interrupted by
+    /// the `List` it's happening in being handed fresh data mid-gesture.
+    /// Self-clears after 5 seconds regardless, so a missed mouse-up (a drag
+    /// cancelled in some way that doesn't reach our monitor) can't freeze
+    /// the UI forever.
+    func suppressPublishing() {
+        isPublishSuppressed = true
+        suppressionSafetyTask?.cancel()
+        suppressionSafetyTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(5))
+            guard !Task.isCancelled else { return }
+            self?.isPublishSuppressed = false
+        }
+    }
+
+    func resumePublishing() {
+        suppressionSafetyTask?.cancel()
+        suppressionSafetyTask = nil
+        isPublishSuppressed = false
     }
 
     /// Compares two heartbeats' worth of snapshot and fires exactly the

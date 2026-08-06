@@ -27,6 +27,8 @@ struct MainWindowView: View {
     @State private var collapsedPackageIDs: Set<UUID> = []
     @State private var collapsedCompletedPackageIDs: Set<UUID> = []
     @State private var pendingDeletion: PendingDeletion?
+    @State private var hostWindow: NSWindow?
+    @State private var mouseSuppressionMonitor: Any?
 
     /// What a "Remove and Delete" confirmation is about to act on. Unified
     /// into one enum (rather than two separate optional-ID states, one per
@@ -68,7 +70,11 @@ struct MainWindowView: View {
             // actually shows through.
             .scrollContentBackground(.hidden)
             .background(theme.sidebarBackgroundColor)
-            .tint(theme.selectionTintColor)
+            // `.tint(_:)` does not reach a List's native (system-accent-
+            // blue) row selection highlight on macOS despite looking like
+            // it should — `.listItemTint(.fixed(_:))` is the actual,
+            // documented API for this.
+            .listItemTint(.fixed(theme.selectionTintColor))
             .sdmSurface(.sidebar)
         } detail: {
             switch selection ?? .downloads {
@@ -78,8 +84,16 @@ struct MainWindowView: View {
             }
         }
         .frame(minWidth: 760, minHeight: 480)
+        .background(WindowAccessor { hostWindow = $0 })
         .task(id: themeStore.selectedID) { applyNativeAppearance() }
         .onChange(of: colorScheme) { _, _ in applyNativeAppearance() }
+        .onAppear { installMouseSuppressionMonitor() }
+        .onDisappear {
+            if let mouseSuppressionMonitor {
+                NSEvent.removeMonitor(mouseSuppressionMonitor)
+            }
+            mouseSuppressionMonitor = nil
+        }
         .onChange(of: controller.snapshot) { _, newSnapshot in
             let urls = Set(newSnapshot.packages.flatMap { $0.items.map(\.url) })
             Task { await grabberController.setKnownDownloadURLs(urls) }
@@ -100,14 +114,44 @@ struct MainWindowView: View {
     /// `NSApp.appearance` is set correctly for native controls." `nil`
     /// (System) leaves `NSApp.appearance` unset so native chrome simply
     /// follows the OS; any fixed theme forces `NSApp.appearance` to match
-    /// its own `isDark`, overriding the system setting.
+    /// its own `isDark`, overriding the system setting. The window's own
+    /// `backgroundColor`/titlebar are themed regardless of that choice —
+    /// "System" still resolves to one of the bundled Light/Dark themes,
+    /// which should still paint the titlebar, not leave it plain white/gray.
     private func applyNativeAppearance() {
-        guard themeStore.selectedID != ThemeStore.systemSelectionID else {
-            NSApp.appearance = nil
-            return
+        NSApp.appearance =
+            themeStore.selectedID == ThemeStore.systemSelectionID
+            ? nil : NSAppearance(named: theme.isDark ? .darkAqua : .aqua)
+
+        // SwiftUI has no view-level API for the titlebar — it's window
+        // chrome, drawn by AppKit above the content view, not reachable by
+        // any `.background()` call inside the view hierarchy. Making it
+        // transparent and setting the window's own backgroundColor is what
+        // actually lets the theme's surface color show through there too.
+        hostWindow?.titlebarAppearsTransparent = true
+        hostWindow?.titlebarSeparatorStyle = .none
+        hostWindow?.backgroundColor = NSColor(theme.surfacePrimaryColor)
+    }
+
+    /// Pauses `EngineController`'s snapshot publishing for exactly the span
+    /// a mouse button is held down, so an in-flight drag-and-drop reorder in
+    /// `PackagesListView` isn't interrupted by the `List` being handed fresh
+    /// data mid-gesture (AppKit resets a table's drag session when its data
+    /// source reloads mid-drag). Installed once for the whole window rather
+    /// than per-list, since only one drag can be in flight at a time
+    /// regardless of which list it started in.
+    private func installMouseSuppressionMonitor() {
+        guard mouseSuppressionMonitor == nil else { return }
+        mouseSuppressionMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .leftMouseUp]
+        ) { event in
+            if event.type == .leftMouseDown {
+                controller.suppressPublishing()
+            } else {
+                controller.resumePublishing()
+            }
+            return event
         }
-        let theme = themeStore.resolved(for: colorScheme)
-        NSApp.appearance = NSAppearance(named: theme.isDark ? .darkAqua : .aqua)
     }
 
     /// Gathers what the confirmation sheet needs to show — how many files,

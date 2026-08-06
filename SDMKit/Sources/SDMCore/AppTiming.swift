@@ -12,17 +12,11 @@ import Foundation
 /// rather than hardcoding a tick count.
 public enum AppTiming {
     /// Heartbeat ticks per second. `DownloadEngine.tick()` is driven at this
-    /// rate by `EngineController`'s loop; a slower or faster refresh is a
-    /// one-line change here.
+    /// rate by `EngineController`'s loop, and every SwiftUI snapshot publish
+    /// rides the same rate — a slower or faster refresh is a one-line
+    /// change here. (A dedicated in-flight drag/reorder can still interrupt
+    /// a `List`-backed `NSTableView` if its data source reloads mid-drag;
+    /// `EngineController` handles that separately by pausing publishing
+    /// while a mouse button is held down, not by throttling this rate.)
     public static let ticksPerSecond: Int = 5
-
-    /// How often `EngineController` republishes a fresh snapshot to
-    /// SwiftUI, independent of `ticksPerSecond` — the engine still ticks
-    /// (and keeps its speed math, checkpointing, and backoff timing) at the
-    /// full rate regardless. Kept lower on purpose: reassigning the
-    /// published snapshot invalidates every `List` that reads it, and doing
-    /// that as often as `ticksPerSecond` visibly interrupts an in-flight
-    /// drag-and-drop reorder — AppKit resets a table's drag session when its
-    /// data source reloads mid-drag.
-    public static let uiRefreshesPerSecond: Int = 2
 }
