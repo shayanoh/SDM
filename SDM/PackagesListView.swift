@@ -82,10 +82,13 @@ struct PackagesListView: View {
         .background(theme.surfacePrimaryColor)
         // `List`'s native selection highlight is a separate layer drawn on
         // top of `.listRowBackground`, tinted by the system control accent
-        // (blue by default) — `.listRowBackground` alone can't override it.
-        // `.tint(_:)` does not reach it despite looking like it should;
-        // `.listItemTint(.fixed(_:))` is the actual documented API.
-        .listItemTint(.fixed(theme.selectionTintColor))
+        // (blue by default). Neither `.tint(_:)` nor `.listItemTint(_:)`
+        // reaches it — verified against current SwiftUI docs;
+        // `.listItemTint` is documented as affecting only sidebar `Label`
+        // icons and watchOS platters. `hidesNativeSelectionHighlight()`
+        // turns the native layer off entirely so `alternatingRowBackground`
+        // above is the only thing drawn.
+        .hidesNativeSelectionHighlight()
     }
 
     @ViewBuilder

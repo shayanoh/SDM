@@ -27,7 +27,6 @@ struct MainWindowView: View {
     @State private var collapsedPackageIDs: Set<UUID> = []
     @State private var collapsedCompletedPackageIDs: Set<UUID> = []
     @State private var pendingDeletion: PendingDeletion?
-    @State private var hostWindow: NSWindow?
     @State private var mouseSuppressionMonitor: Any?
 
     /// What a "Remove and Delete" confirmation is about to act on. Unified
@@ -52,8 +51,12 @@ struct MainWindowView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: $selection) {
-                Label("Downloads", systemImage: "arrow.down.circle").tag(SidebarItem.downloads)
-                Label("Completed", systemImage: "checkmark.circle").tag(SidebarItem.completed)
+                Label("Downloads", systemImage: "arrow.down.circle")
+                    .tag(SidebarItem.downloads)
+                    .listRowBackground(sidebarRowBackground(.downloads))
+                Label("Completed", systemImage: "checkmark.circle")
+                    .tag(SidebarItem.completed)
+                    .listRowBackground(sidebarRowBackground(.completed))
                 // `.tag()` must be the outermost modifier — a `List`'s
                 // selection binding reads a row's tag off the final composed
                 // view, and `.badge()` applied *after* `.tag()` was breaking
@@ -61,6 +64,7 @@ struct MainWindowView: View {
                 Label("Linkgrabber", systemImage: "link")
                     .badge(grabberController.snapshot.totalCount)
                     .tag(SidebarItem.linkgrabber)
+                    .listRowBackground(sidebarRowBackground(.linkgrabber))
                 Section("Overview") { statsBlock }
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 220)
@@ -70,11 +74,12 @@ struct MainWindowView: View {
             // actually shows through.
             .scrollContentBackground(.hidden)
             .background(theme.sidebarBackgroundColor)
-            // `.tint(_:)` does not reach a List's native (system-accent-
-            // blue) row selection highlight on macOS despite looking like
-            // it should — `.listItemTint(.fixed(_:))` is the actual,
-            // documented API for this.
-            .listItemTint(.fixed(theme.selectionTintColor))
+            // Neither `.tint(_:)` nor `.listItemTint(_:)` reaches a List's
+            // native (system-accent-blue) row selection highlight — see
+            // `NativeSelectionHighlightDisabler`'s doc comment. The
+            // `.listRowBackground` calls above are the actual selection
+            // indicator now.
+            .hidesNativeSelectionHighlight()
             .sdmSurface(.sidebar)
         } detail: {
             switch selection ?? .downloads {
@@ -84,7 +89,6 @@ struct MainWindowView: View {
             }
         }
         .frame(minWidth: 760, minHeight: 480)
-        .background(WindowAccessor { hostWindow = $0 })
         .task(id: themeStore.selectedID) { applyNativeAppearance() }
         .onChange(of: colorScheme) { _, _ in applyNativeAppearance() }
         .onAppear { installMouseSuppressionMonitor() }
@@ -114,23 +118,26 @@ struct MainWindowView: View {
     /// `NSApp.appearance` is set correctly for native controls." `nil`
     /// (System) leaves `NSApp.appearance` unset so native chrome simply
     /// follows the OS; any fixed theme forces `NSApp.appearance` to match
-    /// its own `isDark`, overriding the system setting. The window's own
-    /// `backgroundColor`/titlebar are themed regardless of that choice —
-    /// "System" still resolves to one of the bundled Light/Dark themes,
-    /// which should still paint the titlebar, not leave it plain white/gray.
+    /// its own `isDark`, overriding the system setting. That alone is what
+    /// actually themes the titlebar correctly (its material follows
+    /// `NSApp.appearance`'s light/dark, same as every other native control) —
+    /// `titlebarAppearsTransparent` was tried and reverted: it merges the
+    /// titlebar into the content view's coordinate space, so a scrolled
+    /// `List` row paints straight through the window title text as it
+    /// scrolls past. An opaque system titlebar that matches light/dark
+    /// correctly beats a custom-colored one that visibly breaks scrolling.
     private func applyNativeAppearance() {
         NSApp.appearance =
             themeStore.selectedID == ThemeStore.systemSelectionID
             ? nil : NSAppearance(named: theme.isDark ? .darkAqua : .aqua)
+    }
 
-        // SwiftUI has no view-level API for the titlebar — it's window
-        // chrome, drawn by AppKit above the content view, not reachable by
-        // any `.background()` call inside the view hierarchy. Making it
-        // transparent and setting the window's own backgroundColor is what
-        // actually lets the theme's surface color show through there too.
-        hostWindow?.titlebarAppearsTransparent = true
-        hostWindow?.titlebarSeparatorStyle = .none
-        hostWindow?.backgroundColor = NSColor(theme.surfacePrimaryColor)
+    /// The sidebar's own selection indicator now that its native highlight
+    /// is disabled (see `hidesNativeSelectionHighlight()`) — without this,
+    /// disabling the native highlight would leave the selected sidebar row
+    /// with no visual indicator at all.
+    private func sidebarRowBackground(_ item: SidebarItem) -> Color {
+        selection == item ? theme.selectionTintColor.opacity(0.35) : Color.clear
     }
 
     /// Pauses `EngineController`'s snapshot publishing for exactly the span
