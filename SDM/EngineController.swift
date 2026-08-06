@@ -164,7 +164,9 @@ final class EngineController {
     private func publish(_ newSnapshot: EngineSnapshot) {
         snapshot = newSnapshot
         itemTelemetry = Self.telemetry(from: newSnapshot)
-        if !Self.packagesStructurallyEqual(structuralPackages, newSnapshot.packages) {
+        let changed = !Self.packagesStructurallyEqual(structuralPackages, newSnapshot.packages)
+        debugPrint("[SDM diag] publish: structuralPackages \(changed ? "CHANGED" : "stable")")
+        if changed {
             structuralPackages = newSnapshot.packages
         }
     }

@@ -35,7 +35,8 @@ struct PackagesListView: View {
     private var theme: Theme { themeStore.resolved(for: colorScheme) }
 
     var body: some View {
-        VStack(spacing: 0) {
+        let _ = debugPrint("[SDM diag] PackagesListView.body evaluated")
+        return VStack(spacing: 0) {
             list
             Divider()
             PackagesBottomBar(
@@ -45,7 +46,8 @@ struct PackagesListView: View {
     }
 
     private var list: some View {
-        List(selection: $selectedItemIDs) {
+        let _ = debugPrint("[SDM diag] PackagesListView.list evaluated")
+        return List(selection: $selectedItemIDs) {
             ForEach(Array(packages.enumerated()), id: \.element.id) { packageIndex, package in
                 DisclosureGroup(isExpanded: isExpandedBinding(package.id)) {
                     ForEach(Array(package.items.enumerated()), id: \.element.id) {
@@ -253,6 +255,7 @@ private struct PackageHeaderRow: View {
     @Environment(EngineController.self) private var controller
 
     var body: some View {
+        let _ = debugPrint("[SDM diag] PackageHeaderRow.body evaluated: \(package.name)")
         let content =
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
@@ -339,7 +342,8 @@ private struct PackagesBottomBar: View {
     @Environment(EngineController.self) private var controller
 
     var body: some View {
-        HStack {
+        let _ = debugPrint("[SDM diag] PackagesBottomBar.body evaluated")
+        return HStack {
             if showsPauseResumeButton {
                 Button {
                     Task {
@@ -497,7 +501,8 @@ private struct ItemRow: View {
     private var speedHistory: [Double] { telemetry?.speedHistory ?? [] }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
+        let _ = debugPrint("[SDM diag] ItemRow.body evaluated: \(item.filename)")
+        return HStack(alignment: .top, spacing: 8) {
             stateIcon
                 .font(.title3)
                 .frame(width: 20)
