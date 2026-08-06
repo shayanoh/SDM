@@ -20,8 +20,9 @@ struct PackagesListView: View {
     /// drop would silently no-op anyway; this just hides the affordance for
     /// something that cannot do anything.
     let allowsReordering: Bool
-    /// Off for the Completed tab: Pause All/Resume All toggles `isEnabled`,
-    /// which has no effect on a `.completed` item.
+    /// Off for the Completed tab: Pause All/Resume All only touches
+    /// `.queued`/`.running`/`.stopped` items, which a `.completed` item never
+    /// is.
     let showsPauseResumeButton: Bool
 
     @Environment(EngineController.self) private var controller
@@ -199,7 +200,7 @@ struct PackagesListView: View {
         Button(isMultiple ? "Start All" : "Start") {
             Task {
                 for item in items where canStart(item) {
-                    await controller.setEnabled(true, for: item.id)
+                    await controller.startItem(item.id)
                 }
             }
         }
@@ -207,11 +208,28 @@ struct PackagesListView: View {
         Button(isMultiple ? "Stop All" : "Stop") {
             Task {
                 for item in items where canStop(item) {
-                    await controller.setEnabled(false, for: item.id)
+                    await controller.stopItem(item.id)
                 }
             }
         }
         .disabled(!items.contains(where: canStop))
+        Divider()
+        Button(isMultiple ? "Disable All" : "Disable") {
+            Task {
+                for item in items where canDisable(item) {
+                    await controller.setEnabled(false, for: item.id)
+                }
+            }
+        }
+        .disabled(!items.contains(where: canDisable))
+        Button(isMultiple ? "Enable All" : "Enable") {
+            Task {
+                for item in items where canEnable(item) {
+                    await controller.setEnabled(true, for: item.id)
+                }
+            }
+        }
+        .disabled(!items.contains(where: canEnable))
         if items.contains(where: isFailedItem) {
             Button("Retry") {
                 Task {
@@ -235,22 +253,44 @@ struct PackagesListView: View {
         .keyboardShortcut(.delete, modifiers: .command)
     }
 
-    private var allEnabledStopped: Bool {
-        let items = packages.flatMap(\.items)
-        return !items.isEmpty && items.allSatisfy { !$0.isEnabled }
+    /// Items the global bar's button actually acts on: `.completed`/`.failed`
+    /// items are never touched by Pause All/Resume All, so they must not
+    /// factor into which label the button shows either.
+    private var downloadableItems: [ItemSnapshot] {
+        packages.flatMap(\.items).filter {
+            switch $0.state {
+            case .queued, .running, .stopped: return true
+            case .completed, .failed: return false
+            }
+        }
+    }
+
+    /// True when there is nothing left for Pause All to do — every
+    /// downloadable item is already `.stopped`. Drives which label/action the
+    /// single button shows, per spec: any running/queued item means "Pause
+    /// All," all-stopped means "Resume All."
+    private var allDownloadableStopped: Bool {
+        downloadableItems.allSatisfy { $0.state == .stopped }
     }
 
     private var bottomBar: some View {
         HStack {
             if showsPauseResumeButton {
                 Button {
-                    Task { await controller.setAllEnabled(allEnabledStopped) }
+                    Task {
+                        if allDownloadableStopped {
+                            await controller.resumeAll()
+                        } else {
+                            await controller.pauseAll()
+                        }
+                    }
                 } label: {
                     Label(
-                        allEnabledStopped ? "Resume All" : "Pause All",
-                        systemImage: allEnabledStopped ? "play.fill" : "pause.fill"
+                        allDownloadableStopped ? "Resume All" : "Pause All",
+                        systemImage: allDownloadableStopped ? "play.fill" : "pause.fill"
                     )
                 }
+                .disabled(downloadableItems.isEmpty)
                 Divider().frame(height: 16)
             }
             Text(formatted(packages.reduce(0) { $0 + $1.bytesPerSecond }))
@@ -263,24 +303,36 @@ struct PackagesListView: View {
     }
 }
 
-/// "Start" (`setEnabled(true)`) only does something for an item sitting
-/// stopped in the queue — a running item is already going, and a
-/// completed/failed item isn't started by this call at all (failed items
-/// need `Retry`, per `DownloadEngine.retry`'s own doc comment).
+/// "Start" only does something for an enabled item sitting `.stopped` — a
+/// disabled item cannot be started at all (re-enable it first), and a
+/// running/queued/completed/failed item isn't started by this call (failed
+/// items need `Retry`, per `DownloadEngine.retry`'s own doc comment).
 private func canStart(_ item: ItemSnapshot) -> Bool {
-    if case .queued = item.state { return !item.isEnabled }
-    return false
+    item.state == .stopped && item.isEnabled
 }
 
-/// "Stop" (`setEnabled(false)`) only does something for an item that is
-/// actually running or queued-and-enabled; a completed, failed, or
-/// already-stopped item has nothing to stop.
+/// "Stop" only does something for an item actually running or queued; a
+/// completed, failed, or already-stopped item has nothing to stop.
 private func canStop(_ item: ItemSnapshot) -> Bool {
     switch item.state {
-    case .running: return true
-    case .queued: return item.isEnabled
+    case .running, .queued: return true
     default: return false
     }
+}
+
+/// "Disable" is offered for any enabled item that isn't finished — disabling
+/// a completed download has no meaning, and a failed item can still be
+/// disabled to keep `Retry` from being tempting.
+private func canDisable(_ item: ItemSnapshot) -> Bool {
+    guard item.isEnabled else { return false }
+    switch item.state {
+    case .completed: return false
+    default: return true
+    }
+}
+
+private func canEnable(_ item: ItemSnapshot) -> Bool {
+    !item.isEnabled
 }
 
 private func isFailedItem(_ item: ItemSnapshot) -> Bool {
@@ -314,7 +366,11 @@ private struct ItemRow: View {
                 .padding(.top, 2)
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
-                    Text(item.filename).lineLimit(1)
+                    Text(item.filename)
+                        .lineLimit(1)
+                        .strikethrough(!item.isEnabled)
+                        .foregroundStyle(
+                            item.isEnabled ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
                     resumabilityBadge
                     if item.fileMissing {
                         Label("file missing", systemImage: "exclamationmark.triangle.fill")
@@ -345,6 +401,7 @@ private struct ItemRow: View {
         }
         .padding(.vertical, 4)
         .padding(.horizontal, 4)
+        .opacity(item.isEnabled ? 1.0 : 0.55)
         .listRowBackground(alternatingRowBackground)
     }
 
@@ -372,14 +429,9 @@ private struct ItemRow: View {
         case .failed:
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.red)
         case .queued:
-            // A user-disabled item and a scheduler-preempted one are both
-            // `.queued` (spec §6.1 collapses them onto one axis), so the
-            // enabled flag is what tells them apart here too.
-            if item.isEnabled {
-                Image(systemName: "clock.fill").foregroundStyle(.secondary)
-            } else {
-                Image(systemName: "pause.circle.fill").foregroundStyle(.secondary)
-            }
+            Image(systemName: "clock.fill").foregroundStyle(.secondary)
+        case .stopped:
+            Image(systemName: "pause.circle.fill").foregroundStyle(.secondary)
         }
     }
 
@@ -409,12 +461,15 @@ private struct ItemRow: View {
     }
 
     private static func describe(_ item: ItemSnapshot) -> String {
+        let base: String
         switch item.state {
-        case .queued: return item.isEnabled ? "Queued" : "Stopped"
-        case .running: return "Running"
-        case .completed: return "Completed"
-        case .failed(let reason): return "Failed — \(reason)"
+        case .queued: base = "Queued"
+        case .stopped: base = "Stopped"
+        case .running: base = "Running"
+        case .completed: base = "Completed"
+        case .failed(let reason): base = "Failed — \(reason)"
         }
+        return item.isEnabled ? base : "\(base) (disabled)"
     }
 
     /// Renders `isResumable`'s three states honestly: `nil` (not yet probed)

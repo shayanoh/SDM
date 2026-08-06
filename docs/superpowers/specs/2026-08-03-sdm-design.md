@@ -95,11 +95,20 @@ History lives in fixed-size in-memory ring buffers — 60 samples per item and p
 
 ## 6. Scheduler
 
-### 6.1 One axis: enabled / disabled
+### 6.1 Two independent axes: enabled/disabled and stopped/queued/running
 
-"Enable/disable" and "start/stop" are collapsed into a **single** enabled flag; an item's Start/Stop action *is* the enable toggle. Two independent axes would produce four states, two of which are indistinguishable to a user.
+Revised from the original single-axis design (an item's Start/Stop action *was* the enable toggle) after that collapse proved confusing in practice: Pause All and per-item Disable used the identical `isEnabled` bit, so there was no way to tell "the user turned this off" apart from "the user (or a bulk action) merely paused it," and "resume downloads on launch" needed its own separate in-memory suspension flag to avoid corrupting `isEnabled` on every restart.
 
-Terminology used consistently throughout this document: **disabling** an item is the user-initiated action ("pause" in the UI); **preempting** is the scheduler pausing a still-enabled item to free a slot. A preempted item remains enabled and returns to `queued`.
+Two axes now, kept deliberately independent:
+
+- **`isEnabled`** — purely user-managed. Set only by an explicit Disable/Enable action. Nothing else — not Pause All/Resume All, not the scheduler, not a relaunch — may ever change it. A disabled item never runs, and Start is unavailable for it until it is re-enabled.
+- **`state`** — the scheduling axis: `stopped`, `queued`, `running`, `completed`, or `failed(reason:)`. Stop moves an item to `stopped`; Start moves a `stopped`, enabled item to `queued`, where the scheduler picks it up. A **preempted** item (the scheduler pausing a still-running item to free a slot for something higher-ranked) returns to `queued`, not `stopped` — it is still desired, just outranked for a slot right now.
+
+Pause All and Resume All are defined as nothing more than "Stop/Start applied to every item" — same per-item eligibility, same calls, run in a loop. Neither ever touches `isEnabled`.
+
+"Resume downloads automatically on launch" no longer needs a dedicated suspension mechanism: the durable snapshot never records `queued`/`running` in the first place (every non-terminal item is written — and restored — as `stopped`; see §4.2), so the setting is simply whether `EngineController` calls `resumeAll()` once after `restore()`. Off means nothing is called and every item stays exactly as `restore()` left it.
+
+Terminology used consistently throughout this document: **disabling** an item is the user-initiated Disable action; **stopping** is the user-initiated Stop action (or Pause All applied to it); **preempting** is the scheduler pausing a still-running, still-enabled item to free a slot for a higher-ranked one.
 
 ### 6.2 Ranking
 

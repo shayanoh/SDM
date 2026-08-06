@@ -7,6 +7,10 @@ public struct DownloadItem: Identifiable, Equatable, Codable, Sendable {
     public var totalBytes: Int64?
     public var completed: RangeSet
     public var state: ItemState
+    /// Purely user-managed: "never start this, no matter what." Independent
+    /// of `state` — see `ItemState`'s doc comment. Only an explicit
+    /// Disable/Enable action may change this; scheduling actions (Start,
+    /// Stop, Pause All, Resume All, preemption) never touch it.
     public var isEnabled: Bool
     /// Whether the origin honors `Range` requests, or `nil` when it has not
     /// been probed yet.

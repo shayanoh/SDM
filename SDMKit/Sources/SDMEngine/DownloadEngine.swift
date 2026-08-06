@@ -66,7 +66,7 @@ public enum EngineError: Error, Equatable {
 public actor DownloadEngine {
     /// One in-flight item: the task doing the work and the job awaiting it.
     ///
-    /// A preempted runner is marked `isRetiring` and kept here until its job
+    /// A preempted or user-stopped runner is marked retiring and kept here until its job
     /// has actually unwound. That is what stops a second `DownloadTask` from
     /// being pointed at a destination file the first one has not finished
     /// with.
@@ -87,7 +87,20 @@ public actor DownloadEngine {
         let task: DownloadTask
         let job: Task<Void, Never>
         let destinationURL: URL
-        var isRetiring: Bool = false
+        var retireIntent: RetireIntent = .none
+    }
+
+    /// Why a runner is being torn down, decided at the moment it is marked
+    /// retiring and consulted later, once `run()`'s job actually finishes, to
+    /// pick the item's landing state. The two outcomes are genuinely
+    /// different: a preempted item must come back `.queued` — it is still
+    /// desired, just outranked for a slot right now — while a user-stopped
+    /// item must land `.stopped` and stay there until explicitly started
+    /// again.
+    private enum RetireIntent: Sendable {
+        case none
+        case preempted
+        case userStopped
     }
 
     private let transport: any HTTPTransport
@@ -176,11 +189,16 @@ public actor DownloadEngine {
     /// both fields describe the *previous* process's runtime state, not
     /// anything true of this one:
     ///
-    /// - `.running` becomes `.queued`. Nothing in this process is actually
-    ///   running it — the runner that made it `.running` died with the last
-    ///   process — and leaving it `.running` would make the scheduler believe
-    ///   a slot is occupied that is not, while telling the UI a download is
-    ///   in flight when no worker exists.
+    /// - `.running`/`.queued` becomes `.stopped`. `persist()` already writes
+    ///   every non-terminal item as `.stopped` (see its doc comment), so this
+    ///   only matters for a file from an older build or one hand-seeded by a
+    ///   test — but the invariant "the store never says something is in
+    ///   flight or about to run" should hold regardless of how the file got
+    ///   here. Nothing in this process is actually running it: the runner
+    ///   that made it `.running` died with the last process, and leaving it
+    ///   `.running`/`.queued` would make the scheduler believe a slot is
+    ///   occupied that is not, or auto-pick it up before the operator's
+    ///   "resume on launch" setting has had a say.
     /// - `isResumable` resets to `nil`. It records what the *previous*
     ///   process's probe found; this process has probed nothing yet. The
     ///   byte-level safety net is `DownloadTask.prepare()`'s validator check
@@ -198,8 +216,9 @@ public actor DownloadEngine {
         var restored = await stateStore.load().packages
         for packageIndex in restored.indices {
             for itemIndex in restored[packageIndex].items.indices {
-                if restored[packageIndex].items[itemIndex].state == .running {
-                    restored[packageIndex].items[itemIndex].state = .queued
+                switch restored[packageIndex].items[itemIndex].state {
+                case .running, .queued: restored[packageIndex].items[itemIndex].state = .stopped
+                case .stopped, .completed, .failed: break
                 }
                 restored[packageIndex].items[itemIndex].isResumable = nil
             }
@@ -224,13 +243,63 @@ public actor DownloadEngine {
         await reconcile()
     }
 
+    /// User-initiated Disable/Enable. Purely the `isEnabled` axis — see
+    /// `ItemState`'s doc comment for why this is independent of `state`.
+    ///
+    /// Disabling an item that is currently `.queued` or `.running` also stops
+    /// it (mirrors `stopItem`'s effect on `state`), since "disabled" must mean
+    /// "not running" immediately, not just "not eligible to be picked up
+    /// next." Enabling deliberately does *not* resume it — re-enabling only
+    /// makes the item startable again; the user (or Resume All) still has to
+    /// start it explicitly. That asymmetry is the point: it is what makes
+    /// Start disabled-but-visible rather than silently racing a re-enable.
     public func setEnabled(_ enabled: Bool, for itemID: UUID) async {
         mutateItem(itemID) { $0.isEnabled = enabled }
-        // An explicit start is exactly the user action that should lift the
-        // launch-time hold — see `isGloballySuspended`.
-        if enabled { isGloballySuspended = false }
+        if !enabled {
+            switch itemState(for: itemID) {
+            case .running:
+                retireRunnerNonBlocking(itemID)
+                mutateItem(itemID) { $0.state = .stopped }
+            case .queued:
+                mutateItem(itemID) { $0.state = .stopped }
+            default:
+                break
+            }
+        }
         await persist()
         await reconcile()
+    }
+
+    /// User-initiated Start: moves a `.stopped`, enabled item into `.queued`
+    /// so the scheduler can pick it up. A no-op on anything else — a disabled
+    /// item cannot be started (the UI disables the affordance too, this is
+    /// the backstop), and starting a `.queued`/`.running` item has nothing to
+    /// do.
+    public func startItem(_ itemID: UUID) async {
+        guard itemState(for: itemID) == .stopped, isItemEnabled(itemID) else { return }
+        mutateItem(itemID) { $0.state = .queued }
+        await persist()
+        await reconcile()
+    }
+
+    /// User-initiated Stop: moves a `.queued` or `.running` item to
+    /// `.stopped`, stopping its runner first if it has one. Does not touch
+    /// `isEnabled` — a stopped-but-enabled item is exactly what Resume All
+    /// looks for. A no-op on `.completed`/`.failed`/already-`.stopped` items.
+    public func stopItem(_ itemID: UUID) async {
+        switch itemState(for: itemID) {
+        case .running:
+            retireRunnerNonBlocking(itemID)
+            mutateItem(itemID) { $0.state = .stopped }
+            await persist()
+            await reconcile()
+        case .queued:
+            mutateItem(itemID) { $0.state = .stopped }
+            await persist()
+            await reconcile()
+        default:
+            return
+        }
     }
 
     public func setPriority(_ priority: Priority?, for itemID: UUID) async {
@@ -302,40 +371,23 @@ public actor DownloadEngine {
         await persist()
     }
 
-    /// Global pause/resume: spec-driven UI convenience over `setEnabled`,
-    /// applied to every item in one pass rather than one engine round trip
-    /// per item.
-    public func setEnabledForAllItems(_ enabled: Bool) async {
-        for packageIndex in packages.indices {
-            for itemIndex in packages[packageIndex].items.indices {
-                packages[packageIndex].items[itemIndex].isEnabled = enabled
-            }
+    /// Global pause: exactly "select every item and click Stop," nothing
+    /// more — same `stopItem` call, same eligibility, per item. Never touches
+    /// `isEnabled`.
+    public func pauseAll() async {
+        for itemID in packages.flatMap(\.items).map(\.id) {
+            await stopItem(itemID)
         }
-        if enabled { isGloballySuspended = false }
-        await persist()
-        await reconcile()
     }
 
-    /// A launch-time-only hold on starting *anything*, independent of any
-    /// item's own `isEnabled`. `isEnabled` is — and must stay — a value the
-    /// user sets explicitly; nothing here may flip it automatically, since
-    /// that would silently overwrite what the user asked for and persist the
-    /// mistake to disk on the next save. This flag is that: a purely
-    /// in-memory scheduling gate recomputed fresh from
-    /// `autoStartDownloadsOnLaunch` at the start of every launch, cleared by
-    /// the next explicit start (`setEnabled(true, ...)`,
-    /// `setEnabledForAllItems(true)`, or `retry`), and never itself
-    /// persisted.
-    private var isGloballySuspended = false
-
-    /// Called once, right after `restore()`, with the negation of the
-    /// operator's "resume downloads automatically on launch" setting. Held
-    /// items still show their real `.queued`/`isEnabled` state — this only
-    /// stops `reconcile()` from picking any of them to run until the
-    /// operator explicitly starts something.
-    public func setGloballySuspended(_ suspended: Bool) async {
-        isGloballySuspended = suspended
-        await reconcile()
+    /// Global resume: exactly "select every item and click Start," nothing
+    /// more — same `startItem` call, same eligibility (enabled and
+    /// `.stopped`), per item. A disabled item is left alone, same as it
+    /// would be by an individual Start.
+    public func resumeAll() async {
+        for itemID in packages.flatMap(\.items).map(\.id) {
+            await startItem(itemID)
+        }
     }
 
     /// Removes one item: stops its runner if it is currently running, always
@@ -425,11 +477,13 @@ public actor DownloadEngine {
         checkpointFailures[itemID] = nil
         attemptStartBytes[itemID] = nil
 
+        // `isEnabled` is untouched: a disabled item resets its bytes but
+        // stays disabled, rather than a reset silently overriding what the
+        // user explicitly turned off.
         mutateItem(itemID) {
             $0.completed = RangeSet()
             $0.totalBytes = nil
-            $0.state = .queued
-            $0.isEnabled = true
+            $0.state = $0.isEnabled ? .queued : .stopped
             $0.isResumable = nil
             $0.validator = nil
         }
@@ -442,11 +496,50 @@ public actor DownloadEngine {
     /// the task so its file descriptor closes, then await the job so
     /// `finish()` has already run and `runners[itemID]` is cleared before the
     /// caller touches disk.
+    ///
+    /// Blocking here is deliberate and safe for this method's callers
+    /// (`removeItem`, `removePackage`, `resetDownload`): they are about to
+    /// touch the same file on disk and must not race the worker that has it
+    /// open, and each already overwrites the item's landing state (or
+    /// removes the item outright) immediately after, so whatever `run()`
+    /// lands on in the meantime is transient. Marking `.preempted` (rather
+    /// than leaving `.none`) matters independently of that overwrite though:
+    /// without it, the cancellation was charged to the item's retry budget —
+    /// `run()`'s catch block would classify it as a real failure and could
+    /// leave the item silently held in `retryHoldTicks` backoff, invisible in
+    /// `state` but enough to make a later restart sit `.queued` and never
+    /// actually get picked up until the backoff aged out on its own.
+    ///
+    /// User-facing Stop/Disable do **not** go through this method — see
+    /// `retireRunnerNonBlocking`.
     private func stopRunnerIfRunning(_ itemID: UUID) async {
         guard let runner = runners[itemID] else { return }
+        runners[itemID]?.retireIntent = .preempted
         runner.job.cancel()
         await runner.task.pause()
         _ = await runner.job.value
+    }
+
+    /// Cancels a running item's job **without** waiting for it to actually
+    /// finish unwinding — the counterpart to `stopRunnerIfRunning` for
+    /// user-facing Stop/Disable.
+    ///
+    /// Blocking there (as `stopRunnerIfRunning` does) would hang the caller
+    /// for as long as the worker's in-flight read takes to resolve — against
+    /// a origin that is merely slow, or a `.probe`-phase test gate that has
+    /// not opened yet, that is indefinite. That defeats the point of a
+    /// user-facing Stop, which must return immediately even against a hung
+    /// read. The runner stays in `runners` (now marked `.userStopped`) until
+    /// `run()` completes on its own schedule; its catch block then lands the
+    /// item at `.stopped` — see `finish()`'s caller. Until that happens, the
+    /// item cannot be restarted (`reconcile()` only starts an item once
+    /// `runners[itemID]` is `nil`), the same transient unavailability a
+    /// preempted-but-not-yet-unwound item already has.
+    private func retireRunnerNonBlocking(_ itemID: UUID) {
+        guard let runner = runners[itemID], runner.retireIntent == .none else { return }
+        runners[itemID]?.retireIntent = .userStopped
+        runner.job.cancel()
+        Task { await runner.task.pause() }
     }
 
     private func trashIfExists(_ url: URL) {
@@ -476,7 +569,7 @@ public actor DownloadEngine {
     public func setSegmentCount(_ count: Int, for itemID: UUID) async {
         precondition(count >= 1, "segment count must be at least 1")
         segmentOverrides[itemID] = count
-        if let runner = runners[itemID], !runner.isRetiring {
+        if let runner = runners[itemID], runner.retireIntent == .none {
             await runner.task.setWorkerCount(count)
         }
     }
@@ -498,7 +591,6 @@ public actor DownloadEngine {
         }
         failedAttempts[itemID] = nil
         retryHoldTicks[itemID] = nil
-        isGloballySuspended = false
         await persist()
         await reconcile()
     }
@@ -510,13 +602,20 @@ public actor DownloadEngine {
         return nil
     }
 
+    private func isItemEnabled(_ itemID: UUID) -> Bool {
+        for package in packages {
+            if let item = package.items.first(where: { $0.id == itemID }) { return item.isEnabled }
+        }
+        return false
+    }
+
     /// One-second heartbeat: folds the window's bytes into the samplers,
     /// drives the wall-clock half of the sidecar checkpoint trigger, closes
     /// the speed window, ages retry backoff, writes debounced durable state,
     /// and reschedules.
     public func tick() async {
         currentTick += 1
-        for (itemID, runner) in runners where !runner.isRetiring {
+        for (itemID, runner) in runners where runner.retireIntent == .none {
             let transferred = await runner.task.completedRanges.totalBytes
             recordProgress(transferred, for: itemID)
             // Spec §4.3: "every ~8 MB per worker or every 5 s, whichever comes
@@ -714,8 +813,9 @@ public actor DownloadEngine {
 
         var changed = false
         var retiring: [DownloadTask] = []
-        for (itemID, runner) in runners where !desired.contains(itemID) && !runner.isRetiring {
-            runners[itemID]?.isRetiring = true
+        for (itemID, runner) in runners
+        where !desired.contains(itemID) && runner.retireIntent == .none {
+            runners[itemID]?.retireIntent = .preempted
             runner.job.cancel()
             retiring.append(runner.task)
             mutateItem(itemID) { $0.state = .queued }
@@ -781,7 +881,8 @@ public actor DownloadEngine {
         // sibling finishing frees budget the survivors should grow back into,
         // and a newly-added item can just as easily squeeze existing ones
         // down.
-        for (itemID, runner) in runners where !runner.isRetiring && desired.contains(itemID) {
+        for (itemID, runner) in runners
+        where runner.retireIntent == .none && desired.contains(itemID) {
             if let allocated = allocatedSegments[itemID] {
                 await runner.task.setWorkerCount(allocated)
             }
@@ -817,22 +918,7 @@ public actor DownloadEngine {
     /// scheduler's answer afterwards — keeps `Scheduler.desiredRunningSet` a
     /// pure function of its input, which is what makes spec §6 table-testable.
     ///
-    /// `isGloballySuspended` piggybacks on the same mechanism: it presents
-    /// every item as disabled to the scheduler for this one computation only.
-    /// This is a *view* handed to `Scheduler`, built fresh from `packages`
-    /// every call and never written back — so it holds everything from
-    /// starting without ever touching a single item's real, user-owned
-    /// `isEnabled`.
     private func schedulablePackages() -> [DownloadPackage] {
-        guard !isGloballySuspended else {
-            var held = packages
-            for packageIndex in held.indices {
-                for itemIndex in held[packageIndex].items.indices {
-                    held[packageIndex].items[itemIndex].isEnabled = false
-                }
-            }
-            return held
-        }
         guard !retryHoldTicks.isEmpty else { return packages }
         var held = packages
         for packageIndex in held.indices {
@@ -856,7 +942,7 @@ public actor DownloadEngine {
     /// at the head of every `reconcile()` means the very scheduling decision
     /// that could preempt it is already looking at the real value.
     private func refreshResumability() async {
-        for (itemID, runner) in runners where !runner.isRetiring {
+        for (itemID, runner) in runners where runner.retireIntent == .none {
             guard let supportsRanges = await runner.task.probedSupportsRanges else { continue }
             mutateItem(itemID) { $0.isResumable = supportsRanges }
         }
@@ -899,14 +985,15 @@ public actor DownloadEngine {
     }
 
     private func run(itemID: UUID, task: DownloadTask) async {
-        let state: ItemState
+        let state: ItemState?
         do {
             _ = try await task.start()
             state = .completed
             failedAttempts[itemID] = nil
             retryHoldTicks[itemID] = nil
         } catch {
-            if runners[itemID]?.isRetiring == true {
+            switch runners[itemID]?.retireIntent ?? .none {
+            case .preempted:
                 // Preemption, not failure. `reconcile()` cancelled this job
                 // and paused its task, so `start()` throwing here is the
                 // expected shape of a scheduler decision — charging it to the
@@ -915,7 +1002,16 @@ public actor DownloadEngine {
                 // often, and holding it in backoff would stop it resuming the
                 // moment a slot frees up.
                 state = .queued
-            } else {
+            case .userStopped:
+                // A deliberate Stop/Disable, not a failure. `state` was
+                // already set to `.stopped` synchronously by `stopItem`/
+                // `setEnabled` — retiring here is non-blocking, precisely so
+                // that call didn't have to wait for this moment — and may
+                // have moved on since (re-enabled and restarted). `nil` tells
+                // `finish()` to leave it alone rather than reassert a verdict
+                // about a run that's no longer current.
+                state = nil
+            case .none:
                 let progressed =
                     await task.completedRanges.totalBytes > (attemptStartBytes[itemID] ?? 0)
                 state = failureState(for: error, itemID: itemID, madeProgress: progressed)
@@ -951,7 +1047,7 @@ public actor DownloadEngine {
         completed: RangeSet,
         totalBytes: Int64?,
         isResumable: Bool?,
-        state: ItemState
+        state: ItemState?
     ) {
         recordProgress(completed.totalBytes, for: itemID)
         // Only the runner that is still the current one may write back; a
@@ -963,7 +1059,15 @@ public actor DownloadEngine {
             $0.completed = completed
             if let totalBytes { $0.totalBytes = totalBytes }
             if let isResumable { $0.isResumable = isResumable }
-            $0.state = state
+            // `nil` (only ever passed for `.userStopped`) means: `state` was
+            // already set synchronously by `stopItem`/`setEnabled` at the
+            // moment this runner was retired, and — because retiring here is
+            // deliberately non-blocking — the user may since have re-enabled
+            // and restarted the item before this old, cancelled attempt got
+            // around to actually unwinding. Overwriting here would clobber
+            // that newer, authoritative state with a stale verdict about a
+            // run that no longer reflects what the item is doing.
+            if let state { $0.state = state }
         }
     }
 
@@ -1071,8 +1175,28 @@ public actor DownloadEngine {
 
     /// Queues the current package graph for durable storage and starts (or
     /// leaves running) the debounce window `tick()` drains.
+    ///
+    /// `.queued`/`.running` are squashed to `.stopped` in what actually gets
+    /// written — nothing "in flight" or "about to run" is ever true of a
+    /// process that isn't currently alive to act on it, so the durable
+    /// snapshot should not claim otherwise. This is also what makes restart
+    /// behavior fall out of existing primitives with no dedicated mechanism:
+    /// every restored item lands `.stopped` (or terminal), and "resume
+    /// downloads automatically on launch" is then just `resumeAll()` called
+    /// once after `restore()` — see `EngineController`. Live in-memory
+    /// `packages` is untouched; only the copy handed to `stateStore` is
+    /// transformed.
     private func persist() async {
-        await stateStore.save(PersistedState(packages: packages))
+        var forStorage = packages
+        for packageIndex in forStorage.indices {
+            for itemIndex in forStorage[packageIndex].items.indices {
+                switch forStorage[packageIndex].items[itemIndex].state {
+                case .queued, .running: forStorage[packageIndex].items[itemIndex].state = .stopped
+                case .stopped, .completed, .failed: break
+                }
+            }
+        }
+        await stateStore.save(PersistedState(packages: forStorage))
         if ticksSincePendingChange == nil { ticksSincePendingChange = 0 }
     }
 }

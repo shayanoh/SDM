@@ -90,14 +90,16 @@ final class EngineController {
     /// reopens without the process exiting.
     func startHeartbeat() async {
         await engine.restore()
-        // Off by default: nothing should start pulling bytes just because the
-        // app opened. This is a purely in-memory scheduling hold — it never
-        // touches any item's own `isEnabled`, which is a value the user sets
-        // explicitly and which must never change on its own (an earlier
-        // version of this got that wrong by force-disabling and persisting
-        // every item, which durably clobbered whatever the user had actually
-        // set). The hold is lifted the moment the operator starts anything.
-        await engine.setGloballySuspended(!EngineSettingsStore.autoStartDownloadsOnLaunch)
+        // `restore()` always lands every non-terminal item `.stopped` — the
+        // store never persists `.queued`/`.running` (see
+        // `DownloadEngine.persist()`) — so "resume downloads automatically on
+        // launch" is nothing more than the same `resumeAll()` Resume All
+        // uses: enabled, stopped items requeue; disabled ones stay put. Off
+        // by default means simply not calling it, leaving everything exactly
+        // as `restore()` left it.
+        if EngineSettingsStore.autoStartDownloadsOnLaunch {
+            await engine.resumeAll()
+        }
         snapshot = await engine.snapshot()
         notifications.requestAuthorization()
 
@@ -149,6 +151,16 @@ final class EngineController {
         snapshot = await engine.snapshot()
     }
 
+    func startItem(_ itemID: UUID) async {
+        await engine.startItem(itemID)
+        snapshot = await engine.snapshot()
+    }
+
+    func stopItem(_ itemID: UUID) async {
+        await engine.stopItem(itemID)
+        snapshot = await engine.snapshot()
+    }
+
     func retry(_ itemID: UUID) async {
         await engine.retry(itemID)
         snapshot = await engine.snapshot()
@@ -169,10 +181,15 @@ final class EngineController {
         snapshot = await engine.snapshot()
     }
 
-    /// Global pause/resume, spec-adjacent UI convenience: pauses or
-    /// (re-)queues every item in one call.
-    func setAllEnabled(_ enabled: Bool) async {
-        await engine.setEnabledForAllItems(enabled)
+    /// Global pause/resume: stops or (re-)queues every stoppable/resumable
+    /// item in one call. Never touches any item's `isEnabled`.
+    func pauseAll() async {
+        await engine.pauseAll()
+        snapshot = await engine.snapshot()
+    }
+
+    func resumeAll() async {
+        await engine.resumeAll()
         snapshot = await engine.snapshot()
     }
 
@@ -205,11 +222,14 @@ final class EngineController {
     /// to downloads" / "Add and start".
     func addPackage(name: String, urls: [URL], startImmediately: Bool) async {
         guard !urls.isEmpty else { return }
+        // `startImmediately` is a scheduling choice (queued vs. stopped), not
+        // a disable — a freshly grabbed item is always enabled; see
+        // `ItemState`'s doc comment for why the two axes stay independent.
         let items = urls.map { url in
             DownloadItem(
                 url: url,
                 filename: url.lastPathComponent.isEmpty ? "download" : url.lastPathComponent,
-                isEnabled: startImmediately
+                state: startImmediately ? .queued : .stopped
             )
         }
         await engine.add(DownloadPackage(name: name, items: items))

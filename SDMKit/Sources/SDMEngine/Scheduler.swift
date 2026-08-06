@@ -100,7 +100,7 @@ public enum Scheduler {
         guard item.isEnabled else { return false }
         switch item.state {
         case .queued, .running: return true
-        case .completed, .failed: return false
+        case .stopped, .completed, .failed: return false
         }
     }
 }

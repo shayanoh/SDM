@@ -149,28 +149,80 @@ import Testing
     #expect(await snapshotItem(item.id, in: engine)?.fileMissing == true)
 }
 
-@Test func setEnabledForAllItemsTogglesEveryItem() async throws {
+/// `pauseAll()`/`resumeAll()` are defined as "select every item and click
+/// Stop/Start" — nothing more. In particular neither touches `isEnabled`, so
+/// a user-disabled item stays stopped through a full pause/resume cycle
+/// (Resume All is not a backdoor around Disable) while an enabled sibling
+/// gets queued again.
+@Test func pauseAllAndResumeAllNeverTouchIsEnabled() async throws {
     let dir = try makeScratchDirectory()
     defer { try? FileManager.default.removeItem(at: dir) }
-    let engine = DownloadEngine(
-        transport: FakeOrigin(payload: testPayload(10)),
-        stateStore: InMemoryStateStore(),
-        settings: EngineSettings(
-            maxConcurrent: 1, segmentsPerItem: 1, globalMaxConnections: 8, downloadFolder: dir)
-    )
+    let gate = Gate()
+    let engine = makeGatedEngine(payload: testPayload(10), folder: dir, gate: gate, phase: .body)
     let items = (0..<2).map {
-        DownloadItem(
-            url: URL(string: "https://example.com/\($0).bin")!, filename: "\($0).bin",
-            isEnabled: false)
+        DownloadItem(url: URL(string: "https://example.com/\($0).bin")!, filename: "\($0).bin")
     }
     let packageID = UUID()
     await engine.add(DownloadPackage(id: packageID, name: "Batch", items: items))
+    await gate.waitForArrival()
 
-    await engine.setEnabledForAllItems(true)
+    // One item explicitly disabled by the user before the blanket pause.
+    await engine.setEnabled(false, for: items[1].id)
+
+    await engine.pauseAll()
     var snapshot = await engine.snapshot()
-    #expect(snapshot.packages[0].items.allSatisfy { $0.isEnabled })
+    #expect(snapshot.packages[0].items.allSatisfy { $0.state == .stopped })
+    #expect(snapshot.packages[0].items[0].isEnabled == true)
+    #expect(snapshot.packages[0].items[1].isEnabled == false)
 
-    await engine.setEnabledForAllItems(false)
+    await engine.resumeAll()
     snapshot = await engine.snapshot()
-    #expect(snapshot.packages[0].items.allSatisfy { !$0.isEnabled })
+    // The enabled item is queued again; the disabled one stays stopped —
+    // Resume All is not a backdoor around Disable.
+    #expect(snapshot.packages[0].items[0].state == .queued)
+    #expect(snapshot.packages[0].items[1].state == .stopped)
+    #expect(snapshot.packages[0].items[1].isEnabled == false)
+
+    await gate.open()
+    try await engine.runUntilIdle()
+}
+
+/// Disabling a running item stops it immediately (not merely marks it
+/// ineligible for the next reconcile), and re-enabling it does not itself
+/// resume it — the user still has to `startItem`.
+@Test func disablingARunningItemStopsItAndEnablingAloneDoesNotResumeIt() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let payload = testPayload(1000)
+    let gate = Gate()
+    let engine = makeGatedEngine(payload: payload, folder: dir, gate: gate, phase: .body)
+    let package = DownloadPackage(
+        name: "Batch",
+        items: [DownloadItem(url: URL(string: "https://example.com/a.bin")!, filename: "a.bin")]
+    )
+    let itemID = package.items[0].id
+    await engine.add(package)
+    await gate.waitForArrival()
+
+    // Disabling returns immediately — it does not wait for the gated worker
+    // to actually unwind (that would hang for as long as the gate stays
+    // closed, defeating the point of a user-facing Stop). The item's `state`
+    // still flips to `.stopped` synchronously either way.
+    await engine.setEnabled(false, for: itemID)
+    #expect(await snapshotItem(itemID, in: engine)?.state == .stopped)
+
+    await engine.setEnabled(true, for: itemID)
+    #expect(await snapshotItem(itemID, in: engine)?.state == .stopped)
+
+    await engine.startItem(itemID)
+    #expect(await snapshotItem(itemID, in: engine)?.state == .queued)
+
+    // The old (cancelled, but not yet unwound) runner is still occupying the
+    // item's slot in `runners`, so nothing new starts until it actually
+    // finishes — which only happens once the gate opens. `runUntilIdle()`
+    // drains that old runner first, reconciles again, and only then starts
+    // the fresh attempt that reaches completion.
+    await gate.open()
+    try await engine.runUntilIdle()
+    #expect(await snapshotItem(itemID, in: engine)?.state == .completed)
 }

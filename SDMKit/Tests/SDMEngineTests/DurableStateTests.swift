@@ -176,15 +176,19 @@ private func stoppedPackage(_ name: String = "a.bin") -> DownloadPackage {
     )
     await secondEngine.restore()
 
-    // The item came back from the JSON file. Its progress is not re-asserted
-    // here: `restore()` reconciles, so by now a runner exists and `snapshot()`
-    // reports the *task's* set, which is empty until `prepare()` has loaded
-    // the sidecar. The persisted figure was checked above; what the resumed
-    // run does with it is proved below, by what it asks the origin for.
+    // The item came back from the JSON file, landed `.stopped` (restore never
+    // auto-resumes — see `DownloadEngine.restore()`'s doc comment). The
+    // persisted figure was checked above; what the resumed run does with it
+    // is proved below, by what it asks the origin for.
     let restored = try #require(
         await secondEngine.snapshot().packages.flatMap(\.items).first { $0.id == itemID }
     )
     #expect(restored.filename == "a.bin")
+    #expect(restored.state == .stopped)
+
+    // "Resume downloads automatically on launch" is exactly this call, made
+    // by `EngineController` in the real app — see `DownloadEngine.resumeAll`.
+    await secondEngine.resumeAll()
 
     try await secondEngine.runUntilIdle()
 

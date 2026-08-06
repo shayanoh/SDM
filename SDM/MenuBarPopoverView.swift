@@ -54,9 +54,7 @@ struct MenuBarPopoverView: View {
 
             HStack {
                 Button("Pause all") {
-                    Task {
-                        for item in activeItems { await controller.setEnabled(false, for: item.id) }
-                    }
+                    Task { await controller.pauseAll() }
                 }
                 Spacer()
                 Button("Open SDM") {

@@ -37,8 +37,11 @@ enum EngineSettingsStore {
     }
 
     /// Off by default: a freshly launched app should not start pulling bytes
-    /// until the operator says so. When `false`, `EngineController` forces
-    /// every restored item's `isEnabled` to `false` right after `restore()`.
+    /// until the operator says so. When `true`, `EngineController` calls
+    /// `DownloadEngine.resumeAll()` once right after `restore()` — the same
+    /// call Resume All uses, requeuing every enabled, `.stopped` item and
+    /// leaving disabled ones alone. When `false`, nothing is called and
+    /// everything simply stays `.stopped`, exactly as `restore()` left it.
     static var autoStartDownloadsOnLaunch: Bool {
         get { defaults.object(forKey: Key.autoStartDownloadsOnLaunch) as? Bool ?? false }
         set { defaults.set(newValue, forKey: Key.autoStartDownloadsOnLaunch) }

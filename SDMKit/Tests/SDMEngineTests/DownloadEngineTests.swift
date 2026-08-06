@@ -140,7 +140,7 @@ private func packageOf(_ names: [String]) -> DownloadPackage {
 
 // MARK: - A transport that can be suspended at a chosen point
 
-private enum GatePhase: Sendable {
+enum GatePhase: Sendable {
     /// Block inside `fetch` for the one-byte probe, i.e. inside `prepare()`.
     case probe
     /// Block halfway through a body stream, i.e. inside `download(_:)`.
@@ -149,7 +149,7 @@ private enum GatePhase: Sendable {
 
 /// Lets a test park a download at an exact point and release it later,
 /// without sleeping on a real clock.
-private actor Gate {
+actor Gate {
     private var isOpen = false
     private var hasArrived = false
     private var openWaiters: [CheckedContinuation<Void, Never>] = []
@@ -181,7 +181,7 @@ private actor Gate {
     }
 }
 
-private struct GatedOrigin: HTTPTransport {
+struct GatedOrigin: HTTPTransport {
     let payload: Data
     let gate: Gate
     let phase: GatePhase
@@ -239,7 +239,7 @@ private struct GatedOrigin: HTTPTransport {
     }
 }
 
-private func makeGatedEngine(
+func makeGatedEngine(
     payload: Data,
     folder: URL,
     gate: Gate,
@@ -297,12 +297,13 @@ private func makeGatedEngine(
     await gate.open()
     try await engine.runUntilIdle()
 
-    #expect(await snapshotItem(itemID, in: engine)?.state == .queued)
+    #expect(await snapshotItem(itemID, in: engine)?.state == .stopped)
 
     // A 30 s backoff would keep it out of the desired set for 30 ticks; a
     // charged attempt against maxAttempts 1 would have made it terminal. It
     // must simply start again on the very next reconcile.
     await engine.setEnabled(true, for: itemID)
+    await engine.startItem(itemID)
     try await engine.runUntilIdle()
 
     #expect(await snapshotItem(itemID, in: engine)?.state == .completed)
@@ -391,7 +392,7 @@ private func makeGatedEngine(
     try await engine.runUntilIdle()
 
     let item = try #require(await engine.snapshot().packages.first?.items.first)
-    #expect(item.state == .queued)
+    #expect(item.state == .stopped)
     #expect(item.completed.totalBytes == 0)
     #expect(
         !FileManager.default.fileExists(
@@ -656,10 +657,13 @@ private func makeGatedEngine(
     let restoredPackages = await engine.snapshot().packages
     #expect(restoredPackages.map(\.name) == ["Batch"])
     let restoredItem = try #require(restoredPackages.first?.items.first { $0.id == itemID })
-    // Landing state: never `.running` on arrival — nothing in this process is
-    // actually running it, and reporting otherwise would misinform both the
-    // scheduler and the UI.
-    #expect(restoredItem.state == .queued)
+    // Landing state: never `.running`/`.queued` on arrival — nothing in this
+    // process is actually running it or about to, and reporting otherwise
+    // would misinform both the scheduler and the UI. `persist()` never writes
+    // `.running`/`.queued` either (see its doc comment), so every restored
+    // non-terminal item lands `.stopped` regardless of what it was doing when
+    // the previous process quit.
+    #expect(restoredItem.state == .stopped)
     // Progress from the store survives the round trip verbatim (no runner
     // exists for a disabled item, so this reads straight from the restored
     // item rather than a live task).
@@ -669,7 +673,12 @@ private func makeGatedEngine(
     // before this process has verified anything about the origin.
     #expect(restoredItem.isResumable == nil)
 
+    // Re-enabling alone does not resume a stopped item — same as everywhere
+    // else, the user still has to start it explicitly. "b.bin" was never
+    // disabled, so `resumeAll()` alone (the app layer's "resume on launch")
+    // is enough for it; "a.bin" also needs re-enabling first.
     await engine.setEnabled(true, for: itemID)
+    await engine.resumeAll()
     try await engine.runUntilIdle()
     let batch = dir.appendingPathComponent("Batch")
     #expect(try Data(contentsOf: batch.appendingPathComponent("a.bin")) == payload)
