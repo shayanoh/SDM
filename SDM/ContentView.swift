@@ -10,21 +10,66 @@ import SDMEngine
 import SwiftUI
 
 struct ContentView: View {
+    enum SidebarItem: Hashable {
+        case downloads, linkgrabber, completed
+    }
+
     @Environment(EngineController.self) private var controller
     @Environment(GrabberController.self) private var grabberController
+    @Binding var selection: SidebarItem?
     @State private var urlText = ""
 
     var body: some View {
-        TabView {
-            downloadsTab
-                .tabItem { Label("Downloads", systemImage: "arrow.down.circle") }
-            LinkGrabberView()
-                .tabItem { Label("Linkgrabber", systemImage: "link") }
+        NavigationSplitView {
+            List(selection: $selection) {
+                Label("Downloads", systemImage: "arrow.down.circle").tag(SidebarItem.downloads)
+                Label("Linkgrabber", systemImage: "link").tag(SidebarItem.linkgrabber)
+                Label("Completed", systemImage: "checkmark.circle").tag(SidebarItem.completed)
+                Section("Overview") { statsBlock }
+            }
+            .navigationSplitViewColumnWidth(min: 200, ideal: 220)
+        } detail: {
+            switch selection ?? .downloads {
+            case .downloads: downloadsTab
+            case .linkgrabber: LinkGrabberView()
+            case .completed: completedTab
+            }
         }
-        .frame(minWidth: 640, minHeight: 420)
+        .frame(minWidth: 760, minHeight: 480)
         .onChange(of: controller.snapshot) { _, newSnapshot in
             let urls = Set(newSnapshot.packages.flatMap { $0.items.map(\.url) })
             Task { await grabberController.setKnownDownloadURLs(urls) }
+        }
+    }
+
+    private var statsBlock: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(formatted(controller.snapshot.globalBytesPerSecond)).font(
+                .headline.monospacedDigit())
+            BandwidthGraph(history: controller.snapshot.globalHistory).frame(height: 40)
+            Text("\(activeCount) active").font(.caption).foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var activeCount: Int {
+        controller.snapshot.packages.flatMap(\.items).filter { $0.state == .running }.count
+    }
+
+    /// Spec §9.1: "Completed is a filtered view of the same list, not a
+    /// separate store." A predicate over `controller.snapshot`, nothing more.
+    private var completedTab: some View {
+        List {
+            ForEach(controller.snapshot.packages) { package in
+                let completedItems = package.items.filter { $0.state == .completed }
+                if !completedItems.isEmpty {
+                    Section(package.name) {
+                        ForEach(completedItems) { item in
+                            ItemRow(item: item, controller: controller)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -85,6 +130,13 @@ private struct ItemRow: View {
                     Task { await controller.setEnabled(enabled, for: id) }
                 }
                 .controlSize(.small)
+                if item.remainingAttempts != nil, isFailed {
+                    Button("Retry") {
+                        let id = item.id
+                        Task { await controller.retry(id) }
+                    }
+                    .controlSize(.small)
+                }
                 Text(item.filename).lineLimit(1)
                 resumabilityBadge
                 Spacer()

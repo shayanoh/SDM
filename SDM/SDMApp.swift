@@ -44,10 +44,11 @@ struct SDMApp: App {
     /// probe) does not re-add the same package a second time — `addPackage`
     /// has no idempotency of its own.
     @State private var autoAddedLinkIDs: Set<UUID> = []
+    @State private var sidebarSelection: ContentView.SidebarItem? = .downloads
 
     var body: some Scene {
-        WindowGroup {
-            ContentView()
+        WindowGroup(id: "main") {
+            ContentView(selection: $sidebarSelection)
                 .environment(controller)
                 .environment(grabberController)
                 .task {
