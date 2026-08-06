@@ -17,6 +17,10 @@ final class GrabberController {
             prober: LinkProber(
                 transport: URLSessionProbeTransport(),
                 deepSniffEnabled: GrabberSettings.deepSniffEnabled
+            ),
+            budget: GrabberSession.Budget(
+                globalMaxConcurrentProbes: EngineSettingsStore.globalMaxConnections,
+                maxConcurrentPerHost: EngineSettingsStore.maxConnectionsPerHost
             )
         )
     }
