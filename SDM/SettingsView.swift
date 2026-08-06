@@ -1,7 +1,10 @@
+import SDMCore
 import SwiftUI
 
 struct SettingsView: View {
     @Environment(EngineController.self) private var controller
+    @Environment(ThemeStore.self) private var themeStore
+    @Environment(ActivationPolicyController.self) private var activationPolicyController
     @State private var maxConcurrent = EngineSettingsStore.maxConcurrent
     @State private var segmentsPerItem = EngineSettingsStore.segmentsPerItem
     @State private var globalMaxConnections = EngineSettingsStore.globalMaxConnections
@@ -44,6 +47,33 @@ struct SettingsView: View {
                 Toggle("Package finished", isOn: $packageFinishedEnabled)
                 Toggle("Download failed", isOn: $downloadFailedEnabled)
                 Toggle("Links grabbed", isOn: $linksGrabbedEnabled)
+            }
+            Section("Appearance") {
+                Picker(
+                    "Theme",
+                    selection: Binding(
+                        get: { themeStore.selectedID },
+                        set: { themeStore.selectedID = $0 }
+                    )
+                ) {
+                    Text("System").tag(ThemeStore.systemSelectionID)
+                    ForEach(themeStore.catalog) { theme in
+                        Text(theme.name).tag(theme.id)
+                    }
+                }
+            }
+            Section("Window") {
+                Picker(
+                    "Dock / Menu Bar",
+                    selection: Binding(
+                        get: { activationPolicyController.mode },
+                        set: { activationPolicyController.mode = $0 }
+                    )
+                ) {
+                    ForEach(ActivationPolicyMode.allCases) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
             }
         }
         .padding()
