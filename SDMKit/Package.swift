@@ -10,7 +10,7 @@ let package = Package(
         .library(name: "SDMGrabber", targets: ["SDMGrabber"]),
     ],
     targets: [
-        .target(name: "SDMCore"),
+        .target(name: "SDMCore", resources: [.process("Resources")]),
         .target(name: "SDMEngine", dependencies: ["SDMCore"]),
         .target(name: "SDMGrabber", dependencies: ["SDMCore"]),
         .testTarget(name: "SDMCoreTests", dependencies: ["SDMCore"]),
