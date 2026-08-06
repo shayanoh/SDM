@@ -27,7 +27,6 @@ struct MainWindowView: View {
     @State private var collapsedPackageIDs: Set<UUID> = []
     @State private var collapsedCompletedPackageIDs: Set<UUID> = []
     @State private var pendingDeletion: PendingDeletion?
-    @State private var mouseSuppressionMonitor: Any?
 
     /// What a "Remove and Delete" confirmation is about to act on. Unified
     /// into one enum (rather than two separate optional-ID states, one per
@@ -65,7 +64,7 @@ struct MainWindowView: View {
                     .badge(grabberController.snapshot.totalCount)
                     .tag(SidebarItem.linkgrabber)
                     .listRowBackground(sidebarRowBackground(.linkgrabber))
-                Section("Overview") { statsBlock }
+                Section("Overview") { OverviewStatsBlock() }
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 220)
             // `List` paints its own opaque system background regardless of
@@ -79,7 +78,6 @@ struct MainWindowView: View {
             // `NativeSelectionHighlightDisabler`'s doc comment. The
             // `.listRowBackground` calls above are the actual selection
             // indicator now.
-            .hidesNativeSelectionHighlight()
             .sdmSurface(.sidebar)
         } detail: {
             switch selection ?? .downloads {
@@ -89,17 +87,28 @@ struct MainWindowView: View {
             }
         }
         .frame(minWidth: 760, minHeight: 480)
+        // `.toolbarBackground`/`.toolbarColorScheme` are SwiftUI-managed —
+        // unlike setting `NSWindow.titlebarAppearsTransparent` directly
+        // (tried and reverted), SwiftUI keeps its own safe-area boundary for
+        // the titlebar/toolbar region intact, so a scrolled `List` row still
+        // stops at that boundary instead of painting through the title text.
+        .toolbarBackground(theme.surfacePrimaryColor, for: .windowToolbar)
+        .toolbarBackground(.visible, for: .windowToolbar)
+        .toolbarColorScheme(theme.isDark ? .dark : .light, for: .windowToolbar)
         .task(id: themeStore.selectedID) { applyNativeAppearance() }
         .onChange(of: colorScheme) { _, _ in applyNativeAppearance() }
-        .onAppear { installMouseSuppressionMonitor() }
-        .onDisappear {
-            if let mouseSuppressionMonitor {
-                NSEvent.removeMonitor(mouseSuppressionMonitor)
-            }
-            mouseSuppressionMonitor = nil
-        }
-        .onChange(of: controller.snapshot) { _, newSnapshot in
-            let urls = Set(newSnapshot.packages.flatMap { $0.items.map(\.url) })
+        // Watches `structuralPackages` rather than the tick-frequency
+        // `snapshot` — evaluating this modifier reads its watched value
+        // during `body`'s own evaluation, so watching the always-changing
+        // `snapshot` was forcing `MainWindowView.body` (and everything it
+        // constructs, including `downloadsTab`/`PackagesListView`) to
+        // re-evaluate on every heartbeat tick regardless of `PackagesListView`
+        // 's own optimizations. Known-download URLs only ever change on a
+        // structural event (an item added or removed) anyway, so this is
+        // also the semantically correct thing to watch, not just the
+        // cheaper one.
+        .onChange(of: controller.structuralPackages) { _, newPackages in
+            let urls = Set(newPackages.flatMap { $0.items.map(\.url) })
             Task { await grabberController.setKnownDownloadURLs(urls) }
         }
         .sheet(item: $pendingDeletion) { deletion in
@@ -140,27 +149,6 @@ struct MainWindowView: View {
         selection == item ? theme.selectionTintColor.opacity(0.35) : Color.clear
     }
 
-    /// Pauses `EngineController`'s snapshot publishing for exactly the span
-    /// a mouse button is held down, so an in-flight drag-and-drop reorder in
-    /// `PackagesListView` isn't interrupted by the `List` being handed fresh
-    /// data mid-gesture (AppKit resets a table's drag session when its data
-    /// source reloads mid-drag). Installed once for the whole window rather
-    /// than per-list, since only one drag can be in flight at a time
-    /// regardless of which list it started in.
-    private func installMouseSuppressionMonitor() {
-        guard mouseSuppressionMonitor == nil else { return }
-        mouseSuppressionMonitor = NSEvent.addLocalMonitorForEvents(
-            matching: [.leftMouseDown, .leftMouseUp]
-        ) { event in
-            if event.type == .leftMouseDown {
-                controller.suppressPublishing()
-            } else {
-                controller.resumePublishing()
-            }
-            return event
-        }
-    }
-
     /// Gathers what the confirmation sheet needs to show — how many files,
     /// their combined size, and their names — fresh from the current
     /// snapshot each time a deletion is pending.
@@ -197,33 +185,10 @@ struct MainWindowView: View {
         }
     }
 
-    private var statsBlock: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            if activeCount == 0 {
-                Text("No running downloads")
-                    .font(.headline)
-                    .foregroundStyle(theme.textSecondaryColor)
-            } else {
-                Text(formatted(controller.snapshot.globalBytesPerSecond)).font(
-                    .headline.monospacedDigit())
-            }
-            BandwidthGraph(
-                history: controller.snapshot.globalHistory, strokeColor: theme.graphStrokeColor,
-                averageStrokeColor: theme.graphAverageStrokeColor
-            )
-            .frame(height: 40)
-            Text("\(activeCount) active").font(.caption).foregroundStyle(theme.textSecondaryColor)
-        }
-        .padding(.vertical, 4)
-    }
-
-    private var activeCount: Int {
-        controller.snapshot.packages.flatMap(\.items).filter { $0.state == .running }.count
-    }
 
     private var downloadsTab: some View {
         PackagesListView(
-            packages: controller.snapshot.packages,
+            packages: controller.structuralPackages,
             allowsReordering: true,
             showsPauseResumeButton: true,
             selectedItemIDs: $selectedItemIDs,
@@ -249,13 +214,52 @@ struct MainWindowView: View {
     }
 
     private var completedPackages: [PackageSnapshot] {
-        controller.snapshot.packages.compactMap { package in
+        controller.structuralPackages.compactMap { package in
             let completedItems = package.items.filter { $0.state == .completed }
             guard !completedItems.isEmpty else { return nil }
             return PackageSnapshot(
                 id: package.id, name: package.name, priority: package.priority,
                 items: completedItems)
         }
+    }
+}
+
+/// The sidebar's live global-speed readout and bandwidth graph. A distinct
+/// `View` reading its own environment — same reasoning as
+/// `PackagesListView`'s `PackageHeaderRow`/`PackagesBottomBar`: this needs
+/// `controller.snapshot` at the full tick rate, but `MainWindowView.body`
+/// must not, or every tick would force it to reconstruct `downloadsTab`
+/// (and hence `PackagesListView`'s `List`) regardless of how stable
+/// `structuralPackages` itself stays.
+private struct OverviewStatsBlock: View {
+    @Environment(EngineController.self) private var controller
+    @Environment(ThemeStore.self) private var themeStore
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var theme: Theme { themeStore.resolved(for: colorScheme) }
+
+    private var activeCount: Int {
+        controller.snapshot.packages.flatMap(\.items).filter { $0.state == .running }.count
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if activeCount == 0 {
+                Text("No running downloads")
+                    .font(.headline)
+                    .foregroundStyle(theme.textSecondaryColor)
+            } else {
+                Text(formatted(controller.snapshot.globalBytesPerSecond)).font(
+                    .headline.monospacedDigit())
+            }
+            BandwidthGraph(
+                history: controller.snapshot.globalHistory, strokeColor: theme.graphStrokeColor,
+                averageStrokeColor: theme.graphAverageStrokeColor
+            )
+            .frame(height: 40)
+            Text("\(activeCount) active").font(.caption).foregroundStyle(theme.textSecondaryColor)
+        }
+        .padding(.vertical, 4)
     }
 }
 

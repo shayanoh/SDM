@@ -38,7 +38,8 @@ struct PackagesListView: View {
         VStack(spacing: 0) {
             list
             Divider()
-            bottomBar
+            PackagesBottomBar(
+                packages: packages, showsPauseResumeButton: showsPauseResumeButton, theme: theme)
         }
         .background(keyboardShortcuts)
     }
@@ -61,7 +62,9 @@ struct PackagesListView: View {
                             } : nil
                     )
                 } label: {
-                    packageHeader(package, index: packageIndex)
+                    PackageHeaderRow(
+                        package: package, allowsReordering: allowsReordering, theme: theme,
+                        pendingDeletion: $pendingDeletion)
                 }
                 .listRowBackground(packageHeaderBackground(index: packageIndex))
             }
@@ -88,7 +91,7 @@ struct PackagesListView: View {
         // icons and watchOS platters. `hidesNativeSelectionHighlight()`
         // turns the native layer off entirely so `alternatingRowBackground`
         // above is the only thing drawn.
-        .hidesNativeSelectionHighlight()
+        .tint(Color.red)
     }
 
     @ViewBuilder
@@ -106,10 +109,10 @@ struct PackagesListView: View {
             item: item, index: index, controller: controller,
             isSelected: selectedItemIDs.contains(item.id), theme: theme
         )
-        .tag(item.id)
         .contextMenu {
             itemsContextMenu(selectedItemIDs.contains(item.id) ? selectedItemIDs : [item.id])
         }
+        .tag(item.id)
     }
 
     /// Cmd-A (select every item currently listed here), Backspace (remove the
@@ -167,47 +170,6 @@ struct PackagesListView: View {
     /// heavier than the rows beneath it.
     private func packageHeaderBackground(index: Int) -> Color {
         theme.surfaceSecondaryColor.opacity(index.isMultiple(of: 2) ? 0.5 : 0.9)
-    }
-
-    @ViewBuilder
-    private func packageHeader(_ package: PackageSnapshot, index: Int) -> some View {
-        let content =
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(package.name).font(.title3.bold())
-                    Text(
-                        "\(formattedBytes(package.completedBytes)) / \(formattedBytes(package.totalBytes))"
-                    )
-                    .font(.caption)
-                    .foregroundStyle(theme.textSecondaryColor)
-                    .monospacedDigit()
-                }
-                Spacer()
-                Sparkline(samples: package.bytesPerSecondHistory, color: theme.graphStrokeColor)
-                    .frame(width: 60, height: 20)
-            }
-            .padding(.vertical, 4)
-            .contentShape(Rectangle())
-            .contextMenu {
-                Button("Remove from List") {
-                    Task { await controller.removePackage(package.id, deleteFiles: false) }
-                }
-                Button("Remove and Delete Files", role: .destructive) {
-                    pendingDeletion = .package(package.id)
-                }
-            }
-        if allowsReordering {
-            content.dropDestination(for: DraggedItemID.self) { dragged, _ in
-                guard let dragged = dragged.first else { return false }
-                let packageID = package.id
-                Task {
-                    await controller.moveItem(dragged.itemID, toPackage: packageID)
-                }
-                return true
-            }
-        } else {
-            content
-        }
     }
 
     @ViewBuilder
@@ -271,27 +233,112 @@ struct PackagesListView: View {
         .keyboardShortcut(.delete, modifiers: .command)
     }
 
-    /// Items the global bar's button actually acts on: `.completed`/`.failed`
-    /// items are never touched by Pause All/Resume All, so they must not
-    /// factor into which label the button shows either.
-    private var downloadableItems: [ItemSnapshot] {
-        packages.flatMap(\.items).filter {
-            switch $0.state {
-            case .queued, .running, .stopped: return true
-            case .completed, .failed: return false
+}
+
+// MARK: - PackageHeaderRow
+
+/// A package's disclosure-group label. A distinct `View` (rather than a
+/// helper function returning `some View`, which `packageHeader` used to be)
+/// deliberately — reading `controller.itemTelemetry` inside a genuine `View`
+/// struct's `body` scopes SwiftUI's invalidation to *this row alone* when
+/// telemetry updates each tick, instead of forcing `PackagesListView.body` —
+/// and hence the enclosing `List`'s structure — to re-evaluate. See
+/// `EngineController.itemTelemetry`'s doc comment for the full story.
+private struct PackageHeaderRow: View {
+    let package: PackageSnapshot
+    let allowsReordering: Bool
+    let theme: Theme
+    @Binding var pendingDeletion: MainWindowView.PendingDeletion?
+
+    @Environment(EngineController.self) private var controller
+
+    var body: some View {
+        let content =
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(package.name).font(.title3.bold())
+                    Text("\(formattedBytes(liveCompletedBytes)) / \(formattedBytes(liveTotalBytes))")
+                        .font(.caption)
+                        .foregroundStyle(theme.textSecondaryColor)
+                        .monospacedDigit()
+                }
+                Spacer()
+                Sparkline(samples: liveSpeedHistory, color: theme.graphStrokeColor)
+                    .frame(width: 60, height: 20)
             }
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+            .contextMenu {
+                Button("Remove from List") {
+                    Task { await controller.removePackage(package.id, deleteFiles: false) }
+                }
+                Button("Remove and Delete Files", role: .destructive) {
+                    pendingDeletion = .package(package.id)
+                }
+            }
+        if allowsReordering {
+            content.dropDestination(for: DraggedItemID.self) { dragged, _ in
+                guard let dragged = dragged.first else { return false }
+                let packageID = package.id
+                Task {
+                    await controller.moveItem(dragged.itemID, toPackage: packageID)
+                }
+                return true
+            }
+        } else {
+            content
         }
     }
 
-    /// True when there is nothing left for Pause All to do — every
-    /// downloadable item is already `.stopped`. Drives which label/action the
-    /// single button shows, per spec: any running/queued item means "Pause
-    /// All," all-stopped means "Resume All."
-    private var allDownloadableStopped: Bool {
-        downloadableItems.allSatisfy { $0.state == .stopped }
+    /// Live per-item telemetry summed the same way `PackageSnapshot`'s own
+    /// (now-stale-on-`structuralPackages`) computed properties used to —
+    /// falling back to the structural item's own value for any item
+    /// telemetry hasn't reported yet (there shouldn't be a gap in practice,
+    /// since `EngineController` populates `itemTelemetry` for every item on
+    /// every tick, but a fallback costs nothing and avoids a silent zero).
+    private var liveCompletedBytes: Int64 {
+        package.items.reduce(0) {
+            $0 + (controller.itemTelemetry[$1.id]?.completed.totalBytes ?? $1.completed.totalBytes)
+        }
     }
 
-    private var bottomBar: some View {
+    private var liveTotalBytes: Int64 {
+        package.items.reduce(0) {
+            $0 + (controller.itemTelemetry[$1.id]?.totalBytes ?? $1.totalBytes ?? 0)
+        }
+    }
+
+    private var liveSpeedHistory: [Double] {
+        let histories = package.items.map {
+            controller.itemTelemetry[$0.id]?.speedHistory ?? $0.speedHistory
+        }
+        let length = histories.map(\.count).max() ?? 0
+        guard length > 0 else { return [] }
+        var summed = [Double](repeating: 0, count: length)
+        for history in histories {
+            let padding = length - history.count
+            for (index, value) in history.enumerated() {
+                summed[index + padding] += value
+            }
+        }
+        return summed
+    }
+}
+
+// MARK: - PackagesBottomBar
+
+/// The Pause/Resume All bar and the aggregate speed readout. A distinct
+/// `View` for the same reason as `PackageHeaderRow`: reading
+/// `controller.itemTelemetry` here, rather than in `PackagesListView.body`
+/// directly, keeps the `List` above it from re-evaluating every tick.
+private struct PackagesBottomBar: View {
+    let packages: [PackageSnapshot]
+    let showsPauseResumeButton: Bool
+    let theme: Theme
+
+    @Environment(EngineController.self) private var controller
+
+    var body: some View {
         HStack {
             if showsPauseResumeButton {
                 Button {
@@ -311,7 +358,7 @@ struct PackagesListView: View {
                 .disabled(downloadableItems.isEmpty)
                 Divider().frame(height: 16)
             }
-            Text(formatted(packages.reduce(0) { $0 + $1.bytesPerSecond }))
+            Text(formatted(liveAggregateBytesPerSecond))
                 .font(.title3.monospacedDigit())
             Spacer()
             Text("\(packages.count) packages")
@@ -323,6 +370,32 @@ struct PackagesListView: View {
         // no theme color of its own, it just blurs whatever sits behind it.
         .background(theme.surfaceSecondaryColor)
         .sdmSurface(.toolbar)
+    }
+
+    private var liveAggregateBytesPerSecond: Double {
+        packages.flatMap(\.items).reduce(0.0) {
+            $0 + (controller.itemTelemetry[$1.id]?.bytesPerSecond ?? 0)
+        }
+    }
+
+    /// Items the global bar's button actually acts on: `.completed`/`.failed`
+    /// items are never touched by Pause All/Resume All, so they must not
+    /// factor into which label the button shows either.
+    private var downloadableItems: [ItemSnapshot] {
+        packages.flatMap(\.items).filter {
+            switch $0.state {
+            case .queued, .running, .stopped: return true
+            case .completed, .failed: return false
+            }
+        }
+    }
+
+    /// True when there is nothing left for Pause All to do — every
+    /// downloadable item is already `.stopped`. Drives which label/action the
+    /// single button shows, per spec: any running/queued item means "Pause
+    /// All," all-stopped means "Resume All."
+    private var allDownloadableStopped: Bool {
+        downloadableItems.allSatisfy { $0.state == .stopped }
     }
 }
 
@@ -363,19 +436,44 @@ private func isFailedItem(_ item: ItemSnapshot) -> Bool {
     return false
 }
 
+// MARK: - ItemRow
+
 #Preview {
-    var isEnabled = true
-    var isResumable = true
-    var state = ItemState.running
-    var isSelected = false
+    @Previewable @State var selectedItemIDs: Set<UUID> = Set<UUID>()
     let item = ItemSnapshot(
-        id: UUID(), url: URL(fileURLWithPath: ""), filename: "Filename", totalBytes: 1_000_000,
-        completed: RangeSet([ByteRange(start: 10000, end: 20000)]), state: state,
-        isEnabled: isEnabled, isResumable: isResumable, activeSegments: 1, configuredSegments: 3,
-        bytesPerSecond: 100000, speedHistory: [100000, 90000, 80000])
-    ItemRow(
-        item: item, index: 1, controller: EngineController(), isSelected: isSelected,
-        theme: ThemeCatalog.builtInThemes()[0])
+        id: UUID(),
+        url: URL(fileURLWithPath: ""),
+        filename: "Filename",
+        totalBytes: 1_000_000,
+        completed: RangeSet([ByteRange(start: 10000, end: 20000)]),
+        state: .running,
+        isEnabled: true,
+        isResumable: true,
+        activeSegments: 1,
+        configuredSegments: 3,
+        bytesPerSecond: 100000,
+        speedHistory: [100000, 90000, 80000])
+    let theme = ThemeCatalog.builtInThemes()[5]
+    let controller = EngineController()
+    
+    List(selection:$selectedItemIDs) {
+        ItemRow(
+            item: item, index: 1, controller: controller, isSelected: false,
+            theme: theme)
+        ItemRow(
+            item: item, index: 2, controller: controller, isSelected: true,
+            theme: theme)
+        ItemRow(
+            item: item, index: 3, controller: controller, isSelected: false,
+            theme: theme)
+        ItemRow(
+            item: item, index: 4, controller: controller, isSelected: false,
+            theme: theme)
+        ItemRow(
+            item: item, index: 5, controller: controller, isSelected: true,
+            theme: theme)
+        
+    }
 }
 private struct ItemRow: View {
     let item: ItemSnapshot
@@ -383,6 +481,20 @@ private struct ItemRow: View {
     let controller: EngineController
     let isSelected: Bool
     let theme: Theme
+
+    /// Live telemetry for this item, read directly from `controller` rather
+    /// than carried on `item` — `item` comes from `EngineController
+    /// .structuralPackages`, which is deliberately *not* refreshed on every
+    /// tick (see its doc comment). Reading `controller.itemTelemetry` here,
+    /// inside this row's own `body`, scopes SwiftUI's invalidation to just
+    /// this row on a tick, instead of the whole `List` re-diffing.
+    private var telemetry: ItemTelemetry? { controller.itemTelemetry[item.id] }
+    private var completed: RangeSet { telemetry?.completed ?? item.completed }
+    private var totalBytes: Int64? { telemetry?.totalBytes ?? item.totalBytes }
+    private var activeSegments: Int { telemetry?.activeSegments ?? item.activeSegments }
+    private var configuredSegments: Int { telemetry?.configuredSegments ?? item.configuredSegments }
+    private var bytesPerSecond: Double { telemetry?.bytesPerSecond ?? 0 }
+    private var speedHistory: [Double] { telemetry?.speedHistory ?? [] }
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -406,24 +518,22 @@ private struct ItemRow: View {
                             .foregroundStyle(theme.faultyColor)
                     }
                     Spacer()
-                    Text("\(item.activeSegments)/\(item.configuredSegments) seg")
+                    Text("\(activeSegments)/\(configuredSegments) seg")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(theme.textSecondaryColor)
-                    Text(formatted(item.bytesPerSecond))
+                    Text(formatted(bytesPerSecond))
                         .font(.caption.monospacedDigit())
-                    Sparkline(samples: item.speedHistory, color: theme.graphStrokeColor)
+                    Sparkline(samples: speedHistory, color: theme.graphStrokeColor)
                         .frame(width: 48, height: 16)
                 }
-                SegmentedProgressBar(completed: item.completed, total: item.totalBytes ?? 0, theme: theme)
+                SegmentedProgressBar(completed: completed, total: totalBytes ?? 0, theme: theme)
                     .frame(height: 6)
                 HStack {
                     statusLine
                     Spacer()
-                    Text(
-                        "\(formattedBytes(item.completed.totalBytes)) / \(formattedBytes(item.totalBytes ?? 0))"
-                    )
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(theme.textSecondaryColor)
+                    Text("\(formattedBytes(completed.totalBytes)) / \(formattedBytes(totalBytes ?? 0))")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(theme.textSecondaryColor)
                 }
             }
         }
@@ -519,6 +629,7 @@ private struct ItemRow: View {
     }
 }
 
+// MARK: Segmented Progress Bar
 /// Renders the completed `RangeSet` directly, rasterized to the bar's pixel
 /// width so it stays correct at any segment count. See spec §9.4. Uses
 /// spec §10.1's `progressFill` role for the fill and `surfaceTertiary` for

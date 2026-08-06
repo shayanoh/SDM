@@ -3,9 +3,22 @@ import Observation
 import SDMCore
 import SDMEngine
 
+/// The "hot" per-item fields that change every heartbeat tick while a
+/// download is active — split out from `ItemSnapshot` so a row can read live
+/// numbers without forcing `PackagesListView`'s `List` to receive a new
+/// `packages` array identity on every tick. See
+/// `EngineController.structuralPackages`/`itemTelemetry` for why.
+struct ItemTelemetry: Equatable {
+    var completed: RangeSet
+    var totalBytes: Int64?
+    var activeSegments: Int
+    var configuredSegments: Int
+    var bytesPerSecond: Double
+    var speedHistory: [Double]
+}
+
 /// Bridges the engine actor to SwiftUI: drives the `AppTiming.ticksPerSecond`
-/// tick and republishes snapshots on the main actor at that same rate —
-/// except while `suppressPublishing()` is in effect (see below).
+/// tick and republishes on the main actor at that same rate.
 @MainActor
 @Observable
 final class EngineController {
@@ -14,6 +27,33 @@ final class EngineController {
         globalBytesPerSecond: 0,
         globalHistory: []
     )
+    /// A `packages` array that only changes identity when something beyond
+    /// pure byte/speed telemetry actually changed (add/remove/reorder, a
+    /// state transition, enable/disable, resumability learned, etc.) — see
+    /// `packagesStructurallyEqual`. `PackagesListView` reads this instead of
+    /// `snapshot.packages` for its `List`'s data source.
+    ///
+    /// Reassigning `snapshot` itself every tick (still done, for
+    /// `globalBytesPerSecond`/`globalHistory`/notifications/anything else
+    /// that wants a fully live view) is what originally caused this: every
+    /// reassignment fed `List` a brand-new `packages` value, forcing it to
+    /// re-diff its entire structure five times a second even when nothing
+    /// but a byte count changed inside an otherwise-identical row — which
+    /// is what was interrupting an in-flight drag-and-drop reorder (AppKit
+    /// resets a table's drag session when its data source reloads
+    /// mid-drag). A mouse-event-based "pause publishing during a drag"
+    /// mitigation was tried and abandoned: `NSDraggingSession`'s own
+    /// tracking loop does not reliably deliver events to a local `NSEvent`
+    /// monitor, so the resume signal it depended on was itself unreliable.
+    /// This fixes the actual cause instead of working around a symptom.
+    private(set) var structuralPackages: [PackageSnapshot] = []
+    /// Live per-item telemetry, keyed by item ID, reassigned every tick
+    /// regardless of `structuralPackages`. A row (`ItemRow`, the package
+    /// header, the bottom bar) reads its own entry directly via
+    /// `@Environment(EngineController.self)`, which is what lets it update
+    /// at full tick rate without `PackagesListView.body` — and hence its
+    /// `List`'s structure — re-evaluating at all.
+    private(set) var itemTelemetry: [UUID: ItemTelemetry] = [:]
 
     /// `nonisolated` so `applicationWillTerminate` — which runs on the main
     /// thread and cannot await anything — can still reach the engine. Safe
@@ -33,20 +73,6 @@ final class EngineController {
     private let notifications = NotificationManager()
     private var previousSnapshot: EngineSnapshot?
     private let downloadFolder: URL
-    /// While `true`, the heartbeat keeps ticking the engine (so telemetry
-    /// and checkpointing stay accurate) but stops reassigning `snapshot` —
-    /// every reassignment invalidates any `List` reading it, and doing that
-    /// mid-drag makes AppKit reset the table's drag-and-drop session.
-    /// `MainWindowView` toggles this for exactly the span a mouse button is
-    /// held down, which covers both a `.onMove` reorder and a
-    /// `.draggable`/`.dropDestination` cross-package move without needing to
-    /// distinguish "which kind of drag" from the outside.
-    private var isPublishSuppressed = false
-    /// Safety net: if a `resumePublishing()` call is ever missed (a drag
-    /// cancelled in a way that doesn't deliver a mouse-up to our monitor),
-    /// this force-clears suppression rather than leaving the UI frozen
-    /// indefinitely.
-    private var suppressionSafetyTask: Task<Void, Never>?
 
     init() {
         let support = FileManager.default.urls(
@@ -115,17 +141,15 @@ final class EngineController {
         if EngineSettingsStore.autoStartDownloadsOnLaunch {
             await engine.resumeAll()
         }
-        snapshot = await engine.snapshot()
+        publish(await engine.snapshot())
         notifications.requestAuthorization()
 
         while !Task.isCancelled {
             await engine.tick()
-            if !isPublishSuppressed {
-                let newSnapshot = await engine.snapshot()
-                notifyChanges(from: previousSnapshot, to: newSnapshot)
-                previousSnapshot = newSnapshot
-                snapshot = newSnapshot
-            }
+            let newSnapshot = await engine.snapshot()
+            notifyChanges(from: previousSnapshot, to: newSnapshot)
+            previousSnapshot = newSnapshot
+            publish(newSnapshot)
             try? await Task.sleep(for: .seconds(1.0 / Double(AppTiming.ticksPerSecond)))
         }
 
@@ -134,27 +158,57 @@ final class EngineController {
         await engine.shutdown()
     }
 
-    /// Pauses snapshot publishing without pausing the engine's own tick.
-    /// `MainWindowView` calls this on mouse-down and `resumePublishing()` on
-    /// mouse-up, so an in-flight drag-and-drop reorder isn't interrupted by
-    /// the `List` it's happening in being handed fresh data mid-gesture.
-    /// Self-clears after 5 seconds regardless, so a missed mouse-up (a drag
-    /// cancelled in some way that doesn't reach our monitor) can't freeze
-    /// the UI forever.
-    func suppressPublishing() {
-        isPublishSuppressed = true
-        suppressionSafetyTask?.cancel()
-        suppressionSafetyTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(5))
-            guard !Task.isCancelled else { return }
-            self?.isPublishSuppressed = false
+    /// The one place `snapshot`/`structuralPackages`/`itemTelemetry` are
+    /// updated together, so every call site (the tick loop, and every direct
+    /// user-action method below) keeps the three in sync the same way.
+    private func publish(_ newSnapshot: EngineSnapshot) {
+        snapshot = newSnapshot
+        itemTelemetry = Self.telemetry(from: newSnapshot)
+        if !Self.packagesStructurallyEqual(structuralPackages, newSnapshot.packages) {
+            structuralPackages = newSnapshot.packages
         }
     }
 
-    func resumePublishing() {
-        suppressionSafetyTask?.cancel()
-        suppressionSafetyTask = nil
-        isPublishSuppressed = false
+    private static func telemetry(from snapshot: EngineSnapshot) -> [UUID: ItemTelemetry] {
+        var result: [UUID: ItemTelemetry] = [:]
+        for item in snapshot.packages.flatMap(\.items) {
+            result[item.id] = ItemTelemetry(
+                completed: item.completed,
+                totalBytes: item.totalBytes,
+                activeSegments: item.activeSegments,
+                configuredSegments: item.configuredSegments,
+                bytesPerSecond: item.bytesPerSecond,
+                speedHistory: item.speedHistory
+            )
+        }
+        return result
+    }
+
+    /// Everything about a package/item *except* the fields already carried
+    /// by `ItemTelemetry` — i.e. everything a `List` actually needs to
+    /// re-diff its structure for: identity, order, name/filename, and any
+    /// state a row's non-telemetry chrome (icons, badges, strikethrough)
+    /// depends on.
+    private static func packagesStructurallyEqual(
+        _ a: [PackageSnapshot], _ b: [PackageSnapshot]
+    ) -> Bool {
+        guard a.count == b.count else { return false }
+        for (packageA, packageB) in zip(a, b) {
+            guard packageA.id == packageB.id, packageA.name == packageB.name,
+                packageA.priority == packageB.priority,
+                packageA.items.count == packageB.items.count
+            else { return false }
+            for (itemA, itemB) in zip(packageA.items, packageB.items) {
+                guard itemA.id == itemB.id, itemA.url == itemB.url,
+                    itemA.filename == itemB.filename, itemA.state == itemB.state,
+                    itemA.isEnabled == itemB.isEnabled, itemA.isResumable == itemB.isResumable,
+                    itemA.checkpointFailure == itemB.checkpointFailure,
+                    itemA.remainingAttempts == itemB.remainingAttempts,
+                    itemA.fileMissing == itemB.fileMissing
+                else { return false }
+            }
+        }
+        return true
     }
 
     /// Compares two heartbeats' worth of snapshot and fires exactly the
@@ -189,64 +243,64 @@ final class EngineController {
 
     func setEnabled(_ enabled: Bool, for itemID: UUID) async {
         await engine.setEnabled(enabled, for: itemID)
-        snapshot = await engine.snapshot()
+        publish(await engine.snapshot())
     }
 
     func startItem(_ itemID: UUID) async {
         await engine.startItem(itemID)
-        snapshot = await engine.snapshot()
+        publish(await engine.snapshot())
     }
 
     func stopItem(_ itemID: UUID) async {
         await engine.stopItem(itemID)
-        snapshot = await engine.snapshot()
+        publish(await engine.snapshot())
     }
 
     func retry(_ itemID: UUID) async {
         await engine.retry(itemID)
-        snapshot = await engine.snapshot()
+        publish(await engine.snapshot())
     }
 
     func reorderItems(_ itemIDs: [UUID], inPackage packageID: UUID) async {
         await engine.reorderItems(itemIDs, inPackage: packageID)
-        snapshot = await engine.snapshot()
+        publish(await engine.snapshot())
     }
 
     func moveItem(_ itemID: UUID, toPackage packageID: UUID) async {
         await engine.moveItem(itemID, toPackage: packageID)
-        snapshot = await engine.snapshot()
+        publish(await engine.snapshot())
     }
 
     func reorderPackages(_ packageIDs: [UUID]) async {
         await engine.reorderPackages(packageIDs)
-        snapshot = await engine.snapshot()
+        publish(await engine.snapshot())
     }
 
     /// Global pause/resume: stops or (re-)queues every stoppable/resumable
     /// item in one call. Never touches any item's `isEnabled`.
     func pauseAll() async {
         await engine.pauseAll()
-        snapshot = await engine.snapshot()
+        publish(await engine.snapshot())
     }
 
     func resumeAll() async {
         await engine.resumeAll()
-        snapshot = await engine.snapshot()
+        publish(await engine.snapshot())
     }
 
     func removeItem(_ itemID: UUID, deleteFile: Bool) async {
         await engine.removeItem(itemID, deleteFile: deleteFile)
-        snapshot = await engine.snapshot()
+        publish(await engine.snapshot())
     }
 
     func removePackage(_ packageID: UUID, deleteFiles: Bool) async {
         await engine.removePackage(packageID, deleteFiles: deleteFiles)
-        snapshot = await engine.snapshot()
+        publish(await engine.snapshot())
     }
 
     func resetDownload(_ itemID: UUID) async {
         await engine.resetDownload(itemID)
-        snapshot = await engine.snapshot()
+        publish(await engine.snapshot())
     }
 
     /// Batch variant for multi-selection delete: each item is stopped and
@@ -256,7 +310,7 @@ final class EngineController {
         for itemID in itemIDs {
             await engine.removeItem(itemID, deleteFile: deleteFile)
         }
-        snapshot = await engine.snapshot()
+        publish(await engine.snapshot())
     }
 
     /// Hands a grabbed package off to the download engine. Spec §7.5's "Add
@@ -274,7 +328,7 @@ final class EngineController {
             )
         }
         await engine.add(DownloadPackage(name: name, items: items))
-        snapshot = await engine.snapshot()
+        publish(await engine.snapshot())
     }
 
     /// Shuts the engine down from `applicationWillTerminate`, blocking the
