@@ -257,7 +257,7 @@ struct SegmentedProgressBar: View {
     }
 }
 
-private func formatted(_ bytesPerSecond: Double) -> String {
+func formatted(_ bytesPerSecond: Double) -> String {
     let formatter = ByteCountFormatter()
     formatter.countStyle = .binary
     return formatter.string(fromByteCount: Int64(bytesPerSecond)) + "/s"

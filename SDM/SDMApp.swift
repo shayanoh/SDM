@@ -6,6 +6,8 @@
 //
 
 import AppKit
+import SDMCore
+import SDMEngine
 import SDMGrabber
 import SwiftUI
 
@@ -87,5 +89,20 @@ struct SDMApp: App {
             SettingsView()
                 .environment(controller)
         }
+
+        MenuBarExtra {
+            MenuBarPopoverView(selection: $sidebarSelection)
+                .environment(controller)
+                .environment(grabberController)
+        } label: {
+            MenuBarRingIcon(fraction: overallFraction)
+        }
+        .menuBarExtraStyle(.window)
+    }
+
+    private var overallFraction: Double {
+        let running = controller.snapshot.packages.flatMap(\.items).filter { $0.state == .running }
+        guard !running.isEmpty else { return 0 }
+        return running.reduce(0.0) { $0 + $1.fractionCompleted } / Double(running.count)
     }
 }
