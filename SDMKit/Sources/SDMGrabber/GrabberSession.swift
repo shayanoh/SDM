@@ -85,6 +85,36 @@ public actor GrabberSession {
         recluster()
     }
 
+    /// Renames a package by moving every member link's manual override to
+    /// the new name. Spec §7.4: "rename."
+    public func renamePackage(_ oldName: String, to newName: String) {
+        guard !newName.isEmpty, oldName != newName,
+            let package = packages.first(where: { $0.name == oldName })
+        else { return }
+        for id in package.linkIDs { manualOverrides[id] = newName }
+        recluster()
+    }
+
+    /// Combines one package's links into another's. Spec §7.4: "merge."
+    public func mergePackages(_ sourceName: String, into destinationName: String) {
+        guard sourceName != destinationName,
+            let source = packages.first(where: { $0.name == sourceName })
+        else { return }
+        for id in source.linkIDs { manualOverrides[id] = destinationName }
+        recluster()
+    }
+
+    /// Splits a package so each member link becomes its own single-link
+    /// package, named after that link. Spec §7.4: "split."
+    public func splitPackage(_ name: String) {
+        guard let package = packages.first(where: { $0.name == name }) else { return }
+        for id in package.linkIDs {
+            guard let link = links[id] else { continue }
+            manualOverrides[id] = link.effectiveFilename
+        }
+        recluster()
+    }
+
     // MARK: - Probing
 
     /// Launches probes for `ids` under the global and per-host caps, one

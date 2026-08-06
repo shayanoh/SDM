@@ -46,6 +46,21 @@ final class GrabberController {
         snapshot = await session.snapshot()
     }
 
+    func renamePackage(_ oldName: String, to newName: String) async {
+        await session.renamePackage(oldName, to: newName)
+        snapshot = await session.snapshot()
+    }
+
+    func mergePackages(_ sourceName: String, into destinationName: String) async {
+        await session.mergePackages(sourceName, into: destinationName)
+        snapshot = await session.snapshot()
+    }
+
+    func splitPackage(_ name: String) async {
+        await session.splitPackage(name)
+        snapshot = await session.snapshot()
+    }
+
     /// The original URLs of a package's confirmed links, for handoff to the
     /// download engine.
     func urls(inPackageNamed name: String) -> [URL] {

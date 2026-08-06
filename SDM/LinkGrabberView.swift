@@ -7,6 +7,9 @@ struct LinkGrabberView: View {
     @Environment(EngineController.self) private var engineController
     @State private var activeFilter: VerdictFilter = .all
     @State private var isShowingAddSheet = false
+    @State private var isShowingRenameAlert = false
+    @State private var renamingPackage = ""
+    @State private var newPackageName = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -17,12 +20,22 @@ struct LinkGrabberView: View {
                     Section {
                         ForEach(links(in: package)) { link in
                             LinkRow(link: link, controller: controller)
+                                .draggable(DraggedLinkID(linkID: link.id))
                         }
                     } header: {
                         packageHeader(package)
                     }
                 }
             }
+        }
+        .alert("Rename package", isPresented: $isShowingRenameAlert) {
+            TextField("Name", text: $newPackageName)
+            Button("Rename") {
+                let old = renamingPackage
+                let new = newPackageName
+                Task { await controller.renamePackage(old, to: new) }
+            }
+            Button("Cancel", role: .cancel) {}
         }
         .onDrop(of: [.url, .plainText], isTargeted: nil) { providers in
             for provider in providers {
@@ -67,6 +80,34 @@ struct LinkGrabberView: View {
                 }
             }
             .controlSize(.small)
+        }
+        .dropDestination(for: DraggedLinkID.self) { dragged, _ in
+            guard let dragged = dragged.first else { return false }
+            let name = package.name
+            Task { await controller.moveLink(dragged.linkID, toPackageNamed: name) }
+            return true
+        }
+        .contextMenu {
+            Button("Rename…") {
+                renamingPackage = package.name
+                newPackageName = package.name
+                isShowingRenameAlert = true
+            }
+            Menu("Merge into") {
+                ForEach(
+                    controller.snapshot.packages.filter { $0.name != package.name }, id: \.name
+                ) { other in
+                    Button(other.name) {
+                        let source = package.name
+                        let destination = other.name
+                        Task { await controller.mergePackages(source, into: destination) }
+                    }
+                }
+            }
+            Button("Split") {
+                let name = package.name
+                Task { await controller.splitPackage(name) }
+            }
         }
     }
 
