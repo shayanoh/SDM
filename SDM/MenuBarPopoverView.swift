@@ -75,6 +75,7 @@ struct MenuBarPopoverView: View {
         }
         .padding()
         .frame(width: 280)
+        .background(theme.surfacePrimaryColor)
     }
 
     private var activeItems: [ItemSnapshot] {

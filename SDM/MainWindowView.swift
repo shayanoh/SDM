@@ -52,12 +52,23 @@ struct MainWindowView: View {
             List(selection: $selection) {
                 Label("Downloads", systemImage: "arrow.down.circle").tag(SidebarItem.downloads)
                 Label("Completed", systemImage: "checkmark.circle").tag(SidebarItem.completed)
+                // `.tag()` must be the outermost modifier — a `List`'s
+                // selection binding reads a row's tag off the final composed
+                // view, and `.badge()` applied *after* `.tag()` was breaking
+                // that association entirely, making this row unselectable.
                 Label("Linkgrabber", systemImage: "link")
-                    .tag(SidebarItem.linkgrabber)
                     .badge(grabberController.snapshot.totalCount)
+                    .tag(SidebarItem.linkgrabber)
                 Section("Overview") { statsBlock }
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 220)
+            // `List` paints its own opaque system background regardless of
+            // what sits behind it — without hiding that, `sdmSurface`'s
+            // material (and the theme's own sidebarBackground role) never
+            // actually shows through.
+            .scrollContentBackground(.hidden)
+            .background(theme.sidebarBackgroundColor)
+            .tint(theme.selectionTintColor)
             .sdmSurface(.sidebar)
         } detail: {
             switch selection ?? .downloads {

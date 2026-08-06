@@ -32,6 +32,11 @@ struct LinkGrabberView: View {
                     }
                 }
             }
+            // `List` paints its own opaque system background regardless of
+            // what sits behind it — without hiding that, `surfacePrimary`
+            // never actually shows through.
+            .scrollContentBackground(.hidden)
+            .background(theme.surfacePrimaryColor)
         }
         .alert("Rename package", isPresented: $isShowingRenameAlert) {
             TextField("Name", text: $newPackageName)
@@ -123,6 +128,10 @@ struct LinkGrabberView: View {
             }
         }
         .padding()
+        // Applied before `sdmSurface` so the opaque theme color is what's
+        // actually visible — `sdmSurface`'s translucent material alone has
+        // no theme color of its own, it just blurs whatever sits behind it.
+        .background(theme.surfaceSecondaryColor)
         .sdmSurface(.toolbar)
     }
 

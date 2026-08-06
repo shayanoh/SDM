@@ -3,8 +3,9 @@ import Observation
 import SDMCore
 import SDMEngine
 
-/// Bridges the engine actor to SwiftUI: drives the 1 Hz tick and republishes
-/// snapshots on the main actor.
+/// Bridges the engine actor to SwiftUI: drives the `AppTiming.ticksPerSecond`
+/// tick and republishes snapshots on the main actor, at the slower
+/// `AppTiming.uiRefreshesPerSecond` rate.
 @MainActor
 @Observable
 final class EngineController {
@@ -103,11 +104,25 @@ final class EngineController {
         snapshot = await engine.snapshot()
         notifications.requestAuthorization()
 
+        // The engine ticks at `AppTiming.ticksPerSecond` regardless — that's
+        // what keeps speed sampling, checkpointing, and retry backoff
+        // accurate. Publishing the resulting snapshot to SwiftUI is
+        // throttled to the slower `uiRefreshesPerSecond` on purpose: every
+        // reassignment of `snapshot` invalidates every `List` that reads it,
+        // and doing that as often as the engine ticks was interrupting an
+        // in-flight drag-and-drop reorder.
+        let ticksPerPublish = max(1, AppTiming.ticksPerSecond / AppTiming.uiRefreshesPerSecond)
+        var ticksSincePublish = 0
         while !Task.isCancelled {
             await engine.tick()
-            snapshot = await engine.snapshot()
-            notifyChanges(from: previousSnapshot, to: snapshot)
-            previousSnapshot = snapshot
+            ticksSincePublish += 1
+            if ticksSincePublish >= ticksPerPublish {
+                ticksSincePublish = 0
+                let newSnapshot = await engine.snapshot()
+                notifyChanges(from: previousSnapshot, to: newSnapshot)
+                previousSnapshot = newSnapshot
+                snapshot = newSnapshot
+            }
             try? await Task.sleep(for: .seconds(1.0 / Double(AppTiming.ticksPerSecond)))
         }
 

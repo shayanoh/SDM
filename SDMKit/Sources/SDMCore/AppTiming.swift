@@ -15,4 +15,14 @@ public enum AppTiming {
     /// rate by `EngineController`'s loop; a slower or faster refresh is a
     /// one-line change here.
     public static let ticksPerSecond: Int = 5
+
+    /// How often `EngineController` republishes a fresh snapshot to
+    /// SwiftUI, independent of `ticksPerSecond` — the engine still ticks
+    /// (and keeps its speed math, checkpointing, and backoff timing) at the
+    /// full rate regardless. Kept lower on purpose: reassigning the
+    /// published snapshot invalidates every `List` that reads it, and doing
+    /// that as often as `ticksPerSecond` visibly interrupts an in-flight
+    /// drag-and-drop reorder — AppKit resets a table's drag session when its
+    /// data source reloads mid-drag.
+    public static let uiRefreshesPerSecond: Int = 2
 }

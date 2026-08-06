@@ -74,6 +74,17 @@ struct PackagesListView: View {
                     } : nil
             )
         }
+        // `List` paints its own opaque system background regardless of what
+        // sits behind it — without hiding that, `surfacePrimary` never
+        // actually shows through, no matter how many rows/icons/text read
+        // theme roles correctly.
+        .scrollContentBackground(.hidden)
+        .background(theme.surfacePrimaryColor)
+        // `List`'s native selection highlight is a separate layer drawn on
+        // top of `.listRowBackground`, tinted by the system control accent
+        // (blue by default) — `.listRowBackground` alone can't override it.
+        // `.tint` is what SwiftUI actually threads through to that layer.
+        .tint(theme.selectionTintColor)
     }
 
     @ViewBuilder
@@ -303,6 +314,10 @@ struct PackagesListView: View {
                 .foregroundStyle(theme.textSecondaryColor)
         }
         .padding()
+        // Applied before `sdmSurface` so the opaque theme color is what's
+        // actually visible — `sdmSurface`'s translucent material alone has
+        // no theme color of its own, it just blurs whatever sits behind it.
+        .background(theme.surfaceSecondaryColor)
         .sdmSurface(.toolbar)
     }
 }
@@ -414,16 +429,16 @@ private struct ItemRow: View {
         .listRowBackground(alternatingRowBackground)
     }
 
-    /// macOS's own zebra-striping colors, so the two shades stay correct in
-    /// both light and dark appearance without hand-picking a color pair.
-    ///
-    /// A custom `listRowBackground` paints over the List's native selection
-    /// highlight, so a selected row would otherwise look identical to an
-    /// unselected one — this substitutes an accent tint for the zebra shade
-    /// whenever the row is selected, rather than losing the affordance.
+    /// Theme-driven zebra striping. `NSColor.alternatingContentBackgroundColors`
+    /// (the previous source) only adapts to system light/dark — its second
+    /// stripe is a near-transparent overlay tuned for the *default* system
+    /// background, so against a custom theme like Dracula or Nord one of the
+    /// two stripes reads as visibly wrong/missing. This alternates between
+    /// the theme's own primary and secondary surface roles instead.
     private var alternatingRowBackground: Color {
         guard !isSelected else { return theme.selectionTintColor.opacity(0.35) }
-        return Color(nsColor: NSColor.alternatingContentBackgroundColors[index % 2])
+        return index.isMultiple(of: 2)
+            ? theme.surfacePrimaryColor : theme.surfaceSecondaryColor.opacity(0.6)
     }
 
     /// Replaces the old per-row Start/Stop button: an at-a-glance state icon,
