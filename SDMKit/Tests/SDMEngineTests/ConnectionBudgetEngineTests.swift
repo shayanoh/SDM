@@ -27,11 +27,15 @@ import Testing
     await engine.add(DownloadPackage(name: "Batch", items: [itemA, itemB]))
 
     var spins = 0
-    while await snapshotItem(itemA.id, in: engine)?.activeSegments != 2, spins < 100_000 {
+    while true {
+        let aSettled = await snapshotItem(itemA.id, in: engine)?.activeSegments == 2
+        let bSettled = await snapshotItem(itemB.id, in: engine)?.activeSegments == 1
+        if aSettled && bSettled || spins >= 100_000 { break }
         await Task.yield()
         spins += 1
     }
     #expect(spins < 100_000)
+    #expect(await snapshotItem(itemA.id, in: engine)?.activeSegments == 2)
     #expect(await snapshotItem(itemB.id, in: engine)?.activeSegments == 1)
 
     await gate.open()
