@@ -401,10 +401,6 @@ private func makeGatedEngine(
     )
 }
 
-private func snapshotItem(_ id: UUID, in engine: DownloadEngine) async -> ItemSnapshot? {
-    await engine.snapshot().packages.flatMap(\.items).first { $0.id == id }
-}
-
 /// Preemption in production shape: nothing here hand-sets `isResumable`. The
 /// items are built exactly as a grabber would hand them over — flag `nil`,
 /// meaning "not probed yet" — and it is the engine that learns the origin

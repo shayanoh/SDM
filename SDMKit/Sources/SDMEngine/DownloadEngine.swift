@@ -4,8 +4,11 @@ import SDMCore
 public struct EngineSettings: Sendable {
     public var maxConcurrent: Int
     public var segmentsPerItem: Int
-    /// Carried for the UI and for Phase 3; not enforced here yet.
     public var globalMaxConnections: Int
+    /// Spec §6.4 and §12 (default 8): enforced together with
+    /// `globalMaxConnections` by `ConnectionAllocator`, largest pool
+    /// yielding first.
+    public var maxConnectionsPerHost: Int
     public var downloadFolder: URL
     /// Bytes written per worker between sidecar checkpoints (spec §4.3's byte
     /// half). Settable so a test can drive the checkpoint path without moving
@@ -20,6 +23,7 @@ public struct EngineSettings: Sendable {
         maxConcurrent: Int,
         segmentsPerItem: Int,
         globalMaxConnections: Int,
+        maxConnectionsPerHost: Int = 8,
         downloadFolder: URL,
         checkpointIntervalBytes: Int64 = 8 * 1024 * 1024,
         persistDebounceTicks: Int = 2
@@ -27,11 +31,13 @@ public struct EngineSettings: Sendable {
         precondition(maxConcurrent >= 1, "maxConcurrent must be at least 1")
         precondition(segmentsPerItem >= 1, "segmentsPerItem must be at least 1")
         precondition(globalMaxConnections >= 1, "globalMaxConnections must be at least 1")
+        precondition(maxConnectionsPerHost >= 1, "maxConnectionsPerHost must be at least 1")
         precondition(checkpointIntervalBytes > 0, "checkpointIntervalBytes must be positive")
         precondition(persistDebounceTicks >= 1, "persistDebounceTicks must be at least 1")
         self.maxConcurrent = maxConcurrent
         self.segmentsPerItem = segmentsPerItem
         self.globalMaxConnections = globalMaxConnections
+        self.maxConnectionsPerHost = maxConnectionsPerHost
         self.downloadFolder = downloadFolder
         self.checkpointIntervalBytes = checkpointIntervalBytes
         self.persistDebounceTicks = persistDebounceTicks
@@ -395,6 +401,12 @@ public actor DownloadEngine {
             )
         )
 
+        let allocatedSegments = ConnectionAllocator.allocate(
+            demands: connectionDemands(for: desired),
+            budget: ConnectionBudget(
+                global: settings.globalMaxConnections, perHost: settings.maxConnectionsPerHost)
+        )
+
         var changed = false
         var retiring: [DownloadTask] = []
         for (itemID, runner) in runners where !desired.contains(itemID) && !runner.isRetiring {
@@ -443,7 +455,7 @@ public actor DownloadEngine {
                 destinationURL: runContext.destinationURL,
                 transport: transport,
                 configuration: DownloadTask.Configuration(
-                    workerCount: runContext.segments,
+                    workerCount: allocatedSegments[itemID] ?? runContext.segments,
                     minChunk: 64 * 1024,
                     checkpointInterval: settings.checkpointIntervalBytes
                 )
@@ -459,8 +471,36 @@ public actor DownloadEngine {
             )
         }
 
+        // Re-clamp every already-running item too, not just fresh starts: a
+        // sibling finishing frees budget the survivors should grow back into,
+        // and a newly-added item can just as easily squeeze existing ones
+        // down.
+        for (itemID, runner) in runners where !runner.isRetiring && desired.contains(itemID) {
+            if let allocated = allocatedSegments[itemID] {
+                await runner.task.setWorkerCount(allocated)
+            }
+        }
+
         for task in retiring { await task.pause() }
         if changed { await persist() }
+    }
+
+    /// Connection demand for a set of items: their real host and their
+    /// requested (not yet budget-capped) worker count.
+    private func connectionDemands(for itemIDs: Set<UUID>) -> [ConnectionDemand] {
+        var demands: [ConnectionDemand] = []
+        for package in packages {
+            for item in package.items where itemIDs.contains(item.id) {
+                demands.append(
+                    ConnectionDemand(
+                        id: item.id,
+                        host: item.url.host ?? "",
+                        desiredSegments: segmentCount(for: item.id)
+                    )
+                )
+            }
+        }
+        return demands
     }
 
     /// The package graph as the scheduler should see it right now.
