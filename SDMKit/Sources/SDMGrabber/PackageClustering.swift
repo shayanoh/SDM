@@ -72,7 +72,7 @@ public enum PackageClustering {
             let cleaned = base.trimmingCharacters(in: CharacterSet(charactersIn: " ._-"))
             candidates.append(
                 PackageCandidate(
-                    name: cleaned.isEmpty ? name(for: members) : cleaned,
+                    name: cleaned.isEmpty ? name(for: members) : beautify(cleaned),
                     linkIDs: members.map(\.id),
                     isArchive: true
                 )
@@ -134,16 +134,25 @@ public enum PackageClustering {
         URL(fileURLWithPath: filename).deletingPathExtension().lastPathComponent
     }
 
-    /// Cleaned longest common prefix of member stems, falling back to the host.
+    /// Cleaned longest common prefix of member stems, falling back to the
+    /// host. Tries the season/episode-aware prefix first, since a naive
+    /// character-by-character common prefix mangles that specific pattern.
     private static func name(for members: [ClusterableLink]) -> String {
         let stems = members.map { stripExtension($0.filename) }
+        guard !stems.isEmpty else { return "Package" }
+
+        if let seasonPrefix = seasonEpisodePrefix(for: stems) {
+            return beautify(seasonPrefix)
+        }
+
         guard var prefix = stems.first else { return members.first?.host ?? "Package" }
         for stem in stems.dropFirst() {
             prefix = commonPrefix(prefix, stem)
             if prefix.isEmpty { break }
         }
         let cleaned = prefix.trimmingCharacters(in: CharacterSet(charactersIn: " ._-"))
-        return cleaned.isEmpty ? (members.first?.host ?? "Package") : cleaned
+        guard !cleaned.isEmpty else { return members.first?.host ?? "Package" }
+        return beautify(cleaned)
     }
 
     private static func commonPrefix(_ a: String, _ b: String) -> String {
@@ -153,5 +162,54 @@ public enum PackageClustering {
             result.append(charA)
         }
         return result
+    }
+
+    /// Detects a shared "S01E0x" style season/episode structure across
+    /// every member's stem and, when found, returns the name up through the
+    /// season token — "Show.S01E01" and "Show.S01E02" name as "Show.S01",
+    /// not the meaningless "Show.S01E0" a naive character-by-character
+    /// common prefix produces, since that stops the instant the episode
+    /// digits diverge, mid-token.
+    private static func seasonEpisodePrefix(for stems: [String]) -> String? {
+        let pattern = #"(?i)^(.*?)(s\d{1,2})e\d{1,2}.*$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+
+        var sharedLeading: String?
+        var sharedSeason: String?
+        for stem in stems {
+            let range = NSRange(stem.startIndex..<stem.endIndex, in: stem)
+            guard let match = regex.firstMatch(in: stem, range: range),
+                let leadingRange = Range(match.range(at: 1), in: stem),
+                let seasonRange = Range(match.range(at: 2), in: stem)
+            else { return nil }
+            let leading = String(stem[leadingRange])
+            let season = String(stem[seasonRange]).uppercased()
+            if let currentLeading = sharedLeading, let currentSeason = sharedSeason {
+                guard currentLeading.caseInsensitiveCompare(leading) == .orderedSame,
+                    currentSeason == season
+                else { return nil }
+            } else {
+                sharedLeading = leading
+                sharedSeason = season
+            }
+        }
+        guard let sharedLeading, let sharedSeason else { return nil }
+        return sharedLeading + sharedSeason
+    }
+
+    /// Replaces `.`/`_`/`-` separators with spaces and collapses runs of
+    /// them, so a package name reads like a title instead of a filename.
+    /// Only capitalizes words that are entirely lowercase — "1080p",
+    /// "BluRay", and "NASA" are left exactly as the source spelled them,
+    /// since re-casing an already-mixed-case or all-caps word is as likely
+    /// to mangle it as improve it.
+    private static func beautify(_ raw: String) -> String {
+        let separators = CharacterSet(charactersIn: "._-")
+        let words = raw.components(separatedBy: separators).filter { !$0.isEmpty }
+        let capitalized = words.map { word -> String in
+            guard word == word.lowercased() else { return word }
+            return word.prefix(1).uppercased() + word.dropFirst()
+        }
+        return capitalized.joined(separator: " ")
     }
 }

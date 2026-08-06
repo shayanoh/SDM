@@ -15,9 +15,31 @@ private func link(_ filename: String, host: String = "cdn.example.com", path: St
     let candidates = PackageClustering.cluster([e1, e2])
 
     #expect(candidates.count == 1)
-    #expect(candidates[0].name == "Show.S01E0")
+    #expect(candidates[0].name == "Show S01")
     #expect(Set(candidates[0].linkIDs) == Set([e1.id, e2.id]))
     #expect(candidates[0].isArchive == false)
+}
+
+@Test func seasonEpisodePatternKeepsTheFullSeasonNumberNotJustItsFirstDigit() {
+    // Regression case: a naive character-by-character common prefix over
+    // "S01E01.1080p" / "S01E02.1080p" stops at "S0" — the very first digit
+    // where the two diverge — which is meaningless. This must keep "S01"
+    // whole and drop only the episode-specific remainder.
+    let e1 = link("S01E01.1080p.mkv")
+    let e2 = link("S01E02.1080p.mkv")
+    let candidates = PackageClustering.cluster([e1, e2])
+
+    #expect(candidates.count == 1)
+    #expect(candidates[0].name == "S01")
+}
+
+@Test func dotsAndDashesInAPackageNameBecomeSpaces() {
+    let a = link("the.matrix.1999.bluray.mkv")
+    let b = link("the.matrix.1999.bluray.nfo")
+    let candidates = PackageClustering.cluster([a, b])
+
+    #expect(candidates.count == 1)
+    #expect(candidates[0].name == "The Matrix 1999 Bluray")
 }
 
 @Test func archivePartsLockTogetherRegardlessOfTemplate() {
@@ -29,7 +51,7 @@ private func link(_ filename: String, host: String = "cdn.example.com", path: St
     let candidates = PackageClustering.cluster(parts)
 
     #expect(candidates.count == 1)
-    #expect(candidates[0].name == "movie")
+    #expect(candidates[0].name == "Movie")
     #expect(candidates[0].isArchive == true)
     #expect(Set(candidates[0].linkIDs) == Set(parts.map(\.id)))
 }
