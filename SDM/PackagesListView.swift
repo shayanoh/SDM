@@ -2,6 +2,27 @@ import SDMCore
 import SDMEngine
 import SwiftUI
 
+/// Where a custom drag-to-reorder gesture (see `PackagesListView`'s
+/// `@State private var dropTarget`) currently indicates an item would land.
+private enum DropTarget: Equatable {
+    case beforeItem(itemID: UUID, packageID: UUID)
+    case endOfPackage(UUID)
+}
+
+private struct ItemRowFramesKey: PreferenceKey {
+    static var defaultValue: [UUID: CGRect] = [:]
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
+private struct PackageDropZoneFramesKey: PreferenceKey {
+    static var defaultValue: [UUID: CGRect] = [:]
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
 /// The one downloads-list component: collapsible per-package sections with
 /// zebra striping, state icons, right-click menus, and multi-select.
 ///
@@ -32,6 +53,20 @@ struct PackagesListView: View {
     @Binding var collapsedPackageIDs: Set<UUID>
     @Binding var pendingDeletion: MainWindowView.PendingDeletion?
 
+    /// Custom drag-to-reorder state. Deliberately *not* built on `.onMove`
+    /// or `.draggable`/`.dropDestination` — both route through AppKit's
+    /// `NSItemProvider`/`NSDraggingSession`, an async transfer that gets
+    /// cancelled ("NSItemProviderErrorDomain Code=-1000... operation was
+    /// cancelled") the moment the source row's view is reconstructed by a
+    /// telemetry update — which is unavoidable while a download is actually
+    /// transferring. A plain `DragGesture` is pure in-process SwiftUI state:
+    /// synchronous, nothing to cancel, and tied to the row's stable view
+    /// identity rather than a value captured at one render.
+    @State private var draggedItemID: UUID?
+    @State private var dropTarget: DropTarget?
+    @State private var itemRowFrames: [UUID: CGRect] = [:]
+    @State private var packageDropZoneFrames: [UUID: CGRect] = [:]
+
     private var theme: Theme { themeStore.resolved(for: colorScheme) }
 
     var body: some View {
@@ -52,23 +87,26 @@ struct PackagesListView: View {
                 DisclosureGroup(isExpanded: isExpandedBinding(package.id)) {
                     ForEach(Array(package.items.enumerated()), id: \.element.id) {
                         itemIndex, item in
-                        row(item, index: itemIndex)
+                        row(
+                            item, index: itemIndex, packageID: package.id,
+                            isLastInPackage: itemIndex == package.items.count - 1)
                     }
-                    .onMove(
-                        perform: allowsReordering
-                            ? { indices, newOffset in
-                                var ids = package.items.map(\.id)
-                                ids.move(fromOffsets: indices, toOffset: newOffset)
-                                let packageID = package.id
-                                Task { await controller.reorderItems(ids, inPackage: packageID) }
-                            } : nil
-                    )
+                    // Package-internal reordering is now driven entirely by
+                    // the `.simultaneousGesture(DragGesture(...))` in
+                    // `row(_:index:packageID:isLastInPackage:)` — no
+                    // `.onMove` here anymore.
                 } label: {
                     PackageHeaderRow(
-                        package: package, allowsReordering: allowsReordering, theme: theme,
-                        pendingDeletion: $pendingDeletion)
+                        package: package, theme: theme, pendingDeletion: $pendingDeletion)
                 }
                 .listRowBackground(packageHeaderBackground(index: packageIndex))
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear.preference(
+                            key: PackageDropZoneFramesKey.self,
+                            value: [package.id: proxy.frame(in: .named("packagesList"))])
+                    }
+                )
             }
             .onMove(
                 perform: allowsReordering
@@ -79,6 +117,9 @@ struct PackagesListView: View {
                     } : nil
             )
         }
+        .coordinateSpace(.named("packagesList"))
+        .onPreferenceChange(ItemRowFramesKey.self) { itemRowFrames = $0 }
+        .onPreferenceChange(PackageDropZoneFramesKey.self) { packageDropZoneFrames = $0 }
         // `List` paints its own opaque system background regardless of what
         // sits behind it — without hiding that, `surfacePrimary` never
         // actually shows through, no matter how many rows/icons/text read
@@ -97,13 +138,141 @@ struct PackagesListView: View {
     }
 
     @ViewBuilder
-    private func row(_ item: ItemSnapshot, index: Int) -> some View {
+    private func row(_ item: ItemSnapshot, index: Int, packageID: UUID, isLastInPackage: Bool)
+        -> some View
+    {
+        let content = itemRow(item, index: index)
         if allowsReordering {
-            itemRow(item, index: index)
-                .draggable(DraggedItemID(itemID: item.id))
+            content
+                .opacity(draggedItemID == item.id ? 0.4 : 1.0)
+                .overlay(alignment: .top) {
+                    if showsInsertionIndicator(before: item.id) {
+                        Rectangle().fill(theme.accentColor).frame(height: 2)
+                    }
+                }
+                .overlay(alignment: .bottom) {
+                    if isLastInPackage, dropTarget == .endOfPackage(packageID) {
+                        Rectangle().fill(theme.accentColor).frame(height: 2)
+                    }
+                }
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear.preference(
+                            key: ItemRowFramesKey.self,
+                            value: [item.id: proxy.frame(in: .named("packagesList"))])
+                    }
+                )
+                // `.simultaneousGesture` rather than `.gesture` — the latter
+                // claims the gesture exclusively, which would swallow plain
+                // clicks (row selection) before the `List`'s own click
+                // handling ever saw them. `minimumDistance: 6` means a plain
+                // click never engages this gesture at all regardless.
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 6, coordinateSpace: .named("packagesList"))
+                        .onChanged { value in
+                            if draggedItemID != item.id { draggedItemID = item.id }
+                            let newTarget = computeDropTarget(
+                                at: value.location, draggedItemID: item.id)
+                            if newTarget != dropTarget { dropTarget = newTarget }
+                        }
+                        .onEnded { _ in
+                            if let target = dropTarget {
+                                commitDrop(itemID: item.id, target: target)
+                            }
+                            draggedItemID = nil
+                            dropTarget = nil
+                        }
+                )
         } else {
-            itemRow(item, index: index)
+            content
         }
+    }
+
+    private func showsInsertionIndicator(before itemID: UUID) -> Bool {
+        if case .beforeItem(let target, _) = dropTarget { return target == itemID }
+        return false
+    }
+
+    /// Hit-tests the drag's current location against every known item-row
+    /// frame first (so precise between-two-rows placement wins), falling
+    /// back to whichever package's header/row region contains the point
+    /// (spec-adjacent to §9.3's "dropping onto a package row moves items
+    /// into it" — here that means "appended at the end").
+    private func computeDropTarget(at location: CGPoint, draggedItemID: UUID) -> DropTarget? {
+        for package in packages {
+            for (index, item) in package.items.enumerated() {
+                guard let frame = itemRowFrames[item.id], frame.contains(location) else {
+                    continue
+                }
+                guard item.id != draggedItemID else {
+                    return .beforeItem(itemID: item.id, packageID: package.id)
+                }
+                if location.y < frame.midY {
+                    return .beforeItem(itemID: item.id, packageID: package.id)
+                }
+                if index + 1 < package.items.count {
+                    return .beforeItem(itemID: package.items[index + 1].id, packageID: package.id)
+                }
+                return .endOfPackage(package.id)
+            }
+        }
+        for (packageID, frame) in packageDropZoneFrames where frame.contains(location) {
+            return .endOfPackage(packageID)
+        }
+        return nil
+    }
+
+    private func commitDrop(itemID: UUID, target: DropTarget) {
+        guard let sourcePackage = packages.first(where: { $0.items.contains { $0.id == itemID } })
+        else { return }
+
+        switch target {
+        case .beforeItem(let beforeID, let targetPackageID):
+            guard beforeID != itemID else { return }
+            if sourcePackage.id == targetPackageID {
+                Task {
+                    await controller.reorderItems(
+                        reordered(sourcePackage.items.map(\.id), moving: itemID, before: beforeID),
+                        inPackage: targetPackageID)
+                }
+            } else {
+                Task {
+                    await controller.moveItem(itemID, toPackage: targetPackageID)
+                    // `moveItem` always appends at the end (spec §5.3's
+                    // scope: `.queued` items only) — this follow-up call
+                    // repositions it precisely, reading the just-updated
+                    // structural state rather than a captured value.
+                    guard
+                        let updated = controller.structuralPackages.first(where: {
+                            $0.id == targetPackageID
+                        })
+                    else { return }
+                    await controller.reorderItems(
+                        reordered(updated.items.map(\.id), moving: itemID, before: beforeID),
+                        inPackage: targetPackageID)
+                }
+            }
+        case .endOfPackage(let targetPackageID):
+            if sourcePackage.id == targetPackageID {
+                var order = sourcePackage.items.map(\.id)
+                order.removeAll { $0 == itemID }
+                order.append(itemID)
+                Task { await controller.reorderItems(order, inPackage: targetPackageID) }
+            } else {
+                Task { await controller.moveItem(itemID, toPackage: targetPackageID) }
+            }
+        }
+    }
+
+    private func reordered(_ ids: [UUID], moving itemID: UUID, before beforeID: UUID) -> [UUID] {
+        var order = ids
+        order.removeAll { $0 == itemID }
+        if let insertIndex = order.firstIndex(of: beforeID) {
+            order.insert(itemID, at: insertIndex)
+        } else {
+            order.append(itemID)
+        }
+        return order
     }
 
     private func itemRow(_ item: ItemSnapshot, index: Int) -> some View {
@@ -248,7 +417,6 @@ struct PackagesListView: View {
 /// `EngineController.itemTelemetry`'s doc comment for the full story.
 private struct PackageHeaderRow: View {
     let package: PackageSnapshot
-    let allowsReordering: Bool
     let theme: Theme
     @Binding var pendingDeletion: MainWindowView.PendingDeletion?
 
@@ -279,18 +447,12 @@ private struct PackageHeaderRow: View {
                     pendingDeletion = .package(package.id)
                 }
             }
-        if allowsReordering {
-            content.dropDestination(for: DraggedItemID.self) { dragged, _ in
-                guard let dragged = dragged.first else { return false }
-                let packageID = package.id
-                Task {
-                    await controller.moveItem(dragged.itemID, toPackage: packageID)
-                }
-                return true
-            }
-        } else {
-            content
-        }
+        // Cross-package dropping is now handled entirely by
+        // `PackagesListView`'s own `DragGesture`-driven `computeDropTarget`/
+        // `commitDrop` (hit-testing this header's frame, reported via
+        // `PackageDropZoneFramesKey`) rather than a `.dropDestination` here —
+        // see `PackagesListView.draggedItemID`'s doc comment for why.
+        content
     }
 
     /// Live per-item telemetry summed the same way `PackageSnapshot`'s own
