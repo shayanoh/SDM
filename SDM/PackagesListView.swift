@@ -35,8 +35,7 @@ struct PackagesListView: View {
     private var theme: Theme { themeStore.resolved(for: colorScheme) }
 
     var body: some View {
-        let _ = debugPrint("[SDM diag] PackagesListView.body evaluated")
-        return VStack(spacing: 0) {
+        VStack(spacing: 0) {
             list
             Divider()
             PackagesBottomBar(
@@ -46,8 +45,7 @@ struct PackagesListView: View {
     }
 
     private var list: some View {
-        let _ = debugPrint("[SDM diag] PackagesListView.list evaluated")
-        return List(selection: $selectedItemIDs) {
+        List(selection: $selectedItemIDs) {
             ForEach(Array(packages.enumerated()), id: \.element.id) { packageIndex, package in
                 DisclosureGroup(isExpanded: isExpandedBinding(package.id)) {
                     ForEach(Array(package.items.enumerated()), id: \.element.id) {
@@ -111,6 +109,7 @@ struct PackagesListView: View {
             item: item, index: index, controller: controller,
             isSelected: selectedItemIDs.contains(item.id), theme: theme
         )
+        .id(item.id)
         .contextMenu {
             itemsContextMenu(selectedItemIDs.contains(item.id) ? selectedItemIDs : [item.id])
         }
@@ -241,11 +240,23 @@ struct PackagesListView: View {
 
 /// A package's disclosure-group label. A distinct `View` (rather than a
 /// helper function returning `some View`, which `packageHeader` used to be)
-/// deliberately — reading `controller.itemTelemetry` inside a genuine `View`
-/// struct's `body` scopes SwiftUI's invalidation to *this row alone* when
-/// telemetry updates each tick, instead of forcing `PackagesListView.body` —
-/// and hence the enclosing `List`'s structure — to re-evaluate. See
-/// `EngineController.itemTelemetry`'s doc comment for the full story.
+/// so its structure stays stable — the live byte counts/sparkline live in
+/// `PackageHeaderBytesText`/`PackageHeaderSparkline`, child views, rather
+/// than being read here directly. That split matters more than it looks:
+/// this label and the
+/// `DisclosureGroup`'s content (the package's item rows, including whichever
+/// one is mid-drag) are one compound row-group entity in `List`'s AppKit
+/// backing. Reading `controller.itemTelemetry` straight in *this* body — as
+/// it used to — reconstructed the whole group, including the active
+/// `NSItemProvider` for a row being dragged inside it, on every tick
+/// (confirmed live: dragging still cancelled with
+/// `NSItemProviderErrorDomain Code=-1000` even after `ItemRow` itself was
+/// split the same way, because this label was still the thing invalidating
+/// the group). Pushing the reads one level deeper into the two child views
+/// below keeps this body — and the group it's the label
+/// for — untouched by tick-driven telemetry. See `EngineController
+/// .itemTelemetry`'s doc comment for why any item's telemetry invalidates
+/// every reader in the first place.
 private struct PackageHeaderRow: View {
     let package: PackageSnapshot
     let allowsReordering: Bool
@@ -255,19 +266,14 @@ private struct PackageHeaderRow: View {
     @Environment(EngineController.self) private var controller
 
     var body: some View {
-        let _ = debugPrint("[SDM diag] PackageHeaderRow.body evaluated: \(package.name)")
         let content =
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(package.name).font(.title3.bold())
-                    Text("\(formattedBytes(liveCompletedBytes)) / \(formattedBytes(liveTotalBytes))")
-                        .font(.caption)
-                        .foregroundStyle(theme.textSecondaryColor)
-                        .monospacedDigit()
+                    PackageHeaderBytesText(package: package, controller: controller, theme: theme)
                 }
                 Spacer()
-                Sparkline(samples: liveSpeedHistory, color: theme.graphStrokeColor)
-                    .frame(width: 60, height: 20)
+                PackageHeaderSparkline(package: package, controller: controller, theme: theme)
             }
             .padding(.vertical, 4)
             .contentShape(Rectangle())
@@ -292,6 +298,24 @@ private struct PackageHeaderRow: View {
             content
         }
     }
+}
+
+/// The package header's live "completed / total" bytes readout. See
+/// `PackageHeaderRow.body`'s doc comment for why this must be a separate
+/// leaf `View` rather than inline in `PackageHeaderRow.body`. A sibling of
+/// `PackageHeaderSparkline` rather than one combined view so each keeps its
+/// own spot in the `HStack`/`VStack` layout the original inline code had.
+private struct PackageHeaderBytesText: View {
+    let package: PackageSnapshot
+    let controller: EngineController
+    let theme: Theme
+
+    var body: some View {
+        Text("\(formattedBytes(liveCompletedBytes)) / \(formattedBytes(liveTotalBytes))")
+            .font(.caption)
+            .foregroundStyle(theme.textSecondaryColor)
+            .monospacedDigit()
+    }
 
     /// Live per-item telemetry summed the same way `PackageSnapshot`'s own
     /// (now-stale-on-`structuralPackages`) computed properties used to —
@@ -309,6 +333,19 @@ private struct PackageHeaderRow: View {
         package.items.reduce(0) {
             $0 + (controller.itemTelemetry[$1.id]?.totalBytes ?? $1.totalBytes ?? 0)
         }
+    }
+}
+
+/// The package header's live speed sparkline. See `PackageHeaderBytesText`'s
+/// doc comment.
+private struct PackageHeaderSparkline: View {
+    let package: PackageSnapshot
+    let controller: EngineController
+    let theme: Theme
+
+    var body: some View {
+        Sparkline(samples: liveSpeedHistory, color: theme.graphStrokeColor)
+            .frame(width: 60, height: 20)
     }
 
     private var liveSpeedHistory: [Double] {
@@ -342,8 +379,7 @@ private struct PackagesBottomBar: View {
     @Environment(EngineController.self) private var controller
 
     var body: some View {
-        let _ = debugPrint("[SDM diag] PackagesBottomBar.body evaluated")
-        return HStack {
+        HStack {
             if showsPauseResumeButton {
                 Button {
                     Task {
@@ -486,23 +522,23 @@ private struct ItemRow: View {
     let isSelected: Bool
     let theme: Theme
 
-    /// Live telemetry for this item, read directly from `controller` rather
-    /// than carried on `item` — `item` comes from `EngineController
-    /// .structuralPackages`, which is deliberately *not* refreshed on every
-    /// tick (see its doc comment). Reading `controller.itemTelemetry` here,
-    /// inside this row's own `body`, scopes SwiftUI's invalidation to just
-    /// this row on a tick, instead of the whole `List` re-diffing.
-    private var telemetry: ItemTelemetry? { controller.itemTelemetry[item.id] }
-    private var completed: RangeSet { telemetry?.completed ?? item.completed }
-    private var totalBytes: Int64? { telemetry?.totalBytes ?? item.totalBytes }
-    private var activeSegments: Int { telemetry?.activeSegments ?? item.activeSegments }
-    private var configuredSegments: Int { telemetry?.configuredSegments ?? item.configuredSegments }
-    private var bytesPerSecond: Double { telemetry?.bytesPerSecond ?? 0 }
-    private var speedHistory: [Double] { telemetry?.speedHistory ?? [] }
-
+    /// This body deliberately never reads `controller.itemTelemetry` —
+    /// `.draggable(_:)` is attached to the view this `body` produces (see
+    /// `PackagesListView.row(_:index:)`), and re-evaluating *this* body on
+    /// every tick was what tore down the in-flight `NSItemProvider` mid-drag
+    /// (confirmed via `NSItemProviderErrorDomain Code=-1000 "operation was
+    /// cancelled"`), for every row on every tick — not just the row actually
+    /// being dragged, since Observation tracks `itemTelemetry` as one whole
+    /// dictionary property rather than per-key, so any item's telemetry
+    /// change invalidates every row that reads the dictionary at all,
+    /// dragged or not. All telemetry-dependent rendering is pushed one level
+    /// deeper into `ItemTelemetryFields`/`ItemProgressBar`/`ItemBytesText`
+    /// below, which read `controller.itemTelemetry` in their own `body`
+    /// instead — so only those leaf children invalidate on a tick, and this
+    /// row (and the drag it hosts) stays untouched regardless of whether
+    /// this exact item, some other item, or nothing at all is downloading.
     var body: some View {
-        let _ = debugPrint("[SDM diag] ItemRow.body evaluated: \(item.filename)")
-        return HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .top, spacing: 8) {
             stateIcon
                 .font(.title3)
                 .frame(width: 20)
@@ -523,22 +559,14 @@ private struct ItemRow: View {
                             .foregroundStyle(theme.faultyColor)
                     }
                     Spacer()
-                    Text("\(activeSegments)/\(configuredSegments) seg")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(theme.textSecondaryColor)
-                    Text(formatted(bytesPerSecond))
-                        .font(.caption.monospacedDigit())
-                    Sparkline(samples: speedHistory, color: theme.graphStrokeColor)
-                        .frame(width: 48, height: 16)
+                    ItemTelemetryFields(itemID: item.id, fallback: item, controller: controller, theme: theme)
                 }
-                SegmentedProgressBar(completed: completed, total: totalBytes ?? 0, theme: theme)
+                ItemProgressBar(itemID: item.id, fallback: item, controller: controller, theme: theme)
                     .frame(height: 6)
                 HStack {
                     statusLine
                     Spacer()
-                    Text("\(formattedBytes(completed.totalBytes)) / \(formattedBytes(totalBytes ?? 0))")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(theme.textSecondaryColor)
+                    ItemBytesText(itemID: item.id, fallback: item, controller: controller, theme: theme)
                 }
             }
         }
@@ -631,6 +659,73 @@ private struct ItemRow: View {
         case true, nil:
             EmptyView()
         }
+    }
+}
+
+// MARK: - Live telemetry leaves
+
+/// The segment count, speed readout, and sparkline. A distinct `View` so its
+/// `controller.itemTelemetry` read lives in *this* `body`, not `ItemRow`'s —
+/// see `ItemRow.body`'s doc comment for why that split matters for drag.
+private struct ItemTelemetryFields: View {
+    let itemID: UUID
+    let fallback: ItemSnapshot
+    let controller: EngineController
+    let theme: Theme
+
+    private var telemetry: ItemTelemetry? { controller.itemTelemetry[itemID] }
+    private var activeSegments: Int { telemetry?.activeSegments ?? fallback.activeSegments }
+    private var configuredSegments: Int {
+        telemetry?.configuredSegments ?? fallback.configuredSegments
+    }
+    private var bytesPerSecond: Double { telemetry?.bytesPerSecond ?? 0 }
+    private var speedHistory: [Double] { telemetry?.speedHistory ?? [] }
+
+    var body: some View {
+        HStack {
+            Text("\(activeSegments)/\(configuredSegments) seg")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(theme.textSecondaryColor)
+            Text(formatted(bytesPerSecond))
+                .font(.caption.monospacedDigit())
+            Sparkline(samples: speedHistory, color: theme.graphStrokeColor)
+                .frame(width: 48, height: 16)
+        }
+    }
+}
+
+/// The segmented progress bar. See `ItemTelemetryFields`'s doc comment.
+private struct ItemProgressBar: View {
+    let itemID: UUID
+    let fallback: ItemSnapshot
+    let controller: EngineController
+    let theme: Theme
+
+    private var telemetry: ItemTelemetry? { controller.itemTelemetry[itemID] }
+    private var completed: RangeSet { telemetry?.completed ?? fallback.completed }
+    private var totalBytes: Int64? { telemetry?.totalBytes ?? fallback.totalBytes }
+
+    var body: some View {
+        SegmentedProgressBar(completed: completed, total: totalBytes ?? 0, theme: theme)
+    }
+}
+
+/// The "completed / total" bytes readout. See `ItemTelemetryFields`'s doc
+/// comment.
+private struct ItemBytesText: View {
+    let itemID: UUID
+    let fallback: ItemSnapshot
+    let controller: EngineController
+    let theme: Theme
+
+    private var telemetry: ItemTelemetry? { controller.itemTelemetry[itemID] }
+    private var completed: RangeSet { telemetry?.completed ?? fallback.completed }
+    private var totalBytes: Int64? { telemetry?.totalBytes ?? fallback.totalBytes }
+
+    var body: some View {
+        Text("\(formattedBytes(completed.totalBytes)) / \(formattedBytes(totalBytes ?? 0))")
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(theme.textSecondaryColor)
     }
 }
 
