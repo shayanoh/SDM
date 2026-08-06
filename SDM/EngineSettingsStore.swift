@@ -13,6 +13,7 @@ enum EngineSettingsStore {
         static let segmentsPerItem = "sdm.segmentsPerItem"
         static let globalMaxConnections = "sdm.globalMaxConnections"
         static let maxConnectionsPerHost = "sdm.maxConnectionsPerHost"
+        static let autoStartDownloadsOnLaunch = "sdm.autoStartDownloadsOnLaunch"
     }
 
     static var maxConcurrent: Int {
@@ -33,5 +34,13 @@ enum EngineSettingsStore {
     static var maxConnectionsPerHost: Int {
         get { defaults.object(forKey: Key.maxConnectionsPerHost) as? Int ?? 8 }
         set { defaults.set(newValue, forKey: Key.maxConnectionsPerHost) }
+    }
+
+    /// Off by default: a freshly launched app should not start pulling bytes
+    /// until the operator says so. When `false`, `EngineController` forces
+    /// every restored item's `isEnabled` to `false` right after `restore()`.
+    static var autoStartDownloadsOnLaunch: Bool {
+        get { defaults.object(forKey: Key.autoStartDownloadsOnLaunch) as? Bool ?? false }
+        set { defaults.set(newValue, forKey: Key.autoStartDownloadsOnLaunch) }
     }
 }

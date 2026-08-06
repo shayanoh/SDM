@@ -29,6 +29,10 @@ public struct ItemSnapshot: Sendable, Equatable, Identifiable {
     /// if it has never failed. Spec §6.4's "manual retry action" needs this
     /// to show the operator how much budget is left before giving up.
     public let remainingAttempts: Int?
+    /// True only for a `.completed` item whose destination file is no longer
+    /// on disk — moved or deleted outside SDM. Always `false` for any other
+    /// state.
+    public let fileMissing: Bool
 
     public init(
         id: UUID,
@@ -44,10 +48,12 @@ public struct ItemSnapshot: Sendable, Equatable, Identifiable {
         bytesPerSecond: Double,
         speedHistory: [Double],
         checkpointFailure: String? = nil,
-        remainingAttempts: Int? = nil
+        remainingAttempts: Int? = nil,
+        fileMissing: Bool = false
     ) {
         self.checkpointFailure = checkpointFailure
         self.remainingAttempts = remainingAttempts
+        self.fileMissing = fileMissing
         self.id = id
         self.url = url
         self.filename = filename
@@ -87,6 +93,10 @@ public struct PackageSnapshot: Sendable, Equatable, Identifiable {
     public var bytesPerSecond: Double { items.reduce(0) { $0 + $1.bytesPerSecond } }
     public var completedCount: Int { items.filter { $0.state == .completed }.count }
     public var totalBytes: Int64 { items.reduce(0) { $0 + ($1.totalBytes ?? 0) } }
+    /// Sum of each item's downloaded bytes so far, for the package header's
+    /// "x MB / y MB" aggregate. Same derived-not-stored idiom as
+    /// `bytesPerSecond`.
+    public var completedBytes: Int64 { items.reduce(0) { $0 + $1.completed.totalBytes } }
 
     /// Spec §9.6's per-row sparkline data, aggregated the same way
     /// `bytesPerSecond` is: summed from the member items, never stored

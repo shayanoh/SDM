@@ -90,6 +90,14 @@ final class EngineController {
     /// reopens without the process exiting.
     func startHeartbeat() async {
         await engine.restore()
+        // Off by default: nothing should start pulling bytes just because the
+        // app opened. `restore()` already turns a persisted `.running` back
+        // into `.queued`; this goes one step further and holds every item
+        // there until the operator explicitly starts it, unless they have
+        // opted into auto-resume in Settings.
+        if !EngineSettingsStore.autoStartDownloadsOnLaunch {
+            await engine.setEnabledForAllItems(false)
+        }
         snapshot = await engine.snapshot()
         notifications.requestAuthorization()
 
@@ -136,16 +144,6 @@ final class EngineController {
         }
     }
 
-    func addDownload(urlString: String) async {
-        guard let url = URL(string: urlString), url.scheme?.hasPrefix("http") == true else {
-            return
-        }
-        let filename = url.lastPathComponent.isEmpty ? "download.bin" : url.lastPathComponent
-        let item = DownloadItem(url: url, filename: filename)
-        await engine.add(DownloadPackage(name: "Manual", items: [item]))
-        snapshot = await engine.snapshot()
-    }
-
     func setEnabled(_ enabled: Bool, for itemID: UUID) async {
         await engine.setEnabled(enabled, for: itemID)
         snapshot = await engine.snapshot()
@@ -163,6 +161,43 @@ final class EngineController {
 
     func moveItem(_ itemID: UUID, toPackage packageID: UUID) async {
         await engine.moveItem(itemID, toPackage: packageID)
+        snapshot = await engine.snapshot()
+    }
+
+    func reorderPackages(_ packageIDs: [UUID]) async {
+        await engine.reorderPackages(packageIDs)
+        snapshot = await engine.snapshot()
+    }
+
+    /// Global pause/resume, spec-adjacent UI convenience: pauses or
+    /// (re-)queues every item in one call.
+    func setAllEnabled(_ enabled: Bool) async {
+        await engine.setEnabledForAllItems(enabled)
+        snapshot = await engine.snapshot()
+    }
+
+    func removeItem(_ itemID: UUID, deleteFile: Bool) async {
+        await engine.removeItem(itemID, deleteFile: deleteFile)
+        snapshot = await engine.snapshot()
+    }
+
+    func removePackage(_ packageID: UUID, deleteFiles: Bool) async {
+        await engine.removePackage(packageID, deleteFiles: deleteFiles)
+        snapshot = await engine.snapshot()
+    }
+
+    func resetDownload(_ itemID: UUID) async {
+        await engine.resetDownload(itemID)
+        snapshot = await engine.snapshot()
+    }
+
+    /// Batch variant for multi-selection delete: each item is stopped and
+    /// removed in turn, then the snapshot is republished once at the end
+    /// rather than once per item.
+    func removeItems(_ itemIDs: [UUID], deleteFile: Bool) async {
+        for itemID in itemIDs {
+            await engine.removeItem(itemID, deleteFile: deleteFile)
+        }
         snapshot = await engine.snapshot()
     }
 

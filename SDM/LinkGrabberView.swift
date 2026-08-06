@@ -63,21 +63,11 @@ struct LinkGrabberView: View {
             Text(package.name)
             Spacer()
             Button("Add to downloads") {
-                let urls = controller.urls(inPackageNamed: package.name)
-                let name = package.name
-                Task {
-                    await engineController.addPackage(
-                        name: name, urls: urls, startImmediately: false)
-                }
+                addToDownloads(package, startImmediately: false)
             }
             .controlSize(.small)
             Button("Add and start") {
-                let urls = controller.urls(inPackageNamed: package.name)
-                let name = package.name
-                Task {
-                    await engineController.addPackage(
-                        name: name, urls: urls, startImmediately: true)
-                }
+                addToDownloads(package, startImmediately: true)
             }
             .controlSize(.small)
         }
@@ -139,6 +129,22 @@ struct LinkGrabberView: View {
         }
         .buttonStyle(.bordered)
         .tint(activeFilter == filter ? .accentColor : .secondary)
+    }
+
+    /// Hands the package's links to the engine, then clears them out of the
+    /// grabber — once a link is a download it has no reason to still show up
+    /// as something waiting to be grabbed.
+    private func addToDownloads(_ package: PackageCandidate, startImmediately: Bool) {
+        let urls = controller.urls(inPackageNamed: package.name)
+        let name = package.name
+        let linkIDs = package.linkIDs
+        Task {
+            await engineController.addPackage(
+                name: name, urls: urls, startImmediately: startImmediately)
+            for linkID in linkIDs {
+                await controller.removeLink(linkID)
+            }
+        }
     }
 
     private func links(in package: PackageCandidate) -> [ProbedLink] {

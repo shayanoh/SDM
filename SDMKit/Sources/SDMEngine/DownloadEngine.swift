@@ -284,6 +284,169 @@ public actor DownloadEngine {
         return nil
     }
 
+    /// Applies a new package order. Same idiom as `reorderItems`: any id not
+    /// present in `packageIDs` keeps its relative order, appended at the end.
+    public func reorderPackages(_ packageIDs: [UUID]) async {
+        var byID = Dictionary(uniqueKeysWithValues: packages.map { ($0.id, $0) })
+        var reordered: [DownloadPackage] = []
+        for (position, id) in packageIDs.enumerated() {
+            guard var package = byID.removeValue(forKey: id) else { continue }
+            package.position = position
+            reordered.append(package)
+        }
+        reordered.append(contentsOf: byID.values)
+        packages = reordered
+        await persist()
+    }
+
+    /// Global pause/resume: spec-driven UI convenience over `setEnabled`,
+    /// applied to every item in one pass rather than one engine round trip
+    /// per item.
+    public func setEnabledForAllItems(_ enabled: Bool) async {
+        for packageIndex in packages.indices {
+            for itemIndex in packages[packageIndex].items.indices {
+                packages[packageIndex].items[itemIndex].isEnabled = enabled
+            }
+        }
+        await persist()
+        await reconcile()
+    }
+
+    /// Removes one item: stops its runner if it is currently running, always
+    /// drops its resume sidecar (a sidecar with no owning list entry is just
+    /// an orphan), and — only when `deleteFile` is true — trashes whatever
+    /// bytes it wrote (both the in-progress `.incomplete` file and, if it had
+    /// already finished, the final file) and, if that was the last item in
+    /// its package, trashes the now-empty package folder too.
+    ///
+    /// `deleteFile == false` is deliberately non-destructive: it only edits
+    /// the list, so "remove from list" can never surprise someone by taking
+    /// their downloaded bytes with it.
+    public func removeItem(_ itemID: UUID, deleteFile: Bool) async {
+        guard let loc = location(of: itemID) else { return }
+        let package = packages[loc.packageIndex]
+        let item = package.items[loc.itemIndex]
+        let folder = settings.downloadFolder.appendingPathComponent(package.name)
+        let destination = folder.appendingPathComponent(item.filename)
+
+        await stopRunnerIfRunning(itemID)
+
+        ResumeSidecar.remove(at: ResumeSidecar.url(for: destination))
+        if deleteFile {
+            trashIfExists(destination)
+            trashIfExists(SparseFile.incompleteURL(for: destination))
+        }
+
+        guard let currentLoc = location(of: itemID) else { return }
+        packages[currentLoc.packageIndex].items.remove(at: currentLoc.itemIndex)
+        let packageBecameEmpty = packages[currentLoc.packageIndex].items.isEmpty
+        if packageBecameEmpty {
+            packages.remove(at: currentLoc.packageIndex)
+        }
+        if deleteFile && packageBecameEmpty {
+            removeFolderIfEmpty(folder)
+        }
+
+        clearItemBookkeeping(itemID)
+        await persist()
+        await reconcile()
+    }
+
+    /// Removes an entire package. `deleteFiles` trashes the whole package
+    /// folder in one move rather than per-item — the folder holds every
+    /// item's bytes and sidecar together, so this is both simpler and atomic
+    /// compared to removing them one at a time.
+    public func removePackage(_ packageID: UUID, deleteFiles: Bool) async {
+        guard let packageIndex = packages.firstIndex(where: { $0.id == packageID }) else { return }
+        let package = packages[packageIndex]
+        for item in package.items {
+            await stopRunnerIfRunning(item.id)
+        }
+
+        let folder = settings.downloadFolder.appendingPathComponent(package.name)
+        if deleteFiles {
+            for item in package.items {
+                ResumeSidecar.remove(
+                    at: ResumeSidecar.url(for: folder.appendingPathComponent(item.filename)))
+            }
+            trashIfExists(folder)
+        }
+
+        for item in package.items { clearItemBookkeeping(item.id) }
+        packages.removeAll { $0.id == packageID }
+        await persist()
+        await reconcile()
+    }
+
+    /// Restarts a download from zero: stops it if running, discards its
+    /// sidecar and any partial bytes, and re-queues it as if freshly added.
+    public func resetDownload(_ itemID: UUID) async {
+        guard let loc = location(of: itemID) else { return }
+        let package = packages[loc.packageIndex]
+        let item = package.items[loc.itemIndex]
+        let folder = settings.downloadFolder.appendingPathComponent(package.name)
+        let destination = folder.appendingPathComponent(item.filename)
+
+        await stopRunnerIfRunning(itemID)
+
+        ResumeSidecar.remove(at: ResumeSidecar.url(for: destination))
+        trashIfExists(destination)
+        trashIfExists(SparseFile.incompleteURL(for: destination))
+
+        failedAttempts[itemID] = nil
+        retryHoldTicks[itemID] = nil
+        sampledBytes[itemID] = nil
+        checkpointFailures[itemID] = nil
+        attemptStartBytes[itemID] = nil
+
+        mutateItem(itemID) {
+            $0.completed = RangeSet()
+            $0.totalBytes = nil
+            $0.state = .queued
+            $0.isEnabled = true
+            $0.isResumable = nil
+            $0.validator = nil
+        }
+        await persist()
+        await reconcile()
+    }
+
+    /// Cancels and awaits an item's runner if it has one, mirroring
+    /// `shutdown()`'s stop sequence for a single item: cancel the job, pause
+    /// the task so its file descriptor closes, then await the job so
+    /// `finish()` has already run and `runners[itemID]` is cleared before the
+    /// caller touches disk.
+    private func stopRunnerIfRunning(_ itemID: UUID) async {
+        guard let runner = runners[itemID] else { return }
+        runner.job.cancel()
+        await runner.task.pause()
+        _ = await runner.job.value
+    }
+
+    private func trashIfExists(_ url: URL) {
+        guard FileManager.default.fileExists(atPath: url.path) else { return }
+        try? FileManager.default.trashItem(at: url, resultingItemURL: nil)
+    }
+
+    private func removeFolderIfEmpty(_ folder: URL) {
+        guard
+            let contents = try? FileManager.default.contentsOfDirectory(atPath: folder.path),
+            contents.isEmpty
+        else { return }
+        try? FileManager.default.trashItem(at: folder, resultingItemURL: nil)
+    }
+
+    private func clearItemBookkeeping(_ itemID: UUID) {
+        failedAttempts[itemID] = nil
+        retryHoldTicks[itemID] = nil
+        samplers[itemID] = nil
+        sampledBytes[itemID] = nil
+        checkpointFailures[itemID] = nil
+        segmentOverrides[itemID] = nil
+        attemptStartBytes[itemID] = nil
+        startedAtTick[itemID] = nil
+    }
+
     public func setSegmentCount(_ count: Int, for itemID: UUID) async {
         precondition(count >= 1, "segment count must be at least 1")
         segmentOverrides[itemID] = count
@@ -392,6 +555,18 @@ public actor DownloadEngine {
                     checkpointFailure = await runner.task.lastCheckpointFailure
                 }
                 let sampler = samplers[item.id] ?? SpeedSampler()
+                // Spec-adjacent UI need: a `.completed` item whose file has
+                // since been moved or deleted outside SDM should say so
+                // rather than silently claiming to be done. Scoped to
+                // `.completed` — any other state's file legitimately may not
+                // exist yet.
+                var fileMissing = false
+                if item.state == .completed {
+                    let destination = settings.downloadFolder
+                        .appendingPathComponent(package.name)
+                        .appendingPathComponent(item.filename)
+                    fileMissing = !FileManager.default.fileExists(atPath: destination.path)
+                }
                 items.append(
                     ItemSnapshot(
                         id: item.id,
@@ -409,7 +584,8 @@ public actor DownloadEngine {
                         checkpointFailure: checkpointFailure,
                         remainingAttempts: failedAttempts[item.id].map {
                             retryPolicy.maxAttempts - $0
-                        }
+                        },
+                        fileMissing: fileMissing
                     )
                 )
             }

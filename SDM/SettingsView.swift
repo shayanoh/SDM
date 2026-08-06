@@ -6,6 +6,7 @@ struct SettingsView: View {
     @State private var segmentsPerItem = EngineSettingsStore.segmentsPerItem
     @State private var globalMaxConnections = EngineSettingsStore.globalMaxConnections
     @State private var maxConnectionsPerHost = EngineSettingsStore.maxConnectionsPerHost
+    @State private var autoStartDownloadsOnLaunch = EngineSettingsStore.autoStartDownloadsOnLaunch
     @State private var clipboardWatchingEnabled = GrabberSettings.clipboardWatchingEnabled
     @State private var autoAddAndStartOnGrab = GrabberSettings.autoAddAndStartOnGrab
     @State private var deepSniffEnabled = GrabberSettings.deepSniffEnabled
@@ -29,6 +30,9 @@ struct SettingsView: View {
                     "Max connections per host: \(maxConnectionsPerHost)",
                     value: $maxConnectionsPerHost, in: 1...64
                 )
+                Toggle(
+                    "Resume downloads automatically when SDM opens",
+                    isOn: $autoStartDownloadsOnLaunch)
             }
             Section("Linkgrabber") {
                 Toggle("Watch clipboard for links", isOn: $clipboardWatchingEnabled)
@@ -48,6 +52,9 @@ struct SettingsView: View {
         .onChange(of: segmentsPerItem) { _, _ in applyEngineSettings() }
         .onChange(of: globalMaxConnections) { _, _ in applyEngineSettings() }
         .onChange(of: maxConnectionsPerHost) { _, _ in applyEngineSettings() }
+        .onChange(of: autoStartDownloadsOnLaunch) { _, new in
+            EngineSettingsStore.autoStartDownloadsOnLaunch = new
+        }
         .onChange(of: clipboardWatchingEnabled) { _, new in
             GrabberSettings.clipboardWatchingEnabled = new
         }
