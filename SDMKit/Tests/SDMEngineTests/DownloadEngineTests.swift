@@ -433,6 +433,11 @@ private func makeGatedEngine(
     }
     #expect(spins < 100_000)
 
+    // Past the hysteresis window (spec §6.4), so the urgent package below is
+    // free to preempt it — this test is about preservation of progress
+    // across a preemption, not about hysteresis itself (see HysteresisTests).
+    for _ in 0..<5 { await engine.tick() }
+
     let second = DownloadPackage(
         name: "Urgent",
         items: [
@@ -563,6 +568,11 @@ private func makeGatedEngine(
     // Parked inside prepare(); the probe has not answered, so nothing knows
     // yet whether this download is resumable.
     await gate.waitForArrival()
+
+    // Past the hysteresis window (spec §6.4) so the urgent package below is
+    // free to preempt it — this test is about preemptibility while unprobed,
+    // not about hysteresis itself (see HysteresisTests).
+    for _ in 0..<5 { await engine.tick() }
 
     let second = DownloadPackage(
         name: "Urgent",

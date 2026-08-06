@@ -120,6 +120,16 @@ public actor DownloadEngine {
     /// Ticks elapsed since the first unflushed change, or `nil` when the store
     /// has nothing pending. Spec §4.2's debounce.
     private var ticksSincePendingChange: Int?
+    /// The heartbeat tick each currently-tracked runner started on, so
+    /// `reconcile()` can tell whether it is still inside spec §6.4's
+    /// hysteresis window. Cleared when the runner finishes, in `finish()`.
+    private var startedAtTick: [UUID: Int] = [:]
+    /// Ticks elapsed since the engine started, driven by `tick()`. Counted
+    /// rather than measured against a clock, matching every other
+    /// tick-driven mechanism here (`retryHoldTicks`, checkpoint staleness).
+    private var currentTick: Int = 0
+    /// Spec §6.4: "An item started within the last ~5 s is not preempted."
+    private let hysteresisWindowTicks = 5
     /// The last checkpoint failure reported by each item's task, kept after
     /// the runner retires so the reason does not vanish from the UI the
     /// instant the download stops.
@@ -230,6 +240,7 @@ public actor DownloadEngine {
     /// the speed window, ages retry backoff, writes debounced durable state,
     /// and reschedules.
     public func tick() async {
+        currentTick += 1
         for (itemID, runner) in runners where !runner.isRetiring {
             let transferred = await runner.task.completedRanges.totalBytes
             recordProgress(transferred, for: itemID)
@@ -377,8 +388,9 @@ public actor DownloadEngine {
     ///
     /// The desired set is computed and applied to `runners` without any
     /// suspension in between, so two overlapping calls can never both decide
-    /// to start the same item. `startedRecently` is empty: hysteresis needs a
-    /// clock and is deferred to Phase 3.
+    /// to start the same item. `startedRecently` is derived from
+    /// `startedAtTick` and the tick-counted hysteresis window (spec §6.4),
+    /// rather than a wall clock — see `currentTick`.
     ///
     /// `refreshResumability()` runs *before* that block, and does suspend.
     /// That is safe for a different reason than the block itself: a call that
@@ -396,7 +408,9 @@ public actor DownloadEngine {
             SchedulerInput(
                 packages: schedulablePackages(),
                 runningNow: Set(runners.keys),
-                startedRecently: [],
+                startedRecently: Set(
+                    startedAtTick.filter { currentTick - $0.value < hysteresisWindowTicks }.keys
+                ),
                 maxConcurrent: settings.maxConcurrent
             )
         )
@@ -439,6 +453,7 @@ public actor DownloadEngine {
             }
             guard claimed.insert(runContext.destinationURL).inserted else { continue }
             mutateItem(itemID) { $0.state = .running }
+            startedAtTick[itemID] = currentTick
             changed = true
             attemptStartBytes[itemID] = completedBytes(of: itemID)
             // The one place a byte total may legitimately go backwards: a new
@@ -636,6 +651,7 @@ public actor DownloadEngine {
         // superseded task must not clobber its replacement's state.
         guard runners[itemID]?.task === task else { return }
         runners[itemID] = nil
+        startedAtTick[itemID] = nil
         mutateItem(itemID) {
             $0.completed = completed
             if let totalBytes { $0.totalBytes = totalBytes }
