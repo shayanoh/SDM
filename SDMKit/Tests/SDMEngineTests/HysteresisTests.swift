@@ -46,7 +46,7 @@ import Testing
     #expect(await snapshotItem(itemA.id, in: engine)?.state == .running)
     #expect(await snapshotItem(itemB.id, in: engine)?.state == .queued)
 
-    for _ in 0..<5 { await engine.tick() }
+    for _ in 0..<(AppTiming.ticksPerSecond * 5) { await engine.tick() }
 
     // Window elapsed: B now preempts A.
     #expect(await snapshotItem(itemA.id, in: engine)?.state == .queued)

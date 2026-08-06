@@ -20,16 +20,17 @@ public actor DownloadTask {
         public var minChunk: Int64
         /// Bytes written per worker between sidecar checkpoints.
         public var checkpointInterval: Int64
-        /// Elapsed 1 Hz ticks without a checkpoint before `checkpointTick()`
-        /// forces one — the wall-clock half of spec §4.3's "every ~8 MB per
-        /// worker or every 5 s, whichever comes first". Five seconds at 1 Hz.
+        /// Elapsed heartbeat ticks without a checkpoint before
+        /// `checkpointTick()` forces one — the wall-clock half of spec
+        /// §4.3's "every ~8 MB per worker or every 5 s, whichever comes
+        /// first". Five seconds' worth of ticks at `AppTiming.ticksPerSecond`.
         public var checkpointStalenessTicks: Int
 
         public init(
             workerCount: Int,
             minChunk: Int64,
             checkpointInterval: Int64,
-            checkpointStalenessTicks: Int = 5
+            checkpointStalenessTicks: Int = AppTiming.ticksPerSecond * 5
         ) {
             precondition(workerCount >= 1, "workerCount must be at least 1")
             precondition(minChunk > 0, "minChunk must be positive")

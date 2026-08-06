@@ -35,7 +35,8 @@ import Testing
     let sidecarURL = ResumeSidecar.url(for: destination)
     #expect(!FileManager.default.fileExists(atPath: sidecarURL.path))
 
-    for _ in 0..<4 {
+    let staleness = AppTiming.ticksPerSecond * 5
+    for _ in 0..<(staleness - 1) {
         await task.checkpointTick()
     }
     #expect(!FileManager.default.fileExists(atPath: sidecarURL.path))
@@ -63,7 +64,8 @@ import Testing
     }
 
     let sidecarURL = ResumeSidecar.url(for: destination)
-    for _ in 0..<5 {
+    let staleness = AppTiming.ticksPerSecond * 5
+    for _ in 0..<staleness {
         await task.checkpointTick()
     }
     #expect(FileManager.default.fileExists(atPath: sidecarURL.path))
@@ -71,7 +73,7 @@ import Testing
 
     // If the counter weren't reset when the checkpoint fired, it would
     // already be past threshold and the very next tick would re-fire.
-    for _ in 0..<4 {
+    for _ in 0..<(staleness - 1) {
         await task.checkpointTick()
     }
     #expect(!FileManager.default.fileExists(atPath: sidecarURL.path))
@@ -106,7 +108,8 @@ import Testing
     #expect(FileManager.default.fileExists(atPath: sidecarURL.path))
     try FileManager.default.removeItem(at: sidecarURL)
 
-    for _ in 0..<4 {
+    let staleness = AppTiming.ticksPerSecond * 5
+    for _ in 0..<(staleness - 1) {
         await task.checkpointTick()
     }
     #expect(!FileManager.default.fileExists(atPath: sidecarURL.path))

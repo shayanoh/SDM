@@ -78,7 +78,7 @@ private func stateOf(_ id: UUID, in engine: DownloadEngine) async -> ItemState? 
     #expect(await origin.requestedRanges.count == 1)
 
     // Thirty heartbeats. Without backoff that is thirty requests.
-    try await pump(engine, ticks: 30)
+    try await pump(engine, ticks: 30 * AppTiming.ticksPerSecond)
 
     let finalState = try #require(await stateOf(itemID, in: engine))
     guard case .failed(let reason) = finalState else {
@@ -120,7 +120,7 @@ private func stateOf(_ id: UUID, in engine: DownloadEngine) async -> ItemState? 
     #expect(await origin.requestedRanges.count == requestsAfterFirstFailure)
 
     await origin.setBehavior(FakeOrigin.Behavior())
-    try await pump(engine, ticks: 10)
+    try await pump(engine, ticks: 10 * AppTiming.ticksPerSecond)
 
     #expect(await stateOf(itemID, in: engine) == .completed)
     let destination = dir.appendingPathComponent("Batch").appendingPathComponent("a.bin")
@@ -163,7 +163,7 @@ private func stateOf(_ id: UUID, in engine: DownloadEngine) async -> ItemState? 
     #expect(reason.contains("already exists"))
 
     let requestsAtFailure = await origin.requestedRanges.count
-    try await pump(engine, ticks: 20)
+    try await pump(engine, ticks: 20 * AppTiming.ticksPerSecond)
     // Terminal means terminal: not one further request, and the user's file
     // is untouched.
     #expect(await origin.requestedRanges.count == requestsAtFailure)
@@ -202,7 +202,7 @@ private func stateOf(_ id: UUID, in engine: DownloadEngine) async -> ItemState? 
     #expect(reason.contains("Batch"))
     // Never even reached the network, and never retries.
     #expect(await origin.requestedRanges.isEmpty)
-    try await pump(engine, ticks: 10)
+    try await pump(engine, ticks: 10 * AppTiming.ticksPerSecond)
     #expect(await origin.requestedRanges.isEmpty)
 }
 

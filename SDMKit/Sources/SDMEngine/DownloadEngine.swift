@@ -14,9 +14,9 @@ public struct EngineSettings: Sendable {
     /// half). Settable so a test can drive the checkpoint path without moving
     /// eight megabytes.
     public var checkpointIntervalBytes: Int64
-    /// Ticks of the 1 Hz heartbeat that must pass with no further change
-    /// before durable state is written. Spec §4.2's "~2 s after the last
-    /// change" debounce.
+    /// Heartbeat ticks that must pass with no further change before durable
+    /// state is written. Spec §4.2's "~2 s after the last change" debounce,
+    /// expressed in ticks at `AppTiming.ticksPerSecond`.
     public var persistDebounceTicks: Int
 
     public init(
@@ -26,7 +26,7 @@ public struct EngineSettings: Sendable {
         maxConnectionsPerHost: Int = 8,
         downloadFolder: URL,
         checkpointIntervalBytes: Int64 = 8 * 1024 * 1024,
-        persistDebounceTicks: Int = 2
+        persistDebounceTicks: Int = AppTiming.ticksPerSecond * 2
     ) {
         precondition(maxConcurrent >= 1, "maxConcurrent must be at least 1")
         precondition(segmentsPerItem >= 1, "segmentsPerItem must be at least 1")
@@ -110,7 +110,8 @@ public actor DownloadEngine {
     private var packages: [DownloadPackage] = []
     private var runners: [UUID: Runner] = [:]
     private var samplers: [UUID: SpeedSampler] = [:]
-    private var globalSampler = SpeedSampler(historyLength: 300, smoothingFactor: 0.4)
+    private var globalSampler = SpeedSampler(
+        historyLength: AppTiming.ticksPerSecond * 300, averagingWindowSeconds: 2)
     private var segmentOverrides: [UUID: Int] = [:]
     /// Byte totals already folded into the samplers, so progress read at 1 Hz
     /// is turned into per-window deltas exactly once.
@@ -141,8 +142,10 @@ public actor DownloadEngine {
     /// rather than measured against a clock, matching every other
     /// tick-driven mechanism here (`retryHoldTicks`, checkpoint staleness).
     private var currentTick: Int = 0
-    /// Spec §6.4: "An item started within the last ~5 s is not preempted."
-    private let hysteresisWindowTicks = 5
+    /// Spec §6.4: "An item started within the last ~5 s is not preempted,"
+    /// expressed in ticks at `AppTiming.ticksPerSecond` rather than a raw
+    /// tick count, so raising the heartbeat rate does not shrink the window.
+    private let hysteresisWindowTicks = AppTiming.ticksPerSecond * 5
     /// The last checkpoint failure reported by each item's task, kept after
     /// the runner retires so the reason does not vanish from the UI the
     /// instant the download stops.
@@ -625,7 +628,24 @@ public actor DownloadEngine {
             await runner.task.checkpointTick()
             checkpointFailures[itemID] = await runner.task.lastCheckpointFailure
         }
-        for itemID in Array(samplers.keys) { samplers[itemID]?.tick() }
+        // Spec's "immediately drop to zero when not downloading": a sampler
+        // whose item is not `.running` gets `idle()`, not `tick()`, so it
+        // reports zero on the very next read instead of decaying toward it.
+        // A sampler that still has bytes recorded but not yet folded into a
+        // window gets one real `.tick()` regardless of the item's current
+        // state, so a pause/completion-moment burst — or a download that
+        // goes `.queued` → `.running` → `.completed` entirely between two
+        // heartbeats — still lands in history exactly once instead of being
+        // silently dropped.
+        for itemID in Array(samplers.keys) {
+            let isRunning = itemState(for: itemID) == .running
+            let hasPendingBytes = samplers[itemID]?.hasPendingBytes ?? false
+            if isRunning || hasPendingBytes {
+                samplers[itemID]?.tick()
+            } else {
+                samplers[itemID]?.idle()
+            }
+        }
         globalSampler.tick()
 
         for (itemID, remaining) in retryHoldTicks {
@@ -1114,11 +1134,11 @@ public actor DownloadEngine {
             )
         }
 
-        // `delay(forAttempt:)` is seconds; the heartbeat is 1 Hz, so seconds
-        // and ticks are the same unit. At least one tick, so a sub-second
-        // backoff still costs a beat rather than re-attempting immediately.
+        // `delay(forAttempt:)` is seconds; scale by the heartbeat rate to
+        // get ticks. At least one tick, so a sub-second backoff still costs
+        // a beat rather than re-attempting immediately.
         let seconds = retryPolicy.delay(forAttempt: attempt - 1).components.seconds
-        retryHoldTicks[itemID] = Swift.max(1, Int(seconds))
+        retryHoldTicks[itemID] = Swift.max(1, Int(seconds) * AppTiming.ticksPerSecond)
         return .queued
     }
 

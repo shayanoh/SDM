@@ -350,7 +350,7 @@ func makeGatedEngine(
     let destination = dir.appendingPathComponent("Batch").appendingPathComponent("a.bin")
     let sidecarURL = ResumeSidecar.url(for: destination)
 
-    for _ in 0..<4 { await engine.tick() }
+    for _ in 0..<(AppTiming.ticksPerSecond * 5 - 1) { await engine.tick() }
     #expect(!FileManager.default.fileExists(atPath: sidecarURL.path))
 
     await engine.tick()
@@ -437,7 +437,7 @@ func makeGatedEngine(
     // Past the hysteresis window (spec §6.4), so the urgent package below is
     // free to preempt it — this test is about preservation of progress
     // across a preemption, not about hysteresis itself (see HysteresisTests).
-    for _ in 0..<5 { await engine.tick() }
+    for _ in 0..<(AppTiming.ticksPerSecond * 5) { await engine.tick() }
 
     let second = DownloadPackage(
         name: "Urgent",
@@ -472,9 +472,18 @@ func makeGatedEngine(
     // resumed progress is what prevents the pre-preemption span being counted
     // a second time by the second attempt; seeding it at zero would report
     // 6000 bytes moved for a 4000-byte file.
+    //
+    // Each history entry is a bytes/second *rate estimate*
+    // (`pendingBytes * AppTiming.ticksPerSecond`, since a tick only covers
+    // `1 / ticksPerSecond` of a second), not a raw per-tick byte count —
+    // summing every window's rate sample therefore recovers the payload
+    // size only after scaling back down by `ticksPerSecond`.
     await engine.tick()
     let finished = try #require(await snapshotItem(itemID, in: engine))
-    #expect(finished.speedHistory.reduce(0, +) == Double(payload.count))
+    #expect(
+        finished.speedHistory.reduce(0, +) == Double(payload.count)
+            * Double(AppTiming.ticksPerSecond)
+    )
 }
 
 /// The other half of the ruling, and the transition that actually matters:
@@ -573,7 +582,7 @@ func makeGatedEngine(
     // Past the hysteresis window (spec §6.4) so the urgent package below is
     // free to preempt it — this test is about preemptibility while unprobed,
     // not about hysteresis itself (see HysteresisTests).
-    for _ in 0..<5 { await engine.tick() }
+    for _ in 0..<(AppTiming.ticksPerSecond * 5) { await engine.tick() }
 
     let second = DownloadPackage(
         name: "Urgent",
