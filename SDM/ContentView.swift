@@ -91,10 +91,27 @@ struct ContentView: View {
 
             List {
                 ForEach(controller.snapshot.packages) { package in
-                    Section(package.name) {
+                    Section {
                         ForEach(package.items) { item in
                             ItemRow(item: item, controller: controller)
+                                .draggable(DraggedItemID(itemID: item.id))
                         }
+                        .onMove { indices, newOffset in
+                            var ids = package.items.map(\.id)
+                            ids.move(fromOffsets: indices, toOffset: newOffset)
+                            let packageID = package.id
+                            Task { await controller.reorderItems(ids, inPackage: packageID) }
+                        }
+                    } header: {
+                        Text(package.name)
+                            .dropDestination(for: DraggedItemID.self) { dragged, _ in
+                                guard let dragged = dragged.first else { return false }
+                                let packageID = package.id
+                                Task {
+                                    await controller.moveItem(dragged.itemID, toPackage: packageID)
+                                }
+                                return true
+                            }
                     }
                 }
             }

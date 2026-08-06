@@ -121,6 +121,16 @@ final class EngineController {
         snapshot = await engine.snapshot()
     }
 
+    func reorderItems(_ itemIDs: [UUID], inPackage packageID: UUID) async {
+        await engine.reorderItems(itemIDs, inPackage: packageID)
+        snapshot = await engine.snapshot()
+    }
+
+    func moveItem(_ itemID: UUID, toPackage packageID: UUID) async {
+        await engine.moveItem(itemID, toPackage: packageID)
+        snapshot = await engine.snapshot()
+    }
+
     /// Hands a grabbed package off to the download engine. Spec §7.5's "Add
     /// to downloads" / "Add and start".
     func addPackage(name: String, urls: [URL], startImmediately: Bool) async {

@@ -236,6 +236,54 @@ public actor DownloadEngine {
         await reconcile()
     }
 
+    /// Applies a new item order within one package. Spec §9.3: "Dropping
+    /// between rows reorders," and reordering writes the position field the
+    /// scheduler's rank already reads — no separate re-scheduling step.
+    public func reorderItems(_ itemIDs: [UUID], inPackage packageID: UUID) async {
+        guard let packageIndex = packages.firstIndex(where: { $0.id == packageID }) else { return }
+        var byID = Dictionary(
+            uniqueKeysWithValues: packages[packageIndex].items.map { ($0.id, $0) })
+        var reordered: [DownloadItem] = []
+        for (position, id) in itemIDs.enumerated() {
+            guard var item = byID.removeValue(forKey: id) else { continue }
+            item.position = position
+            reordered.append(item)
+        }
+        reordered.append(contentsOf: byID.values)
+        packages[packageIndex].items = reordered
+        await persist()
+        await reconcile()
+    }
+
+    /// Moves a queued item into a different package. Spec §9.3: "Dropping
+    /// onto a package row moves items into it."
+    ///
+    /// Scoped to `.queued` items deliberately: a running or completed item's
+    /// bytes already live on disk under its current package's folder
+    /// (`context(for:)`), and relocating those files is out of scope for
+    /// this phase.
+    public func moveItem(_ itemID: UUID, toPackage packageID: UUID) async {
+        guard let source = location(of: itemID),
+            packages[source.packageIndex].id != packageID,
+            packages[source.packageIndex].items[source.itemIndex].state == .queued,
+            let destinationIndex = packages.firstIndex(where: { $0.id == packageID })
+        else { return }
+        var item = packages[source.packageIndex].items.remove(at: source.itemIndex)
+        item.position = packages[destinationIndex].items.count
+        packages[destinationIndex].items.append(item)
+        await persist()
+        await reconcile()
+    }
+
+    private func location(of itemID: UUID) -> (packageIndex: Int, itemIndex: Int)? {
+        for packageIndex in packages.indices {
+            if let itemIndex = packages[packageIndex].items.firstIndex(where: { $0.id == itemID }) {
+                return (packageIndex, itemIndex)
+            }
+        }
+        return nil
+    }
+
     public func setSegmentCount(_ count: Int, for itemID: UUID) async {
         precondition(count >= 1, "segment count must be at least 1")
         segmentOverrides[itemID] = count
