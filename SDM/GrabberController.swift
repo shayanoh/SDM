@@ -7,7 +7,8 @@ import SDMGrabber
 @MainActor
 @Observable
 final class GrabberController {
-    private(set) var snapshot = GrabberSnapshot(links: [], packages: [], checkedCount: 0, totalCount: 0)
+    private(set) var snapshot = GrabberSnapshot(
+        links: [], packages: [], checkedCount: 0, totalCount: 0)
 
     private let session: GrabberSession
 

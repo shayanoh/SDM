@@ -52,13 +52,19 @@ struct LinkGrabberView: View {
             Button("Add to downloads") {
                 let urls = controller.urls(inPackageNamed: package.name)
                 let name = package.name
-                Task { await engineController.addPackage(name: name, urls: urls, startImmediately: false) }
+                Task {
+                    await engineController.addPackage(
+                        name: name, urls: urls, startImmediately: false)
+                }
             }
             .controlSize(.small)
             Button("Add and start") {
                 let urls = controller.urls(inPackageNamed: package.name)
                 let name = package.name
-                Task { await engineController.addPackage(name: name, urls: urls, startImmediately: true) }
+                Task {
+                    await engineController.addPackage(
+                        name: name, urls: urls, startImmediately: true)
+                }
             }
             .controlSize(.small)
         }
@@ -67,7 +73,8 @@ struct LinkGrabberView: View {
     private var header: some View {
         let snapshot = controller.snapshot
         return VStack(alignment: .leading, spacing: 6) {
-            ProgressView(value: Double(snapshot.checkedCount), total: Double(max(snapshot.totalCount, 1)))
+            ProgressView(
+                value: Double(snapshot.checkedCount), total: Double(max(snapshot.totalCount, 1)))
             HStack(spacing: 12) {
                 Text("\(snapshot.checkedCount) / \(snapshot.totalCount) checked")
                     .font(.caption)
@@ -95,7 +102,9 @@ struct LinkGrabberView: View {
 
     private func links(in package: PackageCandidate) -> [ProbedLink] {
         let ids = Set(package.linkIDs)
-        return controller.snapshot.links.filter { ids.contains($0.id) && activeFilter.matches($0.verdict) }
+        return controller.snapshot.links.filter {
+            ids.contains($0.id) && activeFilter.matches($0.verdict)
+        }
     }
 }
 

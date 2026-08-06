@@ -68,13 +68,23 @@ struct SDMApp: App {
                         let ids = Set(package.linkIDs)
                         guard ids.isDisjoint(with: autoAddedLinkIDs) else { continue }
                         let links = newSnapshot.links.filter { ids.contains($0.id) }
-                        guard !links.isEmpty, links.allSatisfy({ $0.verdict == .online }) else { continue }
+                        guard !links.isEmpty, links.allSatisfy({ $0.verdict == .online }) else {
+                            continue
+                        }
                         autoAddedLinkIDs.formUnion(ids)
                         let name = package.name
                         let urls = links.map(\.originalURL)
-                        Task { await controller.addPackage(name: name, urls: urls, startImmediately: true) }
+                        Task {
+                            await controller.addPackage(
+                                name: name, urls: urls, startImmediately: true)
+                        }
                     }
                 }
+        }
+
+        Settings {
+            SettingsView()
+                .environment(controller)
         }
     }
 }
