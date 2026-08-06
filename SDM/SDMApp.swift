@@ -29,6 +29,68 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// which AppKit keeps for the process lifetime, does not decide the
     /// controller's.
     weak var controller: EngineController?
+    weak var activationPolicyController: ActivationPolicyController?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(windowVisibilityChanged(_:)),
+            name: NSWindow.willCloseNotification, object: nil)
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(windowVisibilityChanged(_:)),
+            name: NSWindow.didBecomeMainNotification, object: nil)
+        activationPolicyController?.apply()
+    }
+
+    /// Spec §10.2's "Menu bar only" mode toggles the dock icon on every
+    /// window open/close. Deferred one runloop turn: `willCloseNotification`
+    /// fires before the window is actually removed from `NSApp.windows`, so
+    /// checking visibility synchronously here would see the closing window
+    /// as still open.
+    @objc private func windowVisibilityChanged(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            self?.activationPolicyController?.apply()
+        }
+    }
+
+    /// Dock-icon click when the app has no visible windows (`.accessory`
+    /// mode with a closed window). Restores dock visibility per spec §10.2's
+    /// "Reopen via: menu bar icon (policy → `.regular`)" — the equivalent
+    /// gesture for `.accessory` apps is a dock-icon click if one is still
+    /// showing, or the menu bar icon itself, which independently opens the
+    /// window and lets `windowVisibilityChanged` restore the policy.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool)
+        -> Bool
+    {
+        activationPolicyController?.apply()
+        return true
+    }
+
+    /// Spec §10.2: "Quitting with active non-resumable downloads shows a
+    /// confirmation, since that progress cannot be recovered." `runModal()`
+    /// blocks synchronously — the same "blocking is the point" reasoning
+    /// `EngineController.shutdownBlocking` already documents for the
+    /// termination path this gates — so no `.terminateLater` bookkeeping is
+    /// needed.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let controller, hasActiveNonResumableDownloads(controller) else {
+            return .terminateNow
+        }
+        let alert = NSAlert()
+        alert.messageText = "Quit with active downloads in progress?"
+        alert.informativeText =
+            "One or more downloads cannot be resumed. Quitting now will lose their progress permanently."
+        alert.addButton(withTitle: "Quit")
+        alert.addButton(withTitle: "Cancel")
+        alert.alertStyle = .warning
+        let response = alert.runModal()
+        return response == .alertFirstButtonReturn ? .terminateNow : .terminateCancel
+    }
+
+    private func hasActiveNonResumableDownloads(_ controller: EngineController) -> Bool {
+        controller.snapshot.packages.flatMap(\.items).contains {
+            $0.state == .running && $0.isResumable == false
+        }
+    }
 
     func applicationWillTerminate(_ notification: Notification) {
         controller?.shutdownBlocking()
@@ -41,6 +103,7 @@ struct SDMApp: App {
     @State private var controller = EngineController()
     @State private var grabberController = GrabberController()
     @State private var themeStore = ThemeStore()
+    @State private var activationPolicyController = ActivationPolicyController()
     @State private var clipboardWatcher = ClipboardWatcher()
     /// Link ids already handed to the download engine by auto-add-and-start,
     /// so a later snapshot change (e.g. an unrelated link finishing its
@@ -59,6 +122,7 @@ struct SDMApp: App {
                 .environment(themeStore)
                 .task {
                     appDelegate.controller = controller
+                    appDelegate.activationPolicyController = activationPolicyController
                     await controller.startHeartbeat()
                 }
                 .onAppear {
@@ -99,9 +163,10 @@ struct SDMApp: App {
             SettingsView()
                 .environment(controller)
                 .environment(themeStore)
+                .environment(activationPolicyController)
         }
 
-        MenuBarExtra {
+        MenuBarExtra(isInserted: menuBarInsertedBinding) {
             MenuBarPopoverView(selection: $sidebarSelection)
                 .environment(controller)
                 .environment(grabberController)
@@ -110,6 +175,15 @@ struct SDMApp: App {
             Image(nsImage: statusItemImage)
         }
         .menuBarExtraStyle(.window)
+    }
+
+    /// `MenuBarExtra(isInserted:)` needs a `Binding`, but there is nothing to
+    /// persist here beyond what `activationPolicyController` already tracks —
+    /// this just projects `showsMenuBarIcon` through a no-op setter, since
+    /// the only way this value changes is `activationPolicyController.mode`
+    /// itself changing, which SwiftUI already observes.
+    private var menuBarInsertedBinding: Binding<Bool> {
+        Binding(get: { activationPolicyController.showsMenuBarIcon }, set: { _ in })
     }
 
     private var overallFraction: Double {
