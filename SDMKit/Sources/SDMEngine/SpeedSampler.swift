@@ -76,9 +76,20 @@ public struct SpeedSampler: Sendable {
 
     /// Closes the window for an item that is not currently running
     /// (stopped, queued, completed, failed). Reports zero on the very next
-    /// read — no decay — and still appends a zero sample to history so the
+    /// read — no decay — and appends a zero sample to history so the
     /// sparkline visibly drops rather than freezing at its last value.
+    ///
+    /// A no-op if the sampler is already idle. The caller (`DownloadEngine
+    /// .tick()`) has no way to know it already reported the drop, so it
+    /// calls this every heartbeat for every non-running item indefinitely —
+    /// without this guard, `history` (and therefore this whole value) kept
+    /// changing shape for a full `historyLength` worth of ticks after any
+    /// item went idle, which defeated equality-based change detection one
+    /// layer up (`EngineController` comparing telemetry snapshots to decide
+    /// whether to republish, and hence whether a `List` row needs to
+    /// re-render at all).
     public mutating func idle() {
+        guard isActive else { return }
         isActive = false
         pendingBytes = 0
         append(0)

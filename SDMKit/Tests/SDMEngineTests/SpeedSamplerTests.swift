@@ -83,6 +83,27 @@ import Testing
     #expect(sampler.history == [100, 0])
 }
 
+/// Regression: a heartbeat tick keeps calling `idle()` on every sampler for
+/// every non-running item, every tick, indefinitely — the caller has no way
+/// to know it already went idle and stop calling. Without this, `history`
+/// (and therefore the whole `SpeedSampler` value) kept changing shape for a
+/// full `historyLength` worth of ticks after any item went idle, purely from
+/// harmless-looking repeated `idle()` calls, which defeated equality-based
+/// change detection one layer up (`EngineController` comparing telemetry
+/// snapshots to decide whether to republish).
+@Test func idleCalledAgainWhileAlreadyIdleDoesNotMutateHistoryFurther() {
+    var sampler = SpeedSampler(historyLength: 60, averagingWindowSeconds: 2, ticksPerSecond: 1)
+    sampler.record(bytes: 100)
+    sampler.tick()
+    sampler.idle()
+    let afterFirstIdle = sampler
+    sampler.idle()
+    sampler.idle()
+    sampler.idle()
+    #expect(sampler.history == afterFirstIdle.history)
+    #expect(sampler.history == [100, 0])
+}
+
 @Test func historyIsCappedAtItsLength() {
     var sampler = SpeedSampler(historyLength: 3, averagingWindowSeconds: 2, ticksPerSecond: 1)
     for value in 1...5 {
