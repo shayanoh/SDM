@@ -163,10 +163,25 @@ final class EngineController {
     /// user-action method below) keeps the three in sync the same way.
     private func publish(_ newSnapshot: EngineSnapshot) {
         snapshot = newSnapshot
-        itemTelemetry = Self.telemetry(from: newSnapshot)
-        let changed = !Self.packagesStructurallyEqual(structuralPackages, newSnapshot.packages)
-        debugPrint("[SDM diag] publish: structuralPackages \(changed ? "CHANGED" : "stable")")
-        if changed {
+
+        // `@Observable` notifies on *reassignment*, not on value change — an
+        // unconditional `itemTelemetry = newTelemetry` here was invalidating
+        // every row that reads it on every tick even when nothing in it
+        // actually differed (confirmed live: with zero downloads running,
+        // every `ItemRow` was still re-rendering every tick). Gate the
+        // reassignment the same way `structuralPackages` already is.
+        let newTelemetry = Self.telemetry(from: newSnapshot)
+        let telemetryChanged = newTelemetry != itemTelemetry
+        if telemetryChanged {
+            itemTelemetry = newTelemetry
+        }
+
+        let structuralChanged = !Self.packagesStructurallyEqual(
+            structuralPackages, newSnapshot.packages)
+        debugPrint(
+            "[SDM diag] publish: itemTelemetry \(telemetryChanged ? "CHANGED" : "stable"), structuralPackages \(structuralChanged ? "CHANGED" : "stable")"
+        )
+        if structuralChanged {
             structuralPackages = newSnapshot.packages
         }
     }
