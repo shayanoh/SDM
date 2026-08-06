@@ -226,6 +226,9 @@ public actor DownloadEngine {
 
     public func setEnabled(_ enabled: Bool, for itemID: UUID) async {
         mutateItem(itemID) { $0.isEnabled = enabled }
+        // An explicit start is exactly the user action that should lift the
+        // launch-time hold — see `isGloballySuspended`.
+        if enabled { isGloballySuspended = false }
         await persist()
         await reconcile()
     }
@@ -308,7 +311,30 @@ public actor DownloadEngine {
                 packages[packageIndex].items[itemIndex].isEnabled = enabled
             }
         }
+        if enabled { isGloballySuspended = false }
         await persist()
+        await reconcile()
+    }
+
+    /// A launch-time-only hold on starting *anything*, independent of any
+    /// item's own `isEnabled`. `isEnabled` is — and must stay — a value the
+    /// user sets explicitly; nothing here may flip it automatically, since
+    /// that would silently overwrite what the user asked for and persist the
+    /// mistake to disk on the next save. This flag is that: a purely
+    /// in-memory scheduling gate recomputed fresh from
+    /// `autoStartDownloadsOnLaunch` at the start of every launch, cleared by
+    /// the next explicit start (`setEnabled(true, ...)`,
+    /// `setEnabledForAllItems(true)`, or `retry`), and never itself
+    /// persisted.
+    private var isGloballySuspended = false
+
+    /// Called once, right after `restore()`, with the negation of the
+    /// operator's "resume downloads automatically on launch" setting. Held
+    /// items still show their real `.queued`/`isEnabled` state — this only
+    /// stops `reconcile()` from picking any of them to run until the
+    /// operator explicitly starts something.
+    public func setGloballySuspended(_ suspended: Bool) async {
+        isGloballySuspended = suspended
         await reconcile()
     }
 
@@ -472,6 +498,7 @@ public actor DownloadEngine {
         }
         failedAttempts[itemID] = nil
         retryHoldTicks[itemID] = nil
+        isGloballySuspended = false
         await persist()
         await reconcile()
     }
@@ -789,7 +816,23 @@ public actor DownloadEngine {
     /// than being held empty. Doing it here — rather than subtracting from the
     /// scheduler's answer afterwards — keeps `Scheduler.desiredRunningSet` a
     /// pure function of its input, which is what makes spec §6 table-testable.
+    ///
+    /// `isGloballySuspended` piggybacks on the same mechanism: it presents
+    /// every item as disabled to the scheduler for this one computation only.
+    /// This is a *view* handed to `Scheduler`, built fresh from `packages`
+    /// every call and never written back — so it holds everything from
+    /// starting without ever touching a single item's real, user-owned
+    /// `isEnabled`.
     private func schedulablePackages() -> [DownloadPackage] {
+        guard !isGloballySuspended else {
+            var held = packages
+            for packageIndex in held.indices {
+                for itemIndex in held[packageIndex].items.indices {
+                    held[packageIndex].items[itemIndex].isEnabled = false
+                }
+            }
+            return held
+        }
         guard !retryHoldTicks.isEmpty else { return packages }
         var held = packages
         for packageIndex in held.indices {

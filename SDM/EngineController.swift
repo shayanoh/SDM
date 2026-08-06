@@ -91,13 +91,13 @@ final class EngineController {
     func startHeartbeat() async {
         await engine.restore()
         // Off by default: nothing should start pulling bytes just because the
-        // app opened. `restore()` already turns a persisted `.running` back
-        // into `.queued`; this goes one step further and holds every item
-        // there until the operator explicitly starts it, unless they have
-        // opted into auto-resume in Settings.
-        if !EngineSettingsStore.autoStartDownloadsOnLaunch {
-            await engine.setEnabledForAllItems(false)
-        }
+        // app opened. This is a purely in-memory scheduling hold — it never
+        // touches any item's own `isEnabled`, which is a value the user sets
+        // explicitly and which must never change on its own (an earlier
+        // version of this got that wrong by force-disabling and persisting
+        // every item, which durably clobbered whatever the user had actually
+        // set). The hold is lifted the moment the operator starts anything.
+        await engine.setGloballySuspended(!EngineSettingsStore.autoStartDownloadsOnLaunch)
         snapshot = await engine.snapshot()
         notifications.requestAuthorization()
 
