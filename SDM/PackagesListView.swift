@@ -195,22 +195,24 @@ struct PackagesListView: View {
         }
         .disabled(!items.contains(where: canStop))
         Divider()
-        Button(isMultiple ? "Disable All" : "Disable") {
-            Task {
-                for item in items where canDisable(item) {
-                    await controller.setEnabled(false, for: item.id)
+        if(items.contains(where:canDisable)) {
+            Button(isMultiple ? "Disable All" : "Disable") {
+                Task {
+                    for item in items where canDisable(item) {
+                        await controller.setEnabled(false, for: item.id)
+                    }
                 }
             }
         }
-        .disabled(!items.contains(where: canDisable))
-        Button(isMultiple ? "Enable All" : "Enable") {
-            Task {
-                for item in items where canEnable(item) {
-                    await controller.setEnabled(true, for: item.id)
+        if(items.contains(where: canEnable)) {
+            Button(isMultiple ? "Enable All" : "Enable") {
+                Task {
+                    for item in items where canEnable(item) {
+                        await controller.setEnabled(true, for: item.id)
+                    }
                 }
             }
         }
-        .disabled(!items.contains(where: canEnable))
         if items.contains(where: isFailedItem) {
             Button("Retry") {
                 Task {

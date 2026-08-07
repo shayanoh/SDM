@@ -20,6 +20,34 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            Section("Appearance") {
+                Picker(
+                    "Theme",
+                    selection: Binding(
+                        get: { themeStore.selectedID },
+                        set: { themeStore.selectedID = $0 }
+                    )
+                ) {
+                    Text("System").tag(ThemeStore.systemSelectionID)
+                    ForEach(themeStore.catalog) { theme in
+                        Text(theme.name).tag(theme.id)
+                    }
+                }
+            }
+            Section("Window") {
+                Picker(
+                    "Dock / Menu Bar",
+                    selection: Binding(
+                        get: { activationPolicyController.mode },
+                        set: { activationPolicyController.mode = $0 }
+                    )
+                ) {
+                    ForEach(ActivationPolicyMode.allCases) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+            }
+
             Section("Downloads") {
                 Stepper(
                     "Max concurrent downloads: \(maxConcurrent)", value: $maxConcurrent, in: 1...20)
@@ -48,36 +76,9 @@ struct SettingsView: View {
                 Toggle("Download failed", isOn: $downloadFailedEnabled)
                 Toggle("Links grabbed", isOn: $linksGrabbedEnabled)
             }
-            Section("Appearance") {
-                Picker(
-                    "Theme",
-                    selection: Binding(
-                        get: { themeStore.selectedID },
-                        set: { themeStore.selectedID = $0 }
-                    )
-                ) {
-                    Text("System").tag(ThemeStore.systemSelectionID)
-                    ForEach(themeStore.catalog) { theme in
-                        Text(theme.name).tag(theme.id)
-                    }
-                }
-            }
-            Section("Window") {
-                Picker(
-                    "Dock / Menu Bar",
-                    selection: Binding(
-                        get: { activationPolicyController.mode },
-                        set: { activationPolicyController.mode = $0 }
-                    )
-                ) {
-                    ForEach(ActivationPolicyMode.allCases) { mode in
-                        Text(mode.label).tag(mode)
-                    }
-                }
-            }
         }
         .padding()
-        .frame(width: 420)
+        //.frame(width: 420)
         .onChange(of: maxConcurrent) { _, _ in applyEngineSettings() }
         .onChange(of: segmentsPerItem) { _, _ in applyEngineSettings() }
         .onChange(of: globalMaxConnections) { _, _ in applyEngineSettings() }
