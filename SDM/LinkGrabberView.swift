@@ -107,8 +107,16 @@ struct LinkGrabberView: View {
             .buttonStyle(.plain)
         }
         .padding(.vertical, 8)
-        .padding(.horizontal, 4)
+        .padding(.horizontal, 12)
         .background(theme.surfaceSecondaryColor)
+        // `List` gives every row (headers included) its own leading/trailing
+        // inset, so a `.background` on content sitting inside that inset
+        // stops short of the row's actual edges — zeroing it out here is
+        // what lets the header's background reach edge-to-edge instead of
+        // floating as a shorter bar. The horizontal padding above replaces
+        // the lost inset so the text/buttons don't end up flush against the
+        // window edge.
+        .listRowInsets(EdgeInsets())
         // Without this, the HStack's own hit area is only as big as its
         // rendered content (the text, the buttons) — right-clicking the
         // `Spacer()`'s empty space did nothing. `contentShape` extends the
