@@ -3,6 +3,12 @@ import SDMGrabber
 import SwiftUI
 import UniformTypeIdentifiers
 
+#Preview {
+    LinkRow(link:
+                ProbedLink(id: UUID(), originalURL: URL(fileURLWithPath: ""), finalURL: nil, stage: .done, statusCode: 200, contentLength: 1_000_000_000, contentType: nil, suggestedFilename: "Filename", validator: "validator", acceptsRanges: true, sniffedSignature: nil, transportFailed: false, verdict: .online, isDuplicate: false),
+            controller: GrabberController(),
+            theme: ThemeCatalog.builtInThemes()[5])
+}
 struct LinkGrabberView: View {
     @Environment(GrabberController.self) private var controller
     @Environment(EngineController.self) private var engineController
@@ -125,7 +131,7 @@ struct LinkGrabberView: View {
                 statPill(label: "Offline", count: snapshot.offlineCount, color: theme.offlineColor)
                 statPill(
                     label: "Check failed", count: snapshot.failedCount, color: theme.failedColor)
-                Button("Recheck Failed") {
+                Button("Recheck") {
                     Task { await controller.recheckFailed() }
                 }
                 .controlSize(.small)
@@ -190,6 +196,7 @@ private struct LinkRow: View {
             }
             Spacer()
             verdictBadge
+            Text(fileSize)
             Button(role: .destructive) {
                 let id = link.id
                 Task { await controller.removeLink(id) }
@@ -221,6 +228,13 @@ private struct LinkRow: View {
                 Text(stageLabel).font(.caption).foregroundStyle(theme.textSecondaryColor)
             }
         }
+    }
+    
+    private var fileSize: String {
+        guard let len=link.contentLength, len>0 else {return ""}
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .binary
+        return formatter.string(fromByteCount: len)
     }
 
     private var stageLabel: String {
