@@ -65,6 +65,11 @@ final class GrabberController {
         snapshot = await session.snapshot()
     }
 
+    func recheckFailed() async {
+        await session.recheckFailed()
+        snapshot = await session.snapshot()
+    }
+
     /// The original URLs of a package's confirmed links, for handoff to the
     /// download engine.
     func urls(inPackageNamed name: String) -> [URL] {

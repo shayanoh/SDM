@@ -8,7 +8,6 @@ struct LinkGrabberView: View {
     @Environment(EngineController.self) private var engineController
     @Environment(ThemeStore.self) private var themeStore
     @Environment(\.colorScheme) private var colorScheme
-    @State private var activeFilter: VerdictFilter = .all
     @State private var isShowingAddSheet = false
     @State private var isShowingRenameAlert = false
     @State private var renamingPackage = ""
@@ -121,10 +120,16 @@ struct LinkGrabberView: View {
                     .font(.caption)
                     .foregroundStyle(theme.textSecondaryColor)
                 Spacer()
-                filterChip(.online, count: snapshot.onlineCount)
-                filterChip(.faulty, count: snapshot.faultyCount)
-                filterChip(.offline, count: snapshot.offlineCount)
-                filterChip(.failed, count: snapshot.failedCount)
+                statPill(label: "Online", count: snapshot.onlineCount, color: theme.onlineColor)
+                statPill(label: "Faulty", count: snapshot.faultyCount, color: theme.faultyColor)
+                statPill(label: "Offline", count: snapshot.offlineCount, color: theme.offlineColor)
+                statPill(
+                    label: "Check failed", count: snapshot.failedCount, color: theme.failedColor)
+                Button("Recheck Failed") {
+                    Task { await controller.recheckFailed() }
+                }
+                .controlSize(.small)
+                .disabled(snapshot.failedCount == 0)
             }
         }
         .padding()
@@ -135,15 +140,17 @@ struct LinkGrabberView: View {
         .sdmSurface(.toolbar)
     }
 
-    private func filterChip(_ filter: VerdictFilter, count: Int) -> some View {
-        Button {
-            activeFilter = activeFilter == filter ? .all : filter
-        } label: {
-            Text("\(filter.label) \(count)")
-                .font(.caption)
-        }
-        .buttonStyle(.bordered)
-        .tint(activeFilter == filter ? theme.accentColor : theme.textSecondaryColor)
+    /// A static readout, not a control — spec change: these used to be
+    /// filter toggles, but a link grabber batch is small enough that
+    /// hiding rows behind a filter was never worth the extra click. The
+    /// full list always shows; these just report counts.
+    private func statPill(label: String, count: Int, color: Color) -> some View {
+        Text("\(label) \(count)")
+            .font(.caption)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(theme.surfaceTertiaryColor))
+            .foregroundStyle(color)
     }
 
     /// Hands the package's links to the engine, then clears them out of the
@@ -164,35 +171,7 @@ struct LinkGrabberView: View {
 
     private func links(in package: PackageCandidate) -> [ProbedLink] {
         let ids = Set(package.linkIDs)
-        return controller.snapshot.links.filter {
-            ids.contains($0.id) && activeFilter.matches($0.verdict)
-        }
-    }
-}
-
-enum VerdictFilter: Equatable {
-    case all, online, faulty, offline, failed
-
-    var label: String {
-        switch self {
-        case .all: return "All"
-        case .online: return "Online"
-        case .faulty: return "Faulty"
-        case .offline: return "Offline"
-        case .failed: return "Check failed"
-        }
-    }
-
-    func matches(_ verdict: Verdict?) -> Bool {
-        switch self {
-        case .all: return true
-        case .online: return verdict == .online
-        case .offline: return verdict == .offline
-        case .failed: return verdict == .checkFailed
-        case .faulty:
-            if case .faulty = verdict { return true }
-            return false
-        }
+        return controller.snapshot.links.filter { ids.contains($0.id) }
     }
 }
 

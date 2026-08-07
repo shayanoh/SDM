@@ -115,6 +115,17 @@ public actor GrabberSession {
         recluster()
     }
 
+    /// Re-runs the probe for every link whose most recent check failed
+    /// outright (`.checkFailed`) — a transient network/transport error
+    /// rather than a genuine verdict about the URL, so unlike faulty/offline
+    /// it is worth retrying without the operator re-pasting the link.
+    public func recheckFailed() async {
+        let failedIDs = order.filter { links[$0]?.verdict == .checkFailed }
+        guard !failedIDs.isEmpty else { return }
+        await probeBounded(failedIDs)
+        recluster()
+    }
+
     // MARK: - Probing
 
     /// Launches probes for `ids` under the global and per-host caps, one
