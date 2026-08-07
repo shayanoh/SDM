@@ -550,10 +550,14 @@ private func isFailedItem(_ item: ItemSnapshot) -> Bool {
 /// replaces `List`'s native `.onMove`.
 ///
 /// A distinct `View` rather than a modifier chain inline in `row(_:index:
-/// packageID:)` because it needs its own `@State` for `isTargeted` — the
-/// insertion-line indicator standing in for the native reorder line
-/// `.onMove` used to draw, now that dropping between rows goes through
-/// `dropDestination`'s own targeting instead.
+/// packageID:)` because it needs its own `@State` for `isTargeted` — driving
+/// a whole-row highlight (matching `PackageHeaderRow`'s) standing in for the
+/// native reorder line `.onMove` used to draw. A directional line (top or
+/// bottom edge) would need to know which half of the row the cursor is over
+/// to point at the right edge, and `dropDestination`'s `isTargeted` only
+/// gives a `Bool`, not a live position — a whole-row highlight sidesteps
+/// that by not claiming a specific edge at all, matching the "nearest edge"
+/// intuition without needing to track it.
 private struct DraggableItemRow<Content: View>: View {
     let itemID: UUID
     let packageID: UUID
@@ -596,11 +600,10 @@ private struct DraggableItemRow<Content: View>: View {
                         .onChange(of: proxy.size.height) { _, newHeight in rowHeight = newHeight }
                 }
             )
-            .overlay(alignment: .top) {
+            .overlay {
                 if isTargeted {
-                    Rectangle()
-                        .fill(theme.accentColor)
-                        .frame(height: 2)
+                    RoundedRectangle(cornerRadius: 4)
+                        .strokeBorder(theme.accentColor, lineWidth: 2)
                 }
             }
     }
