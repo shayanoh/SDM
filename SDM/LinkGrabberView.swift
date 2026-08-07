@@ -32,23 +32,20 @@ struct LinkGrabberView: View {
             Divider()
             List {
                 ForEach(controller.snapshot.packages) { package in
-                    Section {
-                        ForEach(links(in: package)) { link in
-                            LinkRow(link: link, controller: controller, theme: theme)
-                                .draggable(DraggedLinkID(linkID: link.id))
-                        }
-                    } header: {
-                        packageHeader(package)
-                            // `.listRowBackground` has to be the outermost
-                            // modifier on the header row's content to take
-                            // effect — applied here rather than buried
-                            // inside `packageHeader`'s own modifier chain
-                            // (under `.contextMenu`/`.dropDestination`),
-                            // which silently drops it. Same pattern as
-                            // `PackagesListView`'s
-                            // `.listRowBackground(packageHeaderBackground(...))`
-                            // on its `DisclosureGroup`.
-                            .listRowBackground(theme.surfaceSecondaryColor)
+                    // Deliberately not a `Section` with a `header:` — macOS
+                    // renders a `Section` header as an AppKit "group row"
+                    // (`NSTableView`'s floating-header chrome), which paints
+                    // its own background regardless of `.listRowBackground`
+                    // or `.listStyle`. A package header here is instead a
+                    // plain sibling row ahead of its links, the same way
+                    // `PackagesListView` avoids the same trap by using
+                    // `DisclosureGroup` rather than `Section` — a normal row
+                    // that `.listRowBackground` actually controls.
+                    packageHeader(package)
+                        .listRowBackground(theme.surfaceSecondaryColor)
+                    ForEach(links(in: package)) { link in
+                        LinkRow(link: link, controller: controller, theme: theme)
+                            .draggable(DraggedLinkID(linkID: link.id))
                     }
                 }
             }
@@ -57,12 +54,6 @@ struct LinkGrabberView: View {
             // never actually shows through.
             .scrollContentBackground(.hidden)
             .background(theme.surfacePrimaryColor)
-            // macOS floats `Section` headers over their content by default
-            // (`NSTableView.floatsGroupRows`, the same look as Mail's/
-            // Finder's pinned group headers) — `.plain` is the one built-in
-            // style that turns this off, which is also what lets our own
-            // background color on `packageHeader` show through undisturbed
-            // rather than being drawn under the system's floating chrome.
             .listStyle(.plain)
         }
         .alert("Rename package", isPresented: $isShowingRenameAlert) {
