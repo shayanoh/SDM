@@ -373,46 +373,101 @@ public actor DownloadEngine {
     /// rather than a specific row) appends at the end.
     public func moveItem(_ itemID: UUID, toPackage packageID: UUID, atIndex index: Int? = nil) async
     {
-        guard let source = location(of: itemID),
-            packages[source.packageIndex].items[source.itemIndex].state != .running,
+        await moveItems([itemID], toPackage: packageID, atIndex: index)
+    }
+
+    /// `moveItem`'s multi-select counterpart: moves an ordered batch of
+    /// items to a destination package in one atomic step, rather than one
+    /// `moveItem` call per item (which would re-run `reconcile()`/`persist()`
+    /// once per item and let each move's index arithmetic see the others'
+    /// already-applied shifts instead of the pre-drop layout the operator
+    /// actually dragged from).
+    ///
+    /// `itemIDs` is trusted to already be in the exact relative order they
+    /// should land in — this does not re-sort them. The caller
+    /// (`PackagesListView`'s drop handling) is the one place that knows
+    /// "list order" as opposed to whatever order a multi-selection drag
+    /// session happens to hand back, which is unspecified.
+    ///
+    /// All-or-nothing, generalizing `moveItem`'s single-item refusal: if any
+    /// named item does not exist or is `.running`, the whole batch is
+    /// refused rather than silently moving a confusing subset.
+    ///
+    /// `atIndex` positions the *whole batch* as one contiguous run within
+    /// the destination package's item list, indexed against that list
+    /// before any of the batch is removed from wherever it currently sits —
+    /// same "insert before whatever is currently at this index" semantics
+    /// as `moveItem`'s `atIndex`. `nil` appends the batch at the end.
+    public func moveItems(_ itemIDs: [UUID], toPackage packageID: UUID, atIndex index: Int? = nil)
+        async
+    {
+        guard !itemIDs.isEmpty,
             let destinationIndex = packages.firstIndex(where: { $0.id == packageID })
         else { return }
-        let samePackage = source.packageIndex == destinationIndex
 
-        let item = packages[source.packageIndex].items[source.itemIndex]
-        let sourceFolder = settings.downloadFolder.appendingPathComponent(
-            packages[source.packageIndex].name)
-        if !samePackage {
-            let destinationFolder = settings.downloadFolder.appendingPathComponent(
-                packages[destinationIndex].name)
+        var sources: [UUID: (packageIndex: Int, itemIndex: Int)] = [:]
+        for itemID in itemIDs {
+            guard let source = location(of: itemID),
+                packages[source.packageIndex].items[source.itemIndex].state != .running
+            else { return }
+            sources[itemID] = source
+        }
+
+        // Snapshot the moved items themselves before any removal below
+        // touches the arrays they currently sit in.
+        let movedItems = itemIDs.map { packages[sources[$0]!.packageIndex].items[sources[$0]!.itemIndex] }
+
+        // How many of the batch sit ahead of `index` within the destination
+        // package itself — same "removing it first shifts everything after
+        // it down by one" adjustment `moveItem` made for a single item,
+        // generalized to however many of the batch are also sourced from
+        // the destination.
+        var insertionIndex = index ?? packages[destinationIndex].items.count
+        if let index {
+            let precedingWithinDestination = itemIDs.filter {
+                sources[$0]!.packageIndex == destinationIndex && sources[$0]!.itemIndex < index
+            }.count
+            insertionIndex = index - precedingWithinDestination
+        }
+
+        let destinationFolder = settings.downloadFolder.appendingPathComponent(
+            packages[destinationIndex].name)
+        for (itemID, item) in zip(itemIDs, movedItems) {
+            let source = sources[itemID]!
+            guard source.packageIndex != destinationIndex else { continue }
+            let sourceFolder = settings.downloadFolder.appendingPathComponent(
+                packages[source.packageIndex].name)
             relocateItemFiles(item, from: sourceFolder, to: destinationFolder)
         }
 
-        // Removing the item first can shift everything after it down by one
-        // slot in its own array — only relevant when reordering within the
-        // same package, since a *different* package's indices are
-        // untouched by removing from this one.
-        var insertionIndex = index ?? packages[destinationIndex].items.count
-        if samePackage, let index, source.itemIndex < index {
-            insertionIndex = index - 1
+        // Removed highest-index-first within each source package so an
+        // earlier removal never invalidates a later one's stored index.
+        let byPackage = Dictionary(grouping: itemIDs) { sources[$0]!.packageIndex }
+        for (packageIndex, ids) in byPackage {
+            for itemIndex in ids.map({ sources[$0]!.itemIndex }).sorted(by: >) {
+                packages[packageIndex].items.remove(at: itemIndex)
+            }
         }
-
-        packages[source.packageIndex].items.remove(at: source.itemIndex)
-        // Only meaningful cross-package: a same-package move reinserts the
-        // item into this exact array a few lines down, so it can never
-        // actually end up empty.
-        let sourceBecameEmpty = !samePackage && packages[source.packageIndex].items.isEmpty
 
         insertionIndex = min(max(insertionIndex, 0), packages[destinationIndex].items.count)
-        packages[destinationIndex].items.insert(item, at: insertionIndex)
+        packages[destinationIndex].items.insert(contentsOf: movedItems, at: insertionIndex)
         renumberPositions(inPackageAt: destinationIndex)
-        if !samePackage {
-            renumberPositions(inPackageAt: source.packageIndex)
-        }
 
-        if sourceBecameEmpty {
-            packages.remove(at: source.packageIndex)
-            removeFolderIfEmpty(sourceFolder)
+        // Descending so removing an emptied source package doesn't shift
+        // the index of another not-yet-processed one still pending below
+        // it in this same loop.
+        var emptySourceFolders: [URL] = []
+        for packageIndex in byPackage.keys.sorted(by: >) where packageIndex != destinationIndex {
+            if packages[packageIndex].items.isEmpty {
+                emptySourceFolders.append(
+                    settings.downloadFolder.appendingPathComponent(packages[packageIndex].name))
+                packages.remove(at: packageIndex)
+            } else {
+                renumberPositions(inPackageAt: packageIndex)
+            }
+        }
+        for folder in emptySourceFolders {
+            removeFolderIfEmpty(folder)
         }
 
         await persist()

@@ -55,11 +55,20 @@ struct PackagesListView: View {
                     }
                 } label: {
                     PackageHeaderRow(
-                        package: package, packageIndex: packageIndex, packages: packages,
+                        package: package, packages: packages,
                         allowsReordering: allowsReordering, theme: theme,
                         pendingDeletion: $pendingDeletion)
                 }
-                .listRowBackground(packageHeaderBackground(index: packageIndex))
+                // Tags the header into the same selection set item rows use
+                // — `Set<UUID>` has room for both since item and package ids
+                // are drawn from the same random space, and it's what lets
+                // native Cmd/Shift-click multi-select a run of packages the
+                // same way it already does items, which a multi-package
+                // drag then relies on (see `orderedDraggedPackageIDs`).
+                .tag(package.id)
+                .listRowBackground(
+                    packageHeaderBackground(
+                        index: packageIndex, isSelected: selectedItemIDs.contains(package.id)))
             }
         }
         // `List` paints its own opaque system background regardless of what
@@ -95,8 +104,8 @@ struct PackagesListView: View {
     private func row(_ item: ItemSnapshot, index: Int, packageID: UUID) -> some View {
         if allowsReordering {
             DraggableItemRow(
-                itemID: item.id, packageID: packageID, index: index, controller: controller,
-                theme: theme
+                itemID: item.id, packageID: packageID, index: index, packages: packages,
+                controller: controller, theme: theme
             ) {
                 itemRow(item, index: index)
             }
@@ -198,9 +207,12 @@ struct PackagesListView: View {
     /// "Light/dark banding": alternates two system-adaptive backgrounds by
     /// package index, the same idiom `ItemRow`'s zebra striping uses, just
     /// one shade further from the base so a header reads as visually
-    /// heavier than the rows beneath it.
-    private func packageHeaderBackground(index: Int) -> Color {
-        theme.surfaceSecondaryColor.opacity(index.isMultiple(of: 2) ? 0.5 : 0.9)
+    /// heavier than the rows beneath it. Selection overrides the banding
+    /// with the same tint `ItemRow.alternatingRowBackground` uses, now that
+    /// a package header is itself a selectable, draggable row.
+    private func packageHeaderBackground(index: Int, isSelected: Bool) -> Color {
+        guard !isSelected else { return theme.selectionTintColor.opacity(0.35) }
+        return theme.surfaceSecondaryColor.opacity(index.isMultiple(of: 2) ? 0.5 : 0.9)
     }
 
     @ViewBuilder
@@ -300,9 +312,9 @@ struct PackagesListView: View {
 /// every reader in the first place.
 private struct PackageHeaderRow: View {
     let package: PackageSnapshot
-    /// This package's own index and the full list, needed only to compute
-    /// where a dropped package lands — see `insertionIndex(forDraggedFrom:)`.
-    let packageIndex: Int
+    /// The full package list, needed only to compute where a dropped
+    /// package or item batch lands — see `reorderedPackageIDs(moving:
+    /// preferAfter:)`.
     let packages: [PackageSnapshot]
     let allowsReordering: Bool
     let theme: Theme
@@ -358,13 +370,18 @@ private struct PackageHeaderRow: View {
                 .dropDestination(
                     for: DraggedRowID.self,
                     action: { dragged, location in
-                        guard let dragged = dragged.first else { return false }
-                        switch dragged {
-                        case .item(let itemID):
+                        // A selected item row dragged alongside a selected
+                        // package header arrives here as one mixed payload —
+                        // both ordering helpers return `nil` for that, so
+                        // this correctly falls through to "do nothing"
+                        // rather than guessing which kind the operator
+                        // meant.
+                        if let itemIDs = orderedDraggedItemIDs(dragged, in: packages) {
                             let packageID = package.id
-                            Task { await controller.moveItem(itemID, toPackage: packageID) }
+                            Task { await controller.moveItems(itemIDs, toPackage: packageID) }
                             return true
-                        case .package(let draggedPackageID):
+                        }
+                        if let draggedPackageIDs = orderedDraggedPackageIDs(dragged, in: packages) {
                             // Same "there's no row after the last one to
                             // drop on" problem as items — dropping on the
                             // bottom half of a header means "after this
@@ -372,15 +389,13 @@ private struct PackageHeaderRow: View {
                             // only way to ever land a package last.
                             let preferAfter = location.y > headerHeight / 2
                             guard
-                                let insertionIndex = insertionIndex(
-                                    forDraggedFrom: draggedPackageID, preferAfter: preferAfter)
+                                let newOrder = reorderedPackageIDs(
+                                    moving: draggedPackageIDs, preferAfter: preferAfter)
                             else { return false }
-                            var ids = packages.map(\.id)
-                            ids.removeAll { $0 == draggedPackageID }
-                            ids.insert(draggedPackageID, at: insertionIndex)
-                            Task { await controller.reorderPackages(ids) }
+                            Task { await controller.reorderPackages(newOrder) }
                             return true
                         }
+                        return false
                     },
                     isTargeted: { isTargeted = $0 }
                 )
@@ -398,20 +413,25 @@ private struct PackageHeaderRow: View {
         }
     }
 
-    /// Where a dragged package lands among its siblings when dropped on
-    /// this header: immediately before this package (or immediately after,
-    /// when `preferAfter`), adjusted for the dragged package's own removal
-    /// shifting everything after it down by one — same "insert before
-    /// whatever is currently at this index" semantics as
-    /// `DownloadEngine.moveItem`'s `atIndex`. `nil` if the dragged id isn't
-    /// actually one of `packages` (stale drag session).
-    private func insertionIndex(forDraggedFrom draggedPackageID: UUID, preferAfter: Bool) -> Int? {
-        guard let sourceIndex = packages.firstIndex(where: { $0.id == draggedPackageID }) else {
-            return nil
-        }
-        let rawTarget = preferAfter ? packageIndex + 1 : packageIndex
-        let target = sourceIndex < rawTarget ? rawTarget - 1 : rawTarget
-        return min(max(target, 0), packages.count - 1)
+    /// The full package-id order after moving `draggedPackageIDs` (already
+    /// in their current relative order) to sit immediately before this
+    /// header's own package — or, when `preferAfter`, immediately after it.
+    /// Generalizes what used to be single-package index arithmetic: remove
+    /// the dragged set from a copy of the full order, find where this
+    /// header's own package landed in that reduced list, and reinsert the
+    /// whole dragged batch there as one contiguous run. `nil` if this
+    /// header's own package is itself part of the dragged set (dropping a
+    /// selection onto one of its own members is a no-op, not a move).
+    private func reorderedPackageIDs(moving draggedPackageIDs: [UUID], preferAfter: Bool) -> [UUID]?
+    {
+        let draggedSet = Set(draggedPackageIDs)
+        guard !draggedSet.contains(package.id) else { return nil }
+
+        var remaining = packages.map(\.id).filter { !draggedSet.contains($0) }
+        guard let anchorIndex = remaining.firstIndex(of: package.id) else { return nil }
+        let insertionIndex = preferAfter ? anchorIndex + 1 : anchorIndex
+        remaining.insert(contentsOf: draggedPackageIDs, at: insertionIndex)
+        return remaining
     }
 }
 
@@ -554,6 +574,54 @@ private struct PackagesBottomBar: View {
     }
 }
 
+// MARK: - Multi-selection drag ordering
+
+/// Extracts the item ids from a drag payload — which, when the dragged row
+/// is part of a larger selection, macOS bundles into one multi-element
+/// payload automatically — reordered to match how they currently appear in
+/// the list (package order, then item order within it) rather than
+/// whatever order the drag session happened to hand back, which is
+/// unspecified and not what "move these to where I dropped them" should
+/// mean. `nil` when the payload mixes items and packages together (the
+/// combination is ambiguous — dropping a page of files and an entire
+/// package onto one target has no obvious single meaning — so the whole
+/// drop is refused rather than guessing) or contains no items at all.
+private func orderedDraggedItemIDs(
+    _ dragged: [DraggedRowID], in packages: [PackageSnapshot]
+) -> [UUID]? {
+    var itemIDs: [UUID] = []
+    var sawPackage = false
+    for entry in dragged {
+        switch entry {
+        case .item(let id): itemIDs.append(id)
+        case .package: sawPackage = true
+        }
+    }
+    guard !sawPackage, !itemIDs.isEmpty else { return nil }
+    let idSet = Set(itemIDs)
+    return packages.flatMap(\.items).map(\.id).filter { idSet.contains($0) }
+}
+
+/// The package-id counterpart of `orderedDraggedItemIDs`: extracts and
+/// reorders the dragged package ids to match their current position in
+/// `packages`, or `nil` for the same "mixed payload" / "nothing of this
+/// kind" reasons.
+private func orderedDraggedPackageIDs(
+    _ dragged: [DraggedRowID], in packages: [PackageSnapshot]
+) -> [UUID]? {
+    var packageIDs: [UUID] = []
+    var sawItem = false
+    for entry in dragged {
+        switch entry {
+        case .package(let id): packageIDs.append(id)
+        case .item: sawItem = true
+        }
+    }
+    guard !sawItem, !packageIDs.isEmpty else { return nil }
+    let idSet = Set(packageIDs)
+    return packages.map(\.id).filter { idSet.contains($0) }
+}
+
 /// "Start" only does something for an enabled item sitting `.stopped` — a
 /// disabled item cannot be started at all (re-enable it first), and a
 /// running/queued/completed/failed item isn't started by this call (failed
@@ -624,6 +692,9 @@ private struct DraggableItemRow<Content: View>: View {
     let itemID: UUID
     let packageID: UUID
     let index: Int
+    /// The full package list, needed only to reorder a multi-item drag
+    /// payload into current list order — see `orderedDraggedItemIDs`.
+    let packages: [PackageSnapshot]
     let controller: EngineController
     let theme: Theme
     @ViewBuilder let content: () -> Content
@@ -637,19 +708,27 @@ private struct DraggableItemRow<Content: View>: View {
             .dropDestination(
                 for: DraggedRowID.self,
                 action: { dragged, location in
-                    guard case .item(let draggedItemID) = dragged.first else { return false }
+                    // A selected package header dragged alongside a
+                    // selected item row arrives here as one mixed payload —
+                    // `orderedDraggedItemIDs` returns `nil` for that (and
+                    // for a drag containing only packages, which an item
+                    // row never accepts), correctly falling through to "do
+                    // nothing."
+                    guard let itemIDs = orderedDraggedItemIDs(dragged, in: packages) else {
+                        return false
+                    }
                     // Every row only ever offered "insert before me," which
                     // meant nothing could ever land after the last row in a
                     // package — there's no next row to hover for that.
                     // `location.y` (the drop's position within this row) in
                     // the bottom half means "after this row" instead
-                    // (`index + 1`, which `moveItem`'s `atIndex` — indexed
-                    // against the *pre-move* list — resolves to "append" when
-                    // this is the last row).
+                    // (`index + 1`, which `moveItems`' `atIndex` — indexed
+                    // against the *pre-move* list — resolves to "append"
+                    // when this is the last row).
                     let targetIndex = location.y > rowHeight / 2 ? index + 1 : index
                     Task {
-                        await controller.moveItem(
-                            draggedItemID, toPackage: packageID, atIndex: targetIndex)
+                        await controller.moveItems(
+                            itemIDs, toPackage: packageID, atIndex: targetIndex)
                     }
                     return true
                 },

@@ -150,6 +150,157 @@ import Testing
     #expect(ordered == [items[3].id, items[1].id, items[0].id, items[2].id])
 }
 
+/// `moveItems` is what a multi-selection drag uses (`PackagesListView`'s
+/// drop handlers) — it moves an ordered batch to one contiguous run at the
+/// target index in a single atomic step, rather than one `moveItem` call
+/// per item.
+@Test func moveItemsInsertsTheWholeBatchAsOneContiguousRunAtTheTargetIndex() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let engine = DownloadEngine(
+        transport: FakeOrigin(payload: testPayload(10)),
+        stateStore: InMemoryStateStore(),
+        settings: EngineSettings(
+            maxConcurrent: 1, segmentsPerItem: 1, globalMaxConnections: 8, downloadFolder: dir)
+    )
+    let moving = (0..<2).map {
+        DownloadItem(
+            url: URL(string: "https://example.com/moving\($0).bin")!, filename: "moving\($0).bin",
+            isEnabled: false)
+    }
+    let existing = (0..<2).map {
+        DownloadItem(
+            url: URL(string: "https://example.com/\($0).bin")!, filename: "\($0).bin",
+            isEnabled: false, position: $0)
+    }
+    let packageAID = UUID()
+    let packageBID = UUID()
+    await engine.add(DownloadPackage(id: packageAID, name: "A", items: moving))
+    await engine.add(DownloadPackage(id: packageBID, name: "B", items: existing))
+
+    // Moving both A items in, dropped between B's two existing items.
+    await engine.moveItems(moving.map(\.id), toPackage: packageBID, atIndex: 1)
+
+    let destinationItems = await engine.snapshot().packages.first { $0.id == packageBID }?.items
+    #expect(
+        destinationItems?.map(\.id) == [existing[0].id, moving[0].id, moving[1].id, existing[1].id])
+    // A had only these two items, so moving both out empties — and drops
+    // — it, same as `moveItem` does for a single item.
+    #expect(await engine.snapshot().packages.first { $0.id == packageAID } == nil)
+}
+
+/// The batch can straddle its own destination: some members already live
+/// in the destination package, others are moving in from elsewhere — the
+/// "how many of the batch sit ahead of the target index within the
+/// destination itself" adjustment has to account for both at once.
+@Test func moveItemsHandlesABatchStraddlingItsOwnDestination() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let engine = DownloadEngine(
+        transport: FakeOrigin(payload: testPayload(10)),
+        stateStore: InMemoryStateStore(),
+        settings: EngineSettings(
+            maxConcurrent: 1, segmentsPerItem: 1, globalMaxConnections: 8, downloadFolder: dir)
+    )
+    let fromOther = DownloadItem(
+        url: URL(string: "https://example.com/other.bin")!, filename: "other.bin",
+        isEnabled: false)
+    let destinationItems = (0..<3).map {
+        DownloadItem(
+            url: URL(string: "https://example.com/\($0).bin")!, filename: "\($0).bin",
+            isEnabled: false, position: $0)
+    }
+    let packageAID = UUID()
+    let packageBID = UUID()
+    await engine.add(DownloadPackage(id: packageAID, name: "A", items: [fromOther]))
+    await engine.add(DownloadPackage(id: packageBID, name: "B", items: destinationItems))
+
+    // Move item 0 (already in B) and `fromOther` (from A) to land right
+    // before B's item 2 — item 0 sitting ahead of index 2 in B's own
+    // pre-move list means the effective insertion point shifts back by one
+    // once it's removed from its old spot.
+    await engine.moveItems(
+        [destinationItems[0].id, fromOther.id], toPackage: packageBID, atIndex: 2)
+
+    let ordered = await engine.snapshot().packages.first { $0.id == packageBID }?.items.map(\.id)
+    #expect(
+        ordered == [
+            destinationItems[1].id, destinationItems[0].id, fromOther.id, destinationItems[2].id,
+        ])
+    #expect(await engine.snapshot().packages.first { $0.id == packageAID } == nil)
+}
+
+/// A batch drawn from multiple distinct source packages must empty and
+/// drop every one of them that ends up with no items left, not just the
+/// first.
+@Test func moveItemsDropsEveryEmptiedSourcePackage() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let engine = DownloadEngine(
+        transport: FakeOrigin(payload: testPayload(10)),
+        stateStore: InMemoryStateStore(),
+        settings: EngineSettings(
+            maxConcurrent: 1, segmentsPerItem: 1, globalMaxConnections: 8, downloadFolder: dir)
+    )
+    let itemA = DownloadItem(
+        url: URL(string: "https://example.com/a.bin")!, filename: "a.bin", isEnabled: false)
+    let itemB = DownloadItem(
+        url: URL(string: "https://example.com/b.bin")!, filename: "b.bin", isEnabled: false)
+    let packageAID = UUID()
+    let packageBID = UUID()
+    let packageCID = UUID()
+    await engine.add(DownloadPackage(id: packageAID, name: "A", items: [itemA]))
+    await engine.add(DownloadPackage(id: packageBID, name: "B", items: [itemB]))
+    await engine.add(DownloadPackage(id: packageCID, name: "C"))
+
+    await engine.moveItems([itemA.id, itemB.id], toPackage: packageCID)
+
+    let snapshot = await engine.snapshot()
+    #expect(snapshot.packages.first { $0.id == packageAID } == nil)
+    #expect(snapshot.packages.first { $0.id == packageBID } == nil)
+    #expect(
+        snapshot.packages.first { $0.id == packageCID }?.items.map(\.id) == [itemA.id, itemB.id])
+}
+
+/// Same all-or-nothing refusal `moveItem` gives a single running item,
+/// generalized: one running item anywhere in the batch refuses the whole
+/// move rather than silently moving the rest.
+@Test func moveItemsRefusesTheWholeBatchIfAnyMemberIsRunning() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let gate = WorkerGate()
+    let engine = DownloadEngine(
+        transport: WorkerGatedOrigin(payload: testPayload(4000), gate: gate),
+        stateStore: InMemoryStateStore(),
+        settings: EngineSettings(
+            maxConcurrent: 2, segmentsPerItem: 1, globalMaxConnections: 8, downloadFolder: dir)
+    )
+    let running = DownloadItem(url: URL(string: "https://example.com/a.bin")!, filename: "a.bin")
+    let queued = DownloadItem(
+        url: URL(string: "https://example.com/b.bin")!, filename: "b.bin", isEnabled: false)
+    let packageAID = UUID()
+    let packageBID = UUID()
+    await engine.add(DownloadPackage(id: packageAID, name: "A", items: [running, queued]))
+    await engine.add(DownloadPackage(id: packageBID, name: "B"))
+
+    var spins = 0
+    while await snapshotItem(running.id, in: engine)?.state != .running, spins < 100_000 {
+        await Task.yield()
+        spins += 1
+    }
+    #expect(spins < 100_000)
+
+    await engine.moveItems([running.id, queued.id], toPackage: packageBID)
+
+    let snapshot = await engine.snapshot()
+    #expect(
+        snapshot.packages.first { $0.id == packageAID }?.items.map(\.id) == [running.id, queued.id])
+    #expect(snapshot.packages.first { $0.id == packageBID }?.items.isEmpty == true)
+
+    await gate.open()
+    try await engine.runUntilIdle()
+}
+
 @Test func moveItemIsANoOpForARunningItem() async throws {
     let dir = try makeScratchDirectory()
     defer { try? FileManager.default.removeItem(at: dir) }

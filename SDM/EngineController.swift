@@ -289,6 +289,11 @@ final class EngineController {
         publish(await engine.snapshot())
     }
 
+    func moveItems(_ itemIDs: [UUID], toPackage packageID: UUID, atIndex index: Int? = nil) async {
+        await engine.moveItems(itemIDs, toPackage: packageID, atIndex: index)
+        publish(await engine.snapshot())
+    }
+
     func reorderPackages(_ packageIDs: [UUID]) async {
         await engine.reorderPackages(packageIDs)
         publish(await engine.snapshot())
