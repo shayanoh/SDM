@@ -127,14 +127,15 @@ struct MainWindowView: View {
     /// `NSApp.appearance` is set correctly for native controls." `nil`
     /// (System) leaves `NSApp.appearance` unset so native chrome simply
     /// follows the OS; any fixed theme forces `NSApp.appearance` to match
-    /// its own `isDark`, overriding the system setting. That alone is what
-    /// actually themes the titlebar correctly (its material follows
-    /// `NSApp.appearance`'s light/dark, same as every other native control) —
-    /// `titlebarAppearsTransparent` was tried and reverted: it merges the
-    /// titlebar into the content view's coordinate space, so a scrolled
-    /// `List` row paints straight through the window title text as it
-    /// scrolls past. An opaque system titlebar that matches light/dark
-    /// correctly beats a custom-colored one that visibly breaks scrolling.
+    /// its own `isDark`, overriding the system setting. This keeps native
+    /// controls (text, buttons, the traffic-light glyphs) legible against
+    /// the theme — the titlebar's actual fill color comes from
+    /// `.toolbarBackground(_:for: .windowToolbar)` above, not from this: a
+    /// `NavigationSplitView`'s titlebar and toolbar are one merged region,
+    /// so that call paints both at once. `titlebarAppearsTransparent` was
+    /// tried and reverted separately: it merges the titlebar into the
+    /// content view's coordinate space, so a scrolled `List` row paints
+    /// straight through the window title text as it scrolls past.
     private func applyNativeAppearance() {
         NSApp.appearance =
             themeStore.selectedID == ThemeStore.systemSelectionID
@@ -184,7 +185,6 @@ struct MainWindowView: View {
             Task { await controller.removePackage(id, deleteFiles: true) }
         }
     }
-
 
     private var downloadsTab: some View {
         PackagesListView(
@@ -272,11 +272,12 @@ struct DeletionInfo {
 }
 
 #Preview {
-    let delInfo = DeletionInfo(title: "Delete files?", totalBytes: 1_000_000_000, names: ["file1","file2"])
+    let delInfo = DeletionInfo(
+        title: "Delete files?", totalBytes: 1_000_000_000, names: ["file1", "file2"])
     let delInfo2 = DeletionInfo(title: "Delete files?", totalBytes: 1_000_000_000, names: [])
-    VStack(spacing:20) {
-        DeletionConfirmationView(info: delInfo, onCancel: { }, onDelete: { })
-        DeletionConfirmationView(info: delInfo2, onCancel: { }, onDelete: { })
+    VStack(spacing: 20) {
+        DeletionConfirmationView(info: delInfo, onCancel: {}, onDelete: {})
+        DeletionConfirmationView(info: delInfo2, onCancel: {}, onDelete: {})
     }
 }
 /// A deliberately larger, more informative stand-in for the old one-line

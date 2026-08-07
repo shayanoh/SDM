@@ -113,6 +113,7 @@ struct SDMApp: App {
     @State private var sidebarSelection: MainWindowView.SidebarItem? = .downloads
     @State private var linkNotifications = NotificationManager()
     @State private var notifiedLinkIDs: Set<UUID> = []
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
         WindowGroup(id: "main") {
@@ -158,13 +159,22 @@ struct SDMApp: App {
                     }
                 }
         }
+        .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") {
+                    openWindow(id: "settings")
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
+        }
 
-        Settings {
+        WindowGroup(id: "settings") {
             SettingsView()
                 .environment(controller)
                 .environment(themeStore)
                 .environment(activationPolicyController)
         }
+        .windowResizability(.contentSize)
 
         MenuBarExtra(isInserted: menuBarInsertedBinding) {
             MenuBarPopoverView(selection: $sidebarSelection)
@@ -187,13 +197,16 @@ struct SDMApp: App {
     }
 
     private var overallFraction: Double {
-        let running = controller.snapshot.packages.flatMap(\.items).filter { $0.state == .running || $0.state == .queued || $0.state == .completed}
+        let running = controller.snapshot.packages.flatMap(\.items).filter {
+            $0.state == .running || $0.state == .queued || $0.state == .completed
+        }
         guard !running.isEmpty else { return 0 }
         return running.reduce(0.0) { $0 + $1.fractionCompleted } / Double(running.count)
     }
-    
+
     private var downloadsRunning: Bool {
-        return controller.snapshot.packages.flatMap(\.items).filter {$0.state == .running}.count > 0
+        return controller.snapshot.packages.flatMap(\.items).filter { $0.state == .running }.count
+            > 0
     }
 
     /// `MenuBarExtra`'s custom label view ignores `.frame`/sizing modifiers
@@ -204,7 +217,9 @@ struct SDMApp: App {
     private var statusItemImage: NSImage {
         let isDark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         let theme = themeStore.resolved(for: isDark ? .dark : .light)
-        let renderer = ImageRenderer(content: MenuBarRingIcon(fraction: overallFraction, drawCircle: downloadsRunning, theme: theme))
+        let renderer = ImageRenderer(
+            content: MenuBarRingIcon(
+                fraction: overallFraction, drawCircle: downloadsRunning, theme: theme))
         renderer.scale = 2
         return renderer.nsImage ?? NSImage()
     }
