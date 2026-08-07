@@ -269,6 +269,7 @@ private struct PackageHeaderRow: View {
 
     @Environment(EngineController.self) private var controller
     @State private var isTargeted = false
+    @State private var headerHeight: CGFloat = 1
 
     var body: some View {
         let content =
@@ -307,7 +308,7 @@ private struct PackageHeaderRow: View {
                 .draggable(DraggedRowID.package(package.id))
                 .dropDestination(
                     for: DraggedRowID.self,
-                    action: { dragged, _ in
+                    action: { dragged, location in
                         guard let dragged = dragged.first else { return false }
                         switch dragged {
                         case .item(let itemID):
@@ -315,7 +316,15 @@ private struct PackageHeaderRow: View {
                             Task { await controller.moveItem(itemID, toPackage: packageID) }
                             return true
                         case .package(let draggedPackageID):
-                            guard let insertionIndex = insertionIndex(forDraggedFrom: draggedPackageID)
+                            // Same "there's no row after the last one to
+                            // drop on" problem as items — dropping on the
+                            // bottom half of a header means "after this
+                            // package" instead of "before," which is the
+                            // only way to ever land a package last.
+                            let preferAfter = location.y > headerHeight / 2
+                            guard
+                                let insertionIndex = insertionIndex(
+                                    forDraggedFrom: draggedPackageID, preferAfter: preferAfter)
                             else { return false }
                             var ids = packages.map(\.id)
                             ids.removeAll { $0 == draggedPackageID }
@@ -326,22 +335,33 @@ private struct PackageHeaderRow: View {
                     },
                     isTargeted: { isTargeted = $0 }
                 )
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear
+                            .onAppear { headerHeight = proxy.size.height }
+                            .onChange(of: proxy.size.height) { _, newHeight in
+                                headerHeight = newHeight
+                            }
+                    }
+                )
         } else {
             content
         }
     }
 
     /// Where a dragged package lands among its siblings when dropped on
-    /// this header: immediately before this package, adjusted for the
-    /// dragged package's own removal shifting everything after it down by
-    /// one — same "insert before whatever is currently at this index"
-    /// semantics as `DownloadEngine.moveItem`'s `atIndex`. `nil` if the
-    /// dragged id isn't actually one of `packages` (stale drag session).
-    private func insertionIndex(forDraggedFrom draggedPackageID: UUID) -> Int? {
+    /// this header: immediately before this package (or immediately after,
+    /// when `preferAfter`), adjusted for the dragged package's own removal
+    /// shifting everything after it down by one — same "insert before
+    /// whatever is currently at this index" semantics as
+    /// `DownloadEngine.moveItem`'s `atIndex`. `nil` if the dragged id isn't
+    /// actually one of `packages` (stale drag session).
+    private func insertionIndex(forDraggedFrom draggedPackageID: UUID, preferAfter: Bool) -> Int? {
         guard let sourceIndex = packages.firstIndex(where: { $0.id == draggedPackageID }) else {
             return nil
         }
-        let target = sourceIndex < packageIndex ? packageIndex - 1 : packageIndex
+        let rawTarget = preferAfter ? packageIndex + 1 : packageIndex
+        let target = sourceIndex < rawTarget ? rawTarget - 1 : rawTarget
         return min(max(target, 0), packages.count - 1)
     }
 }
@@ -543,21 +563,38 @@ private struct DraggableItemRow<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     @State private var isTargeted = false
+    @State private var rowHeight: CGFloat = 1
 
     var body: some View {
         content()
             .draggable(DraggedRowID.item(itemID))
             .dropDestination(
                 for: DraggedRowID.self,
-                action: { dragged, _ in
+                action: { dragged, location in
                     guard case .item(let draggedItemID) = dragged.first else { return false }
+                    // Every row only ever offered "insert before me," which
+                    // meant nothing could ever land after the last row in a
+                    // package — there's no next row to hover for that.
+                    // `location.y` (the drop's position within this row) in
+                    // the bottom half means "after this row" instead
+                    // (`index + 1`, which `moveItem`'s `atIndex` — indexed
+                    // against the *pre-move* list — resolves to "append" when
+                    // this is the last row).
+                    let targetIndex = location.y > rowHeight / 2 ? index + 1 : index
                     Task {
                         await controller.moveItem(
-                            draggedItemID, toPackage: packageID, atIndex: index)
+                            draggedItemID, toPackage: packageID, atIndex: targetIndex)
                     }
                     return true
                 },
                 isTargeted: { isTargeted = $0 }
+            )
+            .background(
+                GeometryReader { proxy in
+                    Color.clear
+                        .onAppear { rowHeight = proxy.size.height }
+                        .onChange(of: proxy.size.height) { _, newHeight in rowHeight = newHeight }
+                }
             )
             .overlay(alignment: .top) {
                 if isTargeted {
