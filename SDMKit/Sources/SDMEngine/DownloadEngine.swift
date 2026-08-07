@@ -433,7 +433,9 @@ public actor DownloadEngine {
     /// a missing source file (the common case — most of these three exist
     /// for any given item, not all of them) is simply skipped rather than
     /// treated as an error.
-    private func relocateItemFiles(_ item: DownloadItem, from sourceFolder: URL, to destinationFolder: URL) {
+    private func relocateItemFiles(
+        _ item: DownloadItem, from sourceFolder: URL, to destinationFolder: URL
+    ) {
         let source = sourceFolder.appendingPathComponent(item.filename)
         let destination = destinationFolder.appendingPathComponent(item.filename)
         try? FileManager.default.createDirectory(
@@ -753,16 +755,27 @@ public actor DownloadEngine {
         // goes `.queued` → `.running` → `.completed` entirely between two
         // heartbeats — still lands in history exactly once instead of being
         // silently dropped.
+        var anyItemActive = false
         for itemID in Array(samplers.keys) {
             let isRunning = itemState(for: itemID) == .running
             let hasPendingBytes = samplers[itemID]?.hasPendingBytes ?? false
             if isRunning || hasPendingBytes {
                 samplers[itemID]?.tick()
+                anyItemActive = true
             } else {
                 samplers[itemID]?.idle()
             }
         }
-        globalSampler.tick()
+        // Mirrors the per-item branch above: without it, `globalSampler`
+        // mutated `history` every tick forever (even appending zeros),
+        // which kept `EngineSnapshot.globalHistory` changing identity and
+        // forced `BandwidthGraph` to fully re-render at the tick rate with
+        // no downloads running at all.
+        if anyItemActive || globalSampler.hasPendingBytes {
+            globalSampler.tick()
+        } else {
+            globalSampler.idle()
+        }
 
         for (itemID, remaining) in retryHoldTicks {
             if remaining <= 1 {

@@ -164,7 +164,14 @@ final class EngineController {
     /// updated together, so every call site (the tick loop, and every direct
     /// user-action method below) keeps the three in sync the same way.
     private func publish(_ newSnapshot: EngineSnapshot) {
-        snapshot = newSnapshot
+        // `@Observable` notifies on *reassignment*, not on value change —
+        // gated the same way `itemTelemetry`/`structuralPackages` below are,
+        // otherwise every view reading `snapshot.*` (chiefly `BandwidthGraph`
+        // via `globalHistory`) re-evaluates at full tick rate forever, even
+        // once `SpeedSampler.idle()` has made the underlying data static.
+        if newSnapshot != snapshot {
+            snapshot = newSnapshot
+        }
 
         // `@Observable` notifies on *reassignment*, not on value change — an
         // unconditional `itemTelemetry = newTelemetry` here was invalidating
