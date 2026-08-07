@@ -177,6 +177,7 @@ public actor DownloadEngine {
 
     public func add(_ package: DownloadPackage) async {
         packages.append(package)
+        renumberAllPositions()
         for item in package.items where samplers[item.id] == nil {
             samplers[item.id] = SpeedSampler()
         }
@@ -238,6 +239,10 @@ public actor DownloadEngine {
         }
 
         packages.append(contentsOf: restored)
+        // Self-heals any position/array-order drift already sitting in a
+        // persisted file from before this normalization existed — see
+        // `renumberAllPositions()`.
+        renumberAllPositions()
         for package in restored {
             for item in package.items where samplers[item.id] == nil {
                 samplers[item.id] = SpeedSampler()
@@ -423,6 +428,24 @@ public actor DownloadEngine {
     private func renumberPositions(inPackageAt packageIndex: Int) {
         for index in packages[packageIndex].items.indices {
             packages[packageIndex].items[index].position = index
+        }
+    }
+
+    /// Renumbers every package's position, and every item's position within
+    /// it, to match current array order — `packages` array order is what
+    /// `snapshot()` actually displays, but `Scheduler.rank` sorts by the
+    /// `position` field, not array order, so the two must never drift apart.
+    /// `moveItem`/`reorderItems`/`reorderPackages` keep that invariant by
+    /// construction (they renumber after rearranging), but `add(_:)` and
+    /// `restore()` hand `packages`/`items` a caller-supplied struct whose
+    /// `position` defaults to `0` regardless of where it lands in the array
+    /// — trusting that value let a freshly added package silently collide
+    /// with (or outrank) an existing one that already had a real position,
+    /// scheduling it out of the order actually shown in the list.
+    private func renumberAllPositions() {
+        for packageIndex in packages.indices {
+            packages[packageIndex].position = packageIndex
+            renumberPositions(inPackageAt: packageIndex)
         }
     }
 

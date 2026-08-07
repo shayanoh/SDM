@@ -124,7 +124,8 @@ import Testing
         settings: EngineSettings(
             maxConcurrent: 1, segmentsPerItem: 1, globalMaxConnections: 8, downloadFolder: dir)
     )
-    let running = DownloadItem(url: URL(string: "https://example.com/running.bin")!, filename: "running.bin")
+    let running = DownloadItem(
+        url: URL(string: "https://example.com/running.bin")!, filename: "running.bin")
     let target = DownloadItem(url: testSourceURL, filename: "a.bin")
     await engine.add(DownloadPackage(name: "Batch", items: [running, target]))
     #expect(await snapshotItem(target.id, in: engine)?.state == .queued)
@@ -193,6 +194,57 @@ import Testing
 
     let ordered = await engine.snapshot().packages.map(\.id)
     #expect(ordered == newOrder)
+}
+
+@Test func addingAPackageAfterAReorderDoesNotJumpAheadInSchedulingOrder() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let engine = DownloadEngine(
+        transport: FakeOrigin(payload: testPayload(20_000)),
+        stateStore: InMemoryStateStore(),
+        settings: EngineSettings(
+            maxConcurrent: 1, segmentsPerItem: 1, globalMaxConnections: 8, downloadFolder: dir)
+    )
+    let firstID = UUID()
+    let secondID = UUID()
+    await engine.add(
+        DownloadPackage(
+            id: firstID, name: "First", items: [DownloadItem(url: testSourceURL, filename: "a.bin")]
+        ))
+    await engine.add(
+        DownloadPackage(
+            id: secondID, name: "Second",
+            items: [DownloadItem(url: testSourceURL, filename: "b.bin")]))
+    // Establishes real, distinct positions the same way a drag-and-drop
+    // reorder would — `secondID` ends up with `position == 1`.
+    await engine.reorderPackages([firstID, secondID])
+
+    // A freshly constructed `DownloadPackage` defaults `position` to `0`,
+    // same as every real call site (`EngineController.addPackage` never
+    // sets it) — this must not collide with `secondID`'s `position == 1`
+    // and jump ahead of it in scheduling order.
+    let thirdID = UUID()
+    await engine.add(
+        DownloadPackage(
+            id: thirdID, name: "Third", items: [DownloadItem(url: testSourceURL, filename: "c.bin")]
+        ))
+
+    // `snapshot()` exposes array order, which is what the UI shows —
+    // confirm it still matches insertion order.
+    let packages = await engine.snapshot().packages
+    #expect(packages.map(\.id) == [firstID, secondID, thirdID])
+
+    // Stop `first`'s item so its slot frees up, then tick once: with
+    // `maxConcurrent: 1`, the scheduler must pick `second`'s item next —
+    // not `third`'s, which is what the position collision caused.
+    let firstItemID = packages[0].items[0].id
+    await engine.stopItem(firstItemID)
+    await engine.tick()
+
+    let running = await engine.snapshot().packages
+        .flatMap(\.items)
+        .filter { $0.state == .running }
+    #expect(running.map(\.filename) == ["b.bin"])
 }
 
 @Test func fileMissingIsTrueOnlyWhenACompletedItemsFileIsGone() async throws {
