@@ -11,10 +11,12 @@ struct Sparkline: View {
 
     var body: some View {
         Canvas { context, size in
-            guard samples.count > 1, let maxValue = samples.max(), maxValue > 0 else { return }
+            guard size.width > 0 else { return }
+            let windowed = Self.windowed(samples, to: Int(size.width.rounded()))
+            guard windowed.count > 1, let maxValue = windowed.max(), maxValue > 0 else { return }
             var path = Path()
-            let stepX = size.width / CGFloat(samples.count - 1)
-            for (index, value) in samples.enumerated() {
+            let stepX = size.width / CGFloat(windowed.count - 1)
+            for (index, value) in windowed.enumerated() {
                 let x = CGFloat(index) * stepX
                 let y = size.height - CGFloat(value / maxValue) * size.height
                 if index == 0 {
@@ -25,5 +27,17 @@ struct Sparkline: View {
             }
             context.stroke(path, with: .color(color), lineWidth: 1)
         }
+    }
+
+    /// Caps the drawn series at one sample per point of width, taking the
+    /// most recent `width` samples, and left-pads with zeros when there
+    /// isn't `width` samples yet so the sparkline doesn't rescale/stretch
+    /// while it's still filling.
+    private static func windowed(_ samples: [Double], to width: Int) -> [Double] {
+        guard width > 0 else { return [] }
+        if samples.count >= width {
+            return Array(samples.suffix(width))
+        }
+        return Array(repeating: 0, count: width - samples.count) + samples
     }
 }
