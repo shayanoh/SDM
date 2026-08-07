@@ -49,10 +49,10 @@ private func makeSession() -> (GrabberSession, FakeProbeOrigin) {
 
     let snapshotBefore = await session.snapshot()
     #expect(snapshotBefore.packages.count == 2)
-    let packageAName = try #require(snapshotBefore.packages.first?.name)
+    let packageAID = try #require(snapshotBefore.packages.first?.id)
     let idB = try #require(snapshotBefore.packages.last?.linkIDs.first)
 
-    await session.moveLink(idB, toPackageNamed: packageAName)
+    await session.moveLink(idB, toPackage: packageAID)
 
     let snapshotAfter = await session.snapshot()
     #expect(snapshotAfter.packages.count == 1)

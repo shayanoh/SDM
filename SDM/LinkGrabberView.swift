@@ -4,10 +4,15 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 #Preview {
-    LinkRow(link:
-                ProbedLink(id: UUID(), originalURL: URL(fileURLWithPath: ""), finalURL: nil, stage: .done, statusCode: 200, contentLength: 1_000_000_000, contentType: nil, suggestedFilename: "Filename", validator: "validator", acceptsRanges: true, sniffedSignature: nil, transportFailed: false, verdict: .online, isDuplicate: false),
-            controller: GrabberController(),
-            theme: ThemeCatalog.builtInThemes()[5])
+    LinkRow(
+        link:
+            ProbedLink(
+                id: UUID(), originalURL: URL(fileURLWithPath: ""), finalURL: nil, stage: .done,
+                statusCode: 200, contentLength: 1_000_000_000, contentType: nil,
+                suggestedFilename: "Filename", validator: "validator", acceptsRanges: true,
+                sniffedSignature: nil, transportFailed: false, verdict: .online, isDuplicate: false),
+        controller: GrabberController(),
+        theme: ThemeCatalog.builtInThemes()[5])
 }
 struct LinkGrabberView: View {
     @Environment(GrabberController.self) private var controller
@@ -16,7 +21,7 @@ struct LinkGrabberView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var isShowingAddSheet = false
     @State private var isShowingRenameAlert = false
-    @State private var renamingPackage = ""
+    @State private var renamingPackageID: UUID?
     @State private var newPackageName = ""
 
     private var theme: Theme { themeStore.resolved(for: colorScheme) }
@@ -26,7 +31,7 @@ struct LinkGrabberView: View {
             header
             Divider()
             List {
-                ForEach(controller.snapshot.packages, id: \.name) { package in
+                ForEach(controller.snapshot.packages) { package in
                     Section {
                         ForEach(links(in: package)) { link in
                             LinkRow(link: link, controller: controller, theme: theme)
@@ -46,9 +51,9 @@ struct LinkGrabberView: View {
         .alert("Rename package", isPresented: $isShowingRenameAlert) {
             TextField("Name", text: $newPackageName)
             Button("Rename") {
-                let old = renamingPackage
+                guard let id = renamingPackageID else { return }
                 let new = newPackageName
-                Task { await controller.renamePackage(old, to: new) }
+                Task { await controller.renamePackage(id, to: new) }
             }
             Button("Cancel", role: .cancel) {}
         }
@@ -88,30 +93,34 @@ struct LinkGrabberView: View {
         }
         .dropDestination(for: DraggedLinkID.self) { dragged, _ in
             guard let dragged = dragged.first else { return false }
-            let name = package.name
-            Task { await controller.moveLink(dragged.linkID, toPackageNamed: name) }
+            let packageID = package.id
+            Task { await controller.moveLink(dragged.linkID, toPackage: packageID) }
             return true
         }
         .contextMenu {
             Button("Rename…") {
-                renamingPackage = package.name
+                renamingPackageID = package.id
                 newPackageName = package.name
                 isShowingRenameAlert = true
             }
+            let others = controller.snapshot.packages.filter { $0.id != package.id }
             Menu("Merge into") {
-                ForEach(
-                    controller.snapshot.packages.filter { $0.name != package.name }, id: \.name
-                ) { other in
-                    Button(other.name) {
-                        let source = package.name
-                        let destination = other.name
-                        Task { await controller.mergePackages(source, into: destination) }
+                if others.isEmpty {
+                    Button("No Other Packages") {}
+                        .disabled(true)
+                } else {
+                    ForEach(others) { other in
+                        Button(other.name) {
+                            let source = package.id
+                            let destination = other.id
+                            Task { await controller.mergePackages(source, into: destination) }
+                        }
                     }
                 }
             }
             Button("Split") {
-                let name = package.name
-                Task { await controller.splitPackage(name) }
+                let id = package.id
+                Task { await controller.splitPackage(id) }
             }
         }
     }
@@ -163,7 +172,7 @@ struct LinkGrabberView: View {
     /// grabber — once a link is a download it has no reason to still show up
     /// as something waiting to be grabbed.
     private func addToDownloads(_ package: PackageCandidate, startImmediately: Bool) {
-        let urls = controller.urls(inPackageNamed: package.name)
+        let urls = controller.urls(inPackage: package.id)
         let name = package.name
         let linkIDs = package.linkIDs
         Task {
@@ -229,9 +238,9 @@ private struct LinkRow: View {
             }
         }
     }
-    
+
     private var fileSize: String {
-        guard let len=link.contentLength, len>0 else {return ""}
+        guard let len = link.contentLength, len > 0 else { return "" }
         let formatter = ByteCountFormatter()
         formatter.countStyle = .binary
         return formatter.string(fromByteCount: len)

@@ -77,40 +77,52 @@ public actor GrabberSession {
         recluster()
     }
 
-    /// Forces a link into a named package, overriding automatic clustering.
-    /// Spec §7.4: "All of it is fully overridable."
-    public func moveLink(_ id: UUID, toPackageNamed name: String) {
-        guard links[id] != nil else { return }
-        manualOverrides[id] = name
+    /// Forces a link into a package, overriding automatic clustering. Spec
+    /// §7.4: "All of it is fully overridable."
+    ///
+    /// Identified by id, not name: `packages` can (however briefly) hold two
+    /// entries with the same name — see `recluster()`'s duplicate-name
+    /// merge — and even when it can't, a name captured by the caller earlier
+    /// is not guaranteed to still uniquely pick out the package the operator
+    /// actually meant.
+    public func moveLink(_ id: UUID, toPackage packageID: UUID) {
+        guard links[id] != nil, let package = packages.first(where: { $0.id == packageID }) else {
+            return
+        }
+        manualOverrides[id] = package.name
         recluster()
     }
 
     /// Renames a package by moving every member link's manual override to
-    /// the new name. Spec §7.4: "rename."
-    public func renamePackage(_ oldName: String, to newName: String) {
-        guard !newName.isEmpty, oldName != newName,
-            let package = packages.first(where: { $0.name == oldName })
+    /// the new name. Spec §7.4: "rename." Identified by id — see
+    /// `moveLink(_:toPackage:)`'s doc comment for why.
+    public func renamePackage(_ id: UUID, to newName: String) {
+        guard !newName.isEmpty, let package = packages.first(where: { $0.id == id }),
+            package.name != newName
         else { return }
-        for id in package.linkIDs { manualOverrides[id] = newName }
+        for linkID in package.linkIDs { manualOverrides[linkID] = newName }
         recluster()
     }
 
     /// Combines one package's links into another's. Spec §7.4: "merge."
-    public func mergePackages(_ sourceName: String, into destinationName: String) {
-        guard sourceName != destinationName,
-            let source = packages.first(where: { $0.name == sourceName })
+    /// Identified by id — see `moveLink(_:toPackage:)`'s doc comment for why.
+    public func mergePackages(_ sourceID: UUID, into destinationID: UUID) {
+        guard sourceID != destinationID,
+            let source = packages.first(where: { $0.id == sourceID }),
+            let destination = packages.first(where: { $0.id == destinationID })
         else { return }
-        for id in source.linkIDs { manualOverrides[id] = destinationName }
+        for linkID in source.linkIDs { manualOverrides[linkID] = destination.name }
         recluster()
     }
 
     /// Splits a package so each member link becomes its own single-link
-    /// package, named after that link. Spec §7.4: "split."
-    public func splitPackage(_ name: String) {
-        guard let package = packages.first(where: { $0.name == name }) else { return }
-        for id in package.linkIDs {
-            guard let link = links[id] else { continue }
-            manualOverrides[id] = link.effectiveFilename
+    /// package, named after that link. Spec §7.4: "split." Identified by id
+    /// — see `moveLink(_:toPackage:)`'s doc comment for why.
+    public func splitPackage(_ id: UUID) {
+        guard let package = packages.first(where: { $0.id == id }) else { return }
+        for linkID in package.linkIDs {
+            guard let link = links[linkID] else { continue }
+            manualOverrides[linkID] = link.effectiveFilename
         }
         recluster()
     }
@@ -190,18 +202,56 @@ public actor GrabberSession {
         }
         var candidates = PackageClustering.cluster(clusterable)
 
-        guard !manualOverrides.isEmpty else {
-            packages = candidates
-            return
+        if !manualOverrides.isEmpty {
+            for (id, name) in manualOverrides {
+                for index in candidates.indices { candidates[index].linkIDs.removeAll { $0 == id } }
+                if let index = candidates.firstIndex(where: { $0.name == name }) {
+                    candidates[index].linkIDs.append(id)
+                } else {
+                    candidates.append(PackageCandidate(name: name, linkIDs: [id]))
+                }
+            }
+            candidates = candidates.filter { !$0.linkIDs.isEmpty }
         }
-        for (id, name) in manualOverrides {
-            for index in candidates.indices { candidates[index].linkIDs.removeAll { $0 == id } }
-            if let index = candidates.firstIndex(where: { $0.name == name }) {
-                candidates[index].linkIDs.append(id)
+
+        packages = mergingDuplicateNames(candidates).map(reconcilingIdentity)
+    }
+
+    /// Clustering and manual overrides can each independently land two
+    /// candidates on the same name — two ingested batches whose derived
+    /// titles happen to coincide, or a rename/merge target that already
+    /// matches another package. A name is the only thing that identifies a
+    /// package to the operator, so two sharing one reads as a single,
+    /// confusingly duplicated package rather than two — collapse them into
+    /// one, keeping the earlier one's place. This is also the mechanism
+    /// `renamePackage`/`mergePackages` themselves rely on: both work by
+    /// giving the moved links' override the target's name and letting this
+    /// merge fold them back together.
+    private func mergingDuplicateNames(_ candidates: [PackageCandidate]) -> [PackageCandidate] {
+        var merged: [PackageCandidate] = []
+        for candidate in candidates {
+            if let index = merged.firstIndex(where: { $0.name == candidate.name }) {
+                merged[index].linkIDs.append(contentsOf: candidate.linkIDs)
+                merged[index].isArchive = merged[index].isArchive || candidate.isArchive
             } else {
-                candidates.append(PackageCandidate(name: name, linkIDs: [id]))
+                merged.append(candidate)
             }
         }
-        packages = candidates.filter { !$0.linkIDs.isEmpty }
+        return merged
+    }
+
+    /// Gives a candidate the `id` of whichever *previous* package (from
+    /// before this `recluster()` call) already had the same name, so a
+    /// package's identity survives reclustering instead of becoming a new
+    /// id — and hence a new package as far as any id-keyed UI state is
+    /// concerned — every time a link is added, removed, or just reordered
+    /// underneath an unchanged name. A name with no previous match keeps the
+    /// fresh id `PackageClustering`/`PackageCandidate.init` already gave it.
+    private func reconcilingIdentity(_ candidate: PackageCandidate) -> PackageCandidate {
+        var candidate = candidate
+        if let previous = packages.first(where: { $0.name == candidate.name }) {
+            candidate.id = previous.id
+        }
+        return candidate
     }
 }

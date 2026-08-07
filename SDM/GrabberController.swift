@@ -45,23 +45,23 @@ final class GrabberController {
         snapshot = await session.snapshot()
     }
 
-    func moveLink(_ id: UUID, toPackageNamed name: String) async {
-        await session.moveLink(id, toPackageNamed: name)
+    func moveLink(_ id: UUID, toPackage packageID: UUID) async {
+        await session.moveLink(id, toPackage: packageID)
         snapshot = await session.snapshot()
     }
 
-    func renamePackage(_ oldName: String, to newName: String) async {
-        await session.renamePackage(oldName, to: newName)
+    func renamePackage(_ id: UUID, to newName: String) async {
+        await session.renamePackage(id, to: newName)
         snapshot = await session.snapshot()
     }
 
-    func mergePackages(_ sourceName: String, into destinationName: String) async {
-        await session.mergePackages(sourceName, into: destinationName)
+    func mergePackages(_ sourceID: UUID, into destinationID: UUID) async {
+        await session.mergePackages(sourceID, into: destinationID)
         snapshot = await session.snapshot()
     }
 
-    func splitPackage(_ name: String) async {
-        await session.splitPackage(name)
+    func splitPackage(_ id: UUID) async {
+        await session.splitPackage(id)
         snapshot = await session.snapshot()
     }
 
@@ -72,8 +72,8 @@ final class GrabberController {
 
     /// The original URLs of a package's confirmed links, for handoff to the
     /// download engine.
-    func urls(inPackageNamed name: String) -> [URL] {
-        guard let package = snapshot.packages.first(where: { $0.name == name }) else { return [] }
+    func urls(inPackage id: UUID) -> [URL] {
+        guard let package = snapshot.packages.first(where: { $0.id == id }) else { return [] }
         let ids = Set(package.linkIDs)
         return snapshot.links.filter { ids.contains($0.id) }.map(\.originalURL)
     }

@@ -14,12 +14,21 @@ public struct ClusterableLink: Identifiable, Equatable, Sendable {
     }
 }
 
-public struct PackageCandidate: Equatable, Sendable {
+public struct PackageCandidate: Equatable, Sendable, Identifiable {
+    /// Stable identity, independent of `name` — two packages can legitimately
+    /// share a name for a moment (see `GrabberSession.recluster()`'s
+    /// duplicate-name merge), and even when they don't, `name` alone is not
+    /// enough for a caller to say "act on *this* package" unambiguously.
+    /// `GrabberSession` preserves this id across reclustering for whichever
+    /// previous package had the same name, so it stays stable across a mere
+    /// regrouping rather than becoming a new id every tick.
+    public var id: UUID
     public var name: String
     public var linkIDs: [UUID]
     public var isArchive: Bool
 
-    public init(name: String, linkIDs: [UUID], isArchive: Bool = false) {
+    public init(id: UUID = UUID(), name: String, linkIDs: [UUID], isArchive: Bool = false) {
+        self.id = id
         self.name = name
         self.linkIDs = linkIDs
         self.isArchive = isArchive
