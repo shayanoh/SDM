@@ -1,9 +1,45 @@
 import UserNotifications
+import os.log
 
+/// `UNUserNotificationCenter` on macOS (like iOS) silently drops a
+/// notification's banner while the app is active/frontmost unless a
+/// delegate is set and its `willPresent` explicitly opts back in — with no
+/// delegate at all (the previous state here), every notification fired
+/// while SDM was the frontmost app, which is most of the time anyone would
+/// actually notice one, was posted successfully and then shown nowhere.
+/// `NSObject` conformance is required by `UNUserNotificationCenterDelegate`.
 @MainActor
-final class NotificationManager {
+final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
+    private static let log = Logger(subsystem: "com.shayanoh.SDM", category: "notifications")
+
+    override init() {
+        super.init()
+        // Two `NotificationManager` instances exist (`EngineController` and
+        // `SDMApp`), but `UNUserNotificationCenter.current()` is one shared
+        // singleton, so whichever instance is created first sets this for
+        // the whole process — both would set the same behavior anyway.
+        UNUserNotificationCenter.current().delegate = self
+    }
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) ->
+            Void
+    ) {
+        completionHandler([.banner, .sound, .list])
+    }
+
     func requestAuthorization() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) {
+            granted, error in
+            if let error {
+                Self.log.error("Notification authorization request failed: \(error)")
+            } else if !granted {
+                Self.log.notice(
+                    "Notification authorization was denied — enable it in System Settings > Notifications > SDM."
+                )
+            }
         }
     }
 
