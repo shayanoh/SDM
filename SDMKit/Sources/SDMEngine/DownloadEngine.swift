@@ -330,24 +330,112 @@ public actor DownloadEngine {
         await reconcile()
     }
 
-    /// Moves a queued item into a different package. Spec §9.3: "Dropping
-    /// onto a package row moves items into it."
+    /// Moves an item to a position — possibly within its own package
+    /// (same-package reordering; the one drag-and-drop primitive this type
+    /// exposes, replacing both the old queued-only cross-package `moveItem`
+    /// and `List`'s native `.onMove`, which cannot coexist with a
+    /// `.draggable`/`.dropDestination` drag on the same row without one
+    /// cancelling the other's `NSItemProvider` the moment a drop target
+    /// falls outside `.onMove`'s own section — see `PackagesListView.swift`
+    /// for the UI side of that), possibly into a different one. Crossing
+    /// packages physically relocates whichever of the item's files exist
+    /// (the finished file, the in-progress `.incomplete` sparse file, the
+    /// `.sdmpart` resume sidecar) into the destination folder. Spec §9.3:
+    /// "Dropping onto a package row moves items into it; dropping between
+    /// rows reorders."
     ///
-    /// Scoped to `.queued` items deliberately: a running or completed item's
-    /// bytes already live on disk under its current package's folder
-    /// (`context(for:)`), and relocating those files is out of scope for
-    /// this phase.
-    public func moveItem(_ itemID: UUID, toPackage packageID: UUID) async {
+    /// Refuses `.running` items: a worker is actively writing to that file
+    /// right now, and moving it out from under an in-flight write is unsafe.
+    /// Stop it first. Every other state (`.queued`, `.stopped`,
+    /// `.completed`, `.failed`) is safe to move — nothing is writing to the
+    /// file, whatever exists of it just needs to move with the item.
+    ///
+    /// `atIndex` positions the item within the destination package's item
+    /// list, indexed against that list *before* the item is removed from
+    /// wherever it currently sits — i.e. "insert before whatever is
+    /// currently at this index," matching what a drop onto a specific row
+    /// means to the person dragging. `nil` (a drop on the package header
+    /// rather than a specific row) appends at the end.
+    public func moveItem(_ itemID: UUID, toPackage packageID: UUID, atIndex index: Int? = nil) async
+    {
         guard let source = location(of: itemID),
-            packages[source.packageIndex].id != packageID,
-            packages[source.packageIndex].items[source.itemIndex].state == .queued,
+            packages[source.packageIndex].items[source.itemIndex].state != .running,
             let destinationIndex = packages.firstIndex(where: { $0.id == packageID })
         else { return }
-        var item = packages[source.packageIndex].items.remove(at: source.itemIndex)
-        item.position = packages[destinationIndex].items.count
-        packages[destinationIndex].items.append(item)
+        let samePackage = source.packageIndex == destinationIndex
+
+        let item = packages[source.packageIndex].items[source.itemIndex]
+        let sourceFolder = settings.downloadFolder.appendingPathComponent(
+            packages[source.packageIndex].name)
+        if !samePackage {
+            let destinationFolder = settings.downloadFolder.appendingPathComponent(
+                packages[destinationIndex].name)
+            relocateItemFiles(item, from: sourceFolder, to: destinationFolder)
+        }
+
+        // Removing the item first can shift everything after it down by one
+        // slot in its own array — only relevant when reordering within the
+        // same package, since a *different* package's indices are
+        // untouched by removing from this one.
+        var insertionIndex = index ?? packages[destinationIndex].items.count
+        if samePackage, let index, source.itemIndex < index {
+            insertionIndex = index - 1
+        }
+
+        packages[source.packageIndex].items.remove(at: source.itemIndex)
+        // Only meaningful cross-package: a same-package move reinserts the
+        // item into this exact array a few lines down, so it can never
+        // actually end up empty.
+        let sourceBecameEmpty = !samePackage && packages[source.packageIndex].items.isEmpty
+
+        insertionIndex = min(max(insertionIndex, 0), packages[destinationIndex].items.count)
+        packages[destinationIndex].items.insert(item, at: insertionIndex)
+        renumberPositions(inPackageAt: destinationIndex)
+        if !samePackage {
+            renumberPositions(inPackageAt: source.packageIndex)
+        }
+
+        if sourceBecameEmpty {
+            packages.remove(at: source.packageIndex)
+            removeFolderIfEmpty(sourceFolder)
+        }
+
         await persist()
         await reconcile()
+    }
+
+    /// Renumbers a package's items to a contiguous `0..<count` sequence
+    /// matching their array order — the same normalization `reorderItems`
+    /// already applies to a full reordering, needed here too since
+    /// `Scheduler` ranks directly on `item.position` (see `Scheduler.swift`),
+    /// so an inserted item's position must not collide with or fall out of
+    /// order against its new siblings'.
+    private func renumberPositions(inPackageAt packageIndex: Int) {
+        for index in packages[packageIndex].items.indices {
+            packages[packageIndex].items[index].position = index
+        }
+    }
+
+    /// Moves whichever of an item's on-disk files currently exist — the
+    /// finished file, the `.incomplete` sparse file, the `.sdmpart` resume
+    /// sidecar — from one package folder to another. Best-effort per file,
+    /// same as `trashIfExists`/`removeFolderIfEmpty` elsewhere in this type:
+    /// a missing source file (the common case — most of these three exist
+    /// for any given item, not all of them) is simply skipped rather than
+    /// treated as an error.
+    private func relocateItemFiles(_ item: DownloadItem, from sourceFolder: URL, to destinationFolder: URL) {
+        let source = sourceFolder.appendingPathComponent(item.filename)
+        let destination = destinationFolder.appendingPathComponent(item.filename)
+        try? FileManager.default.createDirectory(
+            at: destinationFolder, withIntermediateDirectories: true)
+        for (from, to) in [
+            (source, destination),
+            (SparseFile.incompleteURL(for: source), SparseFile.incompleteURL(for: destination)),
+            (ResumeSidecar.url(for: source), ResumeSidecar.url(for: destination)),
+        ] {
+            guard FileManager.default.fileExists(atPath: from.path) else { continue }
+            try? FileManager.default.moveItem(at: from, to: to)
+        }
     }
 
     private func location(of itemID: UUID) -> (packageIndex: Int, itemIndex: Int)? {

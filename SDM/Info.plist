@@ -6,9 +6,9 @@
 	<array>
 		<dict>
 			<key>UTTypeIdentifier</key>
-			<string>com.shayanoh.sdm.dragged-item</string>
+			<string>com.shayanoh.sdm.dragged-row</string>
 			<key>UTTypeDescription</key>
-			<string>SDM Dragged Download Item</string>
+			<string>SDM Dragged Download Row (Item or Package)</string>
 			<key>UTTypeConformsTo</key>
 			<array>
 				<string>public.data</string>

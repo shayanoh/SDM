@@ -50,32 +50,16 @@ struct PackagesListView: View {
                 DisclosureGroup(isExpanded: isExpandedBinding(package.id)) {
                     ForEach(Array(package.items.enumerated()), id: \.element.id) {
                         itemIndex, item in
-                        row(item, index: itemIndex)
+                        row(item, index: itemIndex, packageID: package.id)
                     }
-                    .onMove(
-                        perform: allowsReordering
-                            ? { indices, newOffset in
-                                var ids = package.items.map(\.id)
-                                ids.move(fromOffsets: indices, toOffset: newOffset)
-                                let packageID = package.id
-                                Task { await controller.reorderItems(ids, inPackage: packageID) }
-                            } : nil
-                    )
                 } label: {
                     PackageHeaderRow(
-                        package: package, allowsReordering: allowsReordering, theme: theme,
+                        package: package, packageIndex: packageIndex, packages: packages,
+                        allowsReordering: allowsReordering, theme: theme,
                         pendingDeletion: $pendingDeletion)
                 }
                 .listRowBackground(packageHeaderBackground(index: packageIndex))
             }
-            .onMove(
-                perform: allowsReordering
-                    ? { indices, newOffset in
-                        var ids = packages.map(\.id)
-                        ids.move(fromOffsets: indices, toOffset: newOffset)
-                        Task { await controller.reorderPackages(ids) }
-                    } : nil
-            )
         }
         // `List` paints its own opaque system background regardless of what
         // sits behind it — without hiding that, `surfacePrimary` never
@@ -94,11 +78,27 @@ struct PackagesListView: View {
         .tint(Color.red)
     }
 
+    /// Every row is both a drag source and a drop target for
+    /// `DraggedItemID`, and that one mechanism handles reordering whether
+    /// the drop lands in this row's own package or a different one —
+    /// deliberately *not* `List`'s native `.onMove`. The two cannot coexist
+    /// on the same row: on macOS, once a row also carries `.draggable`,
+    /// dropping outside `.onMove`'s own section (a different package, or —
+    /// it turned out — even the package header) reliably cancelled the
+    /// whole gesture (`NSItemProviderErrorDomain Code=-1000 "operation was
+    /// cancelled"`), confirmed live even with zero tick-driven churn in the
+    /// picture. See `DraggableItemRow` for the drag/drop wiring and the
+    /// insertion-line indicator that replaces the native one `.onMove` used
+    /// to draw.
     @ViewBuilder
-    private func row(_ item: ItemSnapshot, index: Int) -> some View {
+    private func row(_ item: ItemSnapshot, index: Int, packageID: UUID) -> some View {
         if allowsReordering {
-            itemRow(item, index: index)
-                .draggable(DraggedItemID(itemID: item.id))
+            DraggableItemRow(
+                itemID: item.id, packageID: packageID, index: index, controller: controller,
+                theme: theme
+            ) {
+                itemRow(item, index: index)
+            }
         } else {
             itemRow(item, index: index)
         }
@@ -259,11 +259,16 @@ struct PackagesListView: View {
 /// every reader in the first place.
 private struct PackageHeaderRow: View {
     let package: PackageSnapshot
+    /// This package's own index and the full list, needed only to compute
+    /// where a dropped package lands — see `insertionIndex(forDraggedFrom:)`.
+    let packageIndex: Int
+    let packages: [PackageSnapshot]
     let allowsReordering: Bool
     let theme: Theme
     @Binding var pendingDeletion: MainWindowView.PendingDeletion?
 
     @Environment(EngineController.self) private var controller
+    @State private var isTargeted = false
 
     var body: some View {
         let content =
@@ -285,18 +290,59 @@ private struct PackageHeaderRow: View {
                     pendingDeletion = .package(package.id)
                 }
             }
-        if allowsReordering {
-            content.dropDestination(for: DraggedItemID.self) { dragged, _ in
-                guard let dragged = dragged.first else { return false }
-                let packageID = package.id
-                Task {
-                    await controller.moveItem(dragged.itemID, toPackage: packageID)
+            .overlay {
+                if isTargeted {
+                    RoundedRectangle(cornerRadius: 4)
+                        .strokeBorder(theme.accentColor, lineWidth: 2)
                 }
-                return true
             }
+        if allowsReordering {
+            // A package header is a drop target for both dragged kinds: an
+            // item (moves that item into this package, appended at the end)
+            // and another package (reorders packages, inserting the dragged
+            // one immediately before this one) — see `DraggedRowID`'s doc
+            // comment for why both go through one `.dropDestination` for one
+            // unified type rather than two stacked ones.
+            content
+                .draggable(DraggedRowID.package(package.id))
+                .dropDestination(
+                    for: DraggedRowID.self,
+                    action: { dragged, _ in
+                        guard let dragged = dragged.first else { return false }
+                        switch dragged {
+                        case .item(let itemID):
+                            let packageID = package.id
+                            Task { await controller.moveItem(itemID, toPackage: packageID) }
+                            return true
+                        case .package(let draggedPackageID):
+                            guard let insertionIndex = insertionIndex(forDraggedFrom: draggedPackageID)
+                            else { return false }
+                            var ids = packages.map(\.id)
+                            ids.removeAll { $0 == draggedPackageID }
+                            ids.insert(draggedPackageID, at: insertionIndex)
+                            Task { await controller.reorderPackages(ids) }
+                            return true
+                        }
+                    },
+                    isTargeted: { isTargeted = $0 }
+                )
         } else {
             content
         }
+    }
+
+    /// Where a dragged package lands among its siblings when dropped on
+    /// this header: immediately before this package, adjusted for the
+    /// dragged package's own removal shifting everything after it down by
+    /// one — same "insert before whatever is currently at this index"
+    /// semantics as `DownloadEngine.moveItem`'s `atIndex`. `nil` if the
+    /// dragged id isn't actually one of `packages` (stale drag session).
+    private func insertionIndex(forDraggedFrom draggedPackageID: UUID) -> Int? {
+        guard let sourceIndex = packages.firstIndex(where: { $0.id == draggedPackageID }) else {
+            return nil
+        }
+        let target = sourceIndex < packageIndex ? packageIndex - 1 : packageIndex
+        return min(max(target, 0), packages.count - 1)
     }
 }
 
@@ -474,6 +520,53 @@ private func canEnable(_ item: ItemSnapshot) -> Bool {
 private func isFailedItem(_ item: ItemSnapshot) -> Bool {
     if case .failed = item.state { return true }
     return false
+}
+
+// MARK: - DraggableItemRow
+
+/// Wraps a row with the one drag/drop mechanism `PackagesListView` uses for
+/// every reorder — same-package or cross-package alike. See
+/// `PackagesListView.row(_:index:packageID:)`'s doc comment for why this
+/// replaces `List`'s native `.onMove`.
+///
+/// A distinct `View` rather than a modifier chain inline in `row(_:index:
+/// packageID:)` because it needs its own `@State` for `isTargeted` — the
+/// insertion-line indicator standing in for the native reorder line
+/// `.onMove` used to draw, now that dropping between rows goes through
+/// `dropDestination`'s own targeting instead.
+private struct DraggableItemRow<Content: View>: View {
+    let itemID: UUID
+    let packageID: UUID
+    let index: Int
+    let controller: EngineController
+    let theme: Theme
+    @ViewBuilder let content: () -> Content
+
+    @State private var isTargeted = false
+
+    var body: some View {
+        content()
+            .draggable(DraggedRowID.item(itemID))
+            .dropDestination(
+                for: DraggedRowID.self,
+                action: { dragged, _ in
+                    guard case .item(let draggedItemID) = dragged.first else { return false }
+                    Task {
+                        await controller.moveItem(
+                            draggedItemID, toPackage: packageID, atIndex: index)
+                    }
+                    return true
+                },
+                isTargeted: { isTargeted = $0 }
+            )
+            .overlay(alignment: .top) {
+                if isTargeted {
+                    Rectangle()
+                        .fill(theme.accentColor)
+                        .frame(height: 2)
+                }
+            }
+    }
 }
 
 // MARK: - ItemRow
