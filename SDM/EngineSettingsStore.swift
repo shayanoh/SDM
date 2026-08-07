@@ -14,6 +14,7 @@ enum EngineSettingsStore {
         static let globalMaxConnections = "sdm.globalMaxConnections"
         static let maxConnectionsPerHost = "sdm.maxConnectionsPerHost"
         static let autoStartDownloadsOnLaunch = "sdm.autoStartDownloadsOnLaunch"
+        static let minSegmentSizeMB = "sdm.minSegmentSizeMB"
     }
 
     static var maxConcurrent: Int {
@@ -34,6 +35,14 @@ enum EngineSettingsStore {
     static var maxConnectionsPerHost: Int {
         get { defaults.object(forKey: Key.maxConnectionsPerHost) as? Int ?? 8 }
         set { defaults.set(newValue, forKey: Key.maxConnectionsPerHost) }
+    }
+
+    /// Stored in MB (the Settings UI's unit); converted to bytes for
+    /// `EngineSettings.minSegmentSizeBytes`. Range enforced by the Settings
+    /// field itself (1...100).
+    static var minSegmentSizeMB: Int {
+        get { defaults.object(forKey: Key.minSegmentSizeMB) as? Int ?? 10 }
+        set { defaults.set(newValue, forKey: Key.minSegmentSizeMB) }
     }
 
     /// Off by default: a freshly launched app should not start pulling bytes

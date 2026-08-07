@@ -79,7 +79,12 @@ import Testing
     #expect(snapshot.packages.isEmpty)
 }
 
-@Test func resetDownloadRestartsFromZero() async throws {
+/// A reset must not itself start a download — it only discards progress.
+/// Resetting a `.completed` item has neither a "stays queued" nor a "stays
+/// stopped" prior state to preserve, so it lands `.stopped` like a `.failed`
+/// one would: the bytes are gone and nothing should pick it back up until the
+/// operator explicitly says so.
+@Test func resetDownloadDiscardsBytesAndDoesNotAutoStart() async throws {
     let dir = try makeScratchDirectory()
     defer { try? FileManager.default.removeItem(at: dir) }
     let engine = DownloadEngine(
@@ -95,15 +100,78 @@ import Testing
 
     #expect(await snapshotItem(item.id, in: engine)?.state == .completed)
 
-    // `resetDownload` reconciles immediately, so with nothing else competing
-    // for the single concurrency slot the item can already be `.running` (or
-    // even done, against a zero-latency fake origin) by the time this reads
-    // back — the property under test is that it restarted from zero, not the
-    // exact state at this instant.
-    try await engine.runUntilIdle()
+    await engine.resetDownload(item.id)
+
     let reset = await snapshotItem(item.id, in: engine)
-    #expect(reset?.state == .completed)
-    #expect(reset?.completed.totalBytes == 10)
+    #expect(reset?.state == .stopped)
+    #expect(reset?.completed.totalBytes == 0)
+    #expect(reset?.totalBytes == nil)
+
+    let destination = dir.appendingPathComponent("Batch").appendingPathComponent("a.bin")
+    #expect(!FileManager.default.fileExists(atPath: destination.path))
+}
+
+@Test func resetDownloadPreservesAQueuedItemsSchedulingState() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let gate = WorkerGate()
+    // A single concurrency slot, held indefinitely by `running` — `target`
+    // can never be promoted off `.queued` for the whole test, regardless of
+    // scheduling order, which is what makes this deterministic.
+    let engine = DownloadEngine(
+        transport: WorkerGatedOrigin(payload: testPayload(10), gate: gate),
+        stateStore: InMemoryStateStore(),
+        settings: EngineSettings(
+            maxConcurrent: 1, segmentsPerItem: 1, globalMaxConnections: 8, downloadFolder: dir)
+    )
+    let running = DownloadItem(url: URL(string: "https://example.com/running.bin")!, filename: "running.bin")
+    let target = DownloadItem(url: testSourceURL, filename: "a.bin")
+    await engine.add(DownloadPackage(name: "Batch", items: [running, target]))
+    #expect(await snapshotItem(target.id, in: engine)?.state == .queued)
+
+    await engine.resetDownload(target.id)
+    #expect(await snapshotItem(target.id, in: engine)?.state == .queued)
+
+    await gate.open()
+    try await engine.runUntilIdle()
+}
+
+@Test func resetDownloadPreservesAStoppedItemsSchedulingState() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let engine = DownloadEngine(
+        transport: FakeOrigin(payload: testPayload(10)),
+        stateStore: InMemoryStateStore(),
+        settings: EngineSettings(
+            maxConcurrent: 1, segmentsPerItem: 1, globalMaxConnections: 8, downloadFolder: dir)
+    )
+    let item = DownloadItem(url: testSourceURL, filename: "a.bin", state: .stopped)
+    await engine.add(DownloadPackage(name: "Batch", items: [item]))
+    #expect(await snapshotItem(item.id, in: engine)?.state == .stopped)
+
+    await engine.resetDownload(item.id)
+
+    #expect(await snapshotItem(item.id, in: engine)?.state == .stopped)
+}
+
+@Test func resetDownloadOnADisabledItemStaysStopped() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let engine = DownloadEngine(
+        transport: FakeOrigin(payload: testPayload(10)),
+        stateStore: InMemoryStateStore(),
+        settings: EngineSettings(
+            maxConcurrent: 1, segmentsPerItem: 1, globalMaxConnections: 8, downloadFolder: dir)
+    )
+    var item = DownloadItem(url: testSourceURL, filename: "a.bin", state: .queued)
+    item.isEnabled = false
+    await engine.add(DownloadPackage(name: "Batch", items: [item]))
+
+    await engine.resetDownload(item.id)
+
+    let reset = await snapshotItem(item.id, in: engine)
+    #expect(reset?.state == .stopped)
+    #expect(reset?.isEnabled == false)
 }
 
 @Test func reorderPackagesAppliesTheGivenOrder() async throws {

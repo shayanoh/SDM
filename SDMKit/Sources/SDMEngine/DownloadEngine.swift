@@ -18,6 +18,13 @@ public struct EngineSettings: Sendable {
     /// state is written. Spec §4.2's "~2 s after the last change" debounce,
     /// expressed in ticks at `AppTiming.ticksPerSecond`.
     public var persistDebounceTicks: Int
+    /// The floor `DownloadTask.stealableRemainder()` enforces when splitting a
+    /// busy worker's claim to hand half to an idle one: a split only happens
+    /// when both resulting halves would still be at least this large. An
+    /// unclaimed free gap is always handed out whole regardless of size — this
+    /// only bounds *splitting*, not claiming. Settings UI default is 10 MB,
+    /// exposed there in 1...100 MB.
+    public var minSegmentSizeBytes: Int64
 
     public init(
         maxConcurrent: Int,
@@ -26,7 +33,8 @@ public struct EngineSettings: Sendable {
         maxConnectionsPerHost: Int = 8,
         downloadFolder: URL,
         checkpointIntervalBytes: Int64 = 8 * 1024 * 1024,
-        persistDebounceTicks: Int = AppTiming.ticksPerSecond * 2
+        persistDebounceTicks: Int = AppTiming.ticksPerSecond * 2,
+        minSegmentSizeBytes: Int64 = 10 * 1024 * 1024
     ) {
         precondition(maxConcurrent >= 1, "maxConcurrent must be at least 1")
         precondition(segmentsPerItem >= 1, "segmentsPerItem must be at least 1")
@@ -34,6 +42,7 @@ public struct EngineSettings: Sendable {
         precondition(maxConnectionsPerHost >= 1, "maxConnectionsPerHost must be at least 1")
         precondition(checkpointIntervalBytes > 0, "checkpointIntervalBytes must be positive")
         precondition(persistDebounceTicks >= 1, "persistDebounceTicks must be at least 1")
+        precondition(minSegmentSizeBytes > 0, "minSegmentSizeBytes must be positive")
         self.maxConcurrent = maxConcurrent
         self.segmentsPerItem = segmentsPerItem
         self.globalMaxConnections = globalMaxConnections
@@ -41,6 +50,7 @@ public struct EngineSettings: Sendable {
         self.downloadFolder = downloadFolder
         self.checkpointIntervalBytes = checkpointIntervalBytes
         self.persistDebounceTicks = persistDebounceTicks
+        self.minSegmentSizeBytes = minSegmentSizeBytes
     }
 }
 
@@ -548,13 +558,27 @@ public actor DownloadEngine {
     }
 
     /// Restarts a download from zero: stops it if running, discards its
-    /// sidecar and any partial bytes, and re-queues it as if freshly added.
+    /// sidecar and any partial bytes, and resets it — leaving it exactly
+    /// where it was in the schedule rather than starting it.
+    ///
+    /// A reset must not itself start a download: `.queued` stays `.queued`
+    /// and `.stopped` stays `.stopped` (an enabled item was previously
+    /// unconditionally re-queued here, which auto-started it the moment its
+    /// slot came up — surprising for a reset, which is about discarding
+    /// progress, not scheduling). A disabled item still lands `.stopped`
+    /// regardless of what it was reset from, matching `setEnabled`'s own
+    /// "disabled means not running" rule. `.running` is stopped first as
+    /// always, then treated as `.queued` — the UI is expected to disable the
+    /// Reset action on a running item in the first place (see
+    /// `PackagesListView.canReset`), so this is a backstop, not the normal
+    /// path.
     public func resetDownload(_ itemID: UUID) async {
         guard let loc = location(of: itemID) else { return }
         let package = packages[loc.packageIndex]
         let item = package.items[loc.itemIndex]
         let folder = settings.downloadFolder.appendingPathComponent(package.name)
         let destination = folder.appendingPathComponent(item.filename)
+        let priorState = item.state
 
         await stopRunnerIfRunning(itemID)
 
@@ -568,13 +592,17 @@ public actor DownloadEngine {
         checkpointFailures[itemID] = nil
         attemptStartBytes[itemID] = nil
 
-        // `isEnabled` is untouched: a disabled item resets its bytes but
-        // stays disabled, rather than a reset silently overriding what the
-        // user explicitly turned off.
         mutateItem(itemID) {
             $0.completed = RangeSet()
             $0.totalBytes = nil
-            $0.state = $0.isEnabled ? .queued : .stopped
+            if $0.isEnabled {
+                switch priorState {
+                case .queued, .running: $0.state = .queued
+                case .stopped, .completed, .failed: $0.state = .stopped
+                }
+            } else {
+                $0.state = .stopped
+            }
             $0.isResumable = nil
             $0.validator = nil
         }
@@ -970,7 +998,7 @@ public actor DownloadEngine {
                 transport: transport,
                 configuration: DownloadTask.Configuration(
                     workerCount: allocatedSegments[itemID] ?? runContext.segments,
-                    minChunk: 64 * 1024,
+                    minChunk: settings.minSegmentSizeBytes,
                     checkpointInterval: settings.checkpointIntervalBytes
                 )
             )
@@ -1163,8 +1191,28 @@ public actor DownloadEngine {
         guard runners[itemID]?.task === task else { return }
         runners[itemID] = nil
         startedAtTick[itemID] = nil
+        // A confirmed non-resumable item that isn't landing `.completed` will
+        // have its next attempt restart at byte zero regardless of *why*
+        // this runner retired (a deliberate Stop, a transient failure queued
+        // for retry, or a permanent one) — `DownloadTask.prepare()` refuses
+        // to trust a sidecar when `acceptsRanges` is false. Recording the old
+        // task's partial `completed` here would misrepresent the item as
+        // "resumable from partway," and would seed the next `reconcile()`'s
+        // `sampledBytes` baseline (via `completedBytes(of:)`) at that stale
+        // non-zero figure — reporting 0 B/s on the speed graph until the new
+        // attempt's real bytes climb back past a total it never actually
+        // carried forward. `state` is compared rather than gated on `!=
+        // nil`: the deliberate-Stop case is exactly the one that passes
+        // `state: nil` (see the doc comment below), so gating on `state !=
+        // nil` would have excluded the very case this exists for.
+        let displayCompleted: RangeSet
+        if isResumable == false, state != .completed {
+            displayCompleted = RangeSet()
+        } else {
+            displayCompleted = completed
+        }
         mutateItem(itemID) {
-            $0.completed = completed
+            $0.completed = displayCompleted
             if let totalBytes { $0.totalBytes = totalBytes }
             if let isResumable { $0.isResumable = isResumable }
             // `nil` (only ever passed for `.userStopped`) means: `state` was

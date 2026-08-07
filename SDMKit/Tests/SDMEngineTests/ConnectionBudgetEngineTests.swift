@@ -16,7 +16,8 @@ import Testing
             segmentsPerItem: 1,
             globalMaxConnections: 3,
             maxConnectionsPerHost: 100,
-            downloadFolder: dir
+            downloadFolder: dir,
+            minSegmentSizeBytes: 64
         )
     )
 
@@ -54,7 +55,8 @@ import Testing
             segmentsPerItem: 1,
             globalMaxConnections: 32,
             maxConnectionsPerHost: 2,
-            downloadFolder: dir
+            downloadFolder: dir,
+            minSegmentSizeBytes: 64
         )
     )
 

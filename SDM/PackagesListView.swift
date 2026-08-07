@@ -1,3 +1,4 @@
+import AppKit
 import SDMCore
 import SDMEngine
 import SwiftUI
@@ -116,15 +117,44 @@ struct PackagesListView: View {
         .tag(item.id)
     }
 
-    /// Cmd-A (select every item currently listed here), Backspace (remove the
-    /// selection from the list only), and Cmd-Backspace (remove the
-    /// selection *and* trash the underlying files, Finder-style). Hidden
-    /// buttons rather than `.onKeyPress`, so the shortcuts work regardless of
-    /// which row currently has focus. Scoped entirely to `packages` — the
-    /// Completed tab's copy of this view only ever selects/deletes completed
-    /// items, never reaching into the rest of the list.
+    /// The package containing `item`, looked up by scanning `packages` — item
+    /// snapshots don't carry a back-reference to their package, and this list
+    /// is the only place that needs one, for reconstructing a destination URL
+    /// to open.
+    private func package(containing item: ItemSnapshot) -> PackageSnapshot? {
+        packages.first { $0.items.contains { $0.id == item.id } }
+    }
+
+    /// Opens a completed item's file with its default application. A no-op
+    /// for anything else — a missing or not-yet-finished file has nothing to
+    /// open — so this is safe to wire to both the Return-key shortcut and
+    /// the "Open File" context-menu action without each needing its own
+    /// eligibility check.
+    private func openFile(_ item: ItemSnapshot) {
+        guard item.state == .completed, !item.fileMissing, let package = package(containing: item)
+        else { return }
+        NSWorkspace.shared.open(controller.destinationURL(for: item, inPackage: package))
+    }
+
+    /// Cmd-A (select every item currently listed here), Return (open every
+    /// selected completed item's file), Backspace (remove the selection from
+    /// the list only), and Cmd-Backspace (remove the selection *and* trash
+    /// the underlying files, Finder-style). Hidden buttons rather than
+    /// `.onKeyPress`, so the shortcuts work regardless of which row currently
+    /// has focus. Scoped entirely to `packages` — the Completed tab's copy of
+    /// this view only ever selects/deletes/opens completed items, never
+    /// reaching into the rest of the list.
     private var keyboardShortcuts: some View {
         Group {
+            Button("") {
+                for item in packages.flatMap(\.items) where selectedItemIDs.contains(item.id) {
+                    openFile(item)
+                }
+            }
+            .keyboardShortcut(.return, modifiers: [])
+            .opacity(0)
+            .frame(width: 0, height: 0)
+
             Button("") {
                 selectedItemIDs = Set(packages.flatMap(\.items).map(\.id))
             }
@@ -222,9 +252,18 @@ struct PackagesListView: View {
                 }
             }
         }
+        if items.contains(where: canOpen) {
+            Button(isMultiple ? "Open Files" : "Open File") {
+                for item in items where canOpen(item) {
+                    openFile(item)
+                }
+            }
+            .keyboardShortcut(.return, modifiers: [])
+        }
         Button("Reset Download\(suffix)") {
             Task { for id in ids { await controller.resetDownload(id) } }
         }
+        .disabled(!items.contains(where: canReset))
         Divider()
         Button("Remove from List") {
             Task { await controller.removeItems(Array(ids), deleteFile: false) }
@@ -542,6 +581,19 @@ private func canEnable(_ item: ItemSnapshot) -> Bool {
 private func isFailedItem(_ item: ItemSnapshot) -> Bool {
     if case .failed = item.state { return true }
     return false
+}
+
+/// "Open File" only makes sense for a genuinely finished, still-present file.
+private func canOpen(_ item: ItemSnapshot) -> Bool {
+    item.state == .completed && !item.fileMissing
+}
+
+/// "Reset Download" is refused on a `.running` item: a worker is actively
+/// writing to that file right now, and resetting out from under an in-flight
+/// write is unsafe in the same way `DownloadEngine.moveItem` refuses to move
+/// one. Every other state discards cleanly since nothing is writing to it.
+private func canReset(_ item: ItemSnapshot) -> Bool {
+    item.state != .running
 }
 
 // MARK: - DraggableItemRow

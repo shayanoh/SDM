@@ -89,7 +89,8 @@ final class EngineController {
                 segmentsPerItem: EngineSettingsStore.segmentsPerItem,
                 globalMaxConnections: EngineSettingsStore.globalMaxConnections,
                 maxConnectionsPerHost: EngineSettingsStore.maxConnectionsPerHost,
-                downloadFolder: downloads
+                downloadFolder: downloads,
+                minSegmentSizeBytes: Int64(EngineSettingsStore.minSegmentSizeMB) * 1024 * 1024
             )
         )
     }
@@ -103,7 +104,8 @@ final class EngineController {
                 segmentsPerItem: EngineSettingsStore.segmentsPerItem,
                 globalMaxConnections: EngineSettingsStore.globalMaxConnections,
                 maxConnectionsPerHost: EngineSettingsStore.maxConnectionsPerHost,
-                downloadFolder: downloadFolder
+                downloadFolder: downloadFolder,
+                minSegmentSizeBytes: Int64(EngineSettingsStore.minSegmentSizeMB) * 1024 * 1024
             )
         )
     }
@@ -310,6 +312,14 @@ final class EngineController {
     func resetDownload(_ itemID: UUID) async {
         await engine.resetDownload(itemID)
         publish(await engine.snapshot())
+    }
+
+    /// Where a completed item's file actually lives on disk — the same path
+    /// `DownloadEngine` resolves internally, reconstructed here since
+    /// `ItemSnapshot`/`PackageSnapshot` don't carry a destination URL of
+    /// their own. Used to open a finished download from the list.
+    func destinationURL(for item: ItemSnapshot, inPackage package: PackageSnapshot) -> URL {
+        downloadFolder.appendingPathComponent(package.name).appendingPathComponent(item.filename)
     }
 
     /// Batch variant for multi-selection delete: each item is stopped and

@@ -116,7 +116,14 @@ struct SDMApp: App {
     @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
-        WindowGroup(id: "main") {
+        // `Window`, not `WindowGroup`: a group allows unbounded duplicate
+        // windows (each `openWindow(id:)` call — or the group's own default
+        // "New Window" command — opens another), which is how "Open SDM"
+        // from the menu bar used to spawn a fresh window every time instead
+        // of surfacing the existing one. `Window` is SwiftUI's single-
+        // instance scene — `openWindow(id:)` against an already-open one
+        // activates it instead.
+        Window("SDM", id: "main") {
             MainWindowView(selection: $sidebarSelection)
                 .environment(controller)
                 .environment(grabberController)
@@ -127,13 +134,22 @@ struct SDMApp: App {
                     await controller.startHeartbeat()
                 }
                 .onAppear {
+                    // Deliberately not tied to this window's lifecycle
+                    // beyond using its first appearance as a convenient
+                    // "app has launched" hook: SDM is designed to keep
+                    // running from the menu bar with the main window closed,
+                    // and clipboard watching — the core of the Linkgrabber
+                    // feature — must keep working the whole time. There is
+                    // no matching `.onDisappear` stop call; the watcher's
+                    // lifecycle is governed solely by
+                    // `GrabberSettings.clipboardWatchingEnabled`, toggled
+                    // live from `SettingsView.commit()`.
                     clipboardWatcher.onLinksDetected = { urls in
                         guard GrabberSettings.clipboardWatchingEnabled else { return }
                         Task { await grabberController.ingest(urls: urls) }
                     }
                     if GrabberSettings.clipboardWatchingEnabled { clipboardWatcher.start() }
                 }
-                .onDisappear { clipboardWatcher.stop() }
                 .onChange(of: grabberController.snapshot) { _, newSnapshot in
                     let freshIDs = Set(newSnapshot.links.map(\.id)).subtracting(notifiedLinkIDs)
                     if !freshIDs.isEmpty {
@@ -168,11 +184,12 @@ struct SDMApp: App {
             }
         }
 
-        WindowGroup(id: "settings") {
+        Window("Settings", id: "settings") {
             SettingsView()
                 .environment(controller)
                 .environment(themeStore)
                 .environment(activationPolicyController)
+                .environment(clipboardWatcher)
         }
         .windowResizability(.contentSize)
 

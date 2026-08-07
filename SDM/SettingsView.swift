@@ -12,6 +12,7 @@ struct SettingsView: View {
     @Environment(EngineController.self) private var controller
     @Environment(ThemeStore.self) private var themeStore
     @Environment(ActivationPolicyController.self) private var activationPolicyController
+    @Environment(ClipboardWatcher.self) private var clipboardWatcher
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
 
@@ -19,6 +20,7 @@ struct SettingsView: View {
     @State private var segmentsPerItem = EngineSettingsStore.segmentsPerItem
     @State private var globalMaxConnections = EngineSettingsStore.globalMaxConnections
     @State private var maxConnectionsPerHost = EngineSettingsStore.maxConnectionsPerHost
+    @State private var minSegmentSizeMB = EngineSettingsStore.minSegmentSizeMB
     @State private var autoStartDownloadsOnLaunch = EngineSettingsStore.autoStartDownloadsOnLaunch
     @State private var clipboardWatchingEnabled = GrabberSettings.clipboardWatchingEnabled
     @State private var autoAddAndStartOnGrab = GrabberSettings.autoAddAndStartOnGrab
@@ -147,6 +149,9 @@ struct SettingsView: View {
                     SteppedNumberField(
                         label: "Max connections per host", value: $maxConnectionsPerHost,
                         range: 1...64)
+                    SteppedNumberField(
+                        label: "Minimum segment size (MB)", value: $minSegmentSizeMB,
+                        range: 1...100)
                 }
             }
             SettingsSection(title: "Startup", theme: theme) {
@@ -207,8 +212,17 @@ struct SettingsView: View {
         EngineSettingsStore.segmentsPerItem = segmentsPerItem
         EngineSettingsStore.globalMaxConnections = globalMaxConnections
         EngineSettingsStore.maxConnectionsPerHost = maxConnectionsPerHost
+        EngineSettingsStore.minSegmentSizeMB = minSegmentSizeMB
         EngineSettingsStore.autoStartDownloadsOnLaunch = autoStartDownloadsOnLaunch
         GrabberSettings.clipboardWatchingEnabled = clipboardWatchingEnabled
+        // Applied live, independent of any window's visibility — see
+        // `SDMApp`'s doc comment on the watcher's `.onAppear` for why it
+        // must not be tied to the main window's lifecycle.
+        if clipboardWatchingEnabled {
+            clipboardWatcher.start()
+        } else {
+            clipboardWatcher.stop()
+        }
         GrabberSettings.autoAddAndStartOnGrab = autoAddAndStartOnGrab
         GrabberSettings.deepSniffEnabled = deepSniffEnabled
         NotificationSettings.downloadFinishedEnabled = downloadFinishedEnabled

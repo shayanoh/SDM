@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import Observation
 import SDMGrabber
 
 /// Polls `NSPasteboard.changeCount`, since `NSPasteboard` has no change
@@ -14,7 +15,12 @@ import SDMGrabber
 /// grabbing only the first is exactly what that type signature predicts,
 /// and it makes the API structurally unusable here — spec §7.5's batch-paste
 /// flow requires catching every link on the pasteboard, not just one.
+/// `@Observable` purely so it can travel through `.environment(_:)` to
+/// `SettingsView`, which needs to start/stop it live when the operator
+/// toggles clipboard watching — nothing observes its properties for
+/// rendering.
 @MainActor
+@Observable
 final class ClipboardWatcher {
     private let pasteboard = NSPasteboard.general
     private var lastChangeCount: Int
