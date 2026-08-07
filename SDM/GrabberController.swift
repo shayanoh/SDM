@@ -45,6 +45,16 @@ final class GrabberController {
         snapshot = await session.snapshot()
     }
 
+    func removePackage(_ id: UUID) async {
+        await session.removePackage(id)
+        snapshot = await session.snapshot()
+    }
+
+    func clear() async {
+        await session.clear()
+        snapshot = await session.snapshot()
+    }
+
     func moveLink(_ id: UUID, toPackage packageID: UUID) async {
         await session.moveLink(id, toPackage: packageID)
         snapshot = await session.snapshot()

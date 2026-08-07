@@ -90,7 +90,22 @@ struct LinkGrabberView: View {
                 addToDownloads(package, startImmediately: true)
             }
             .controlSize(.small)
+            Button(role: .destructive) {
+                let id = package.id
+                Task { await controller.removePackage(id) }
+            } label: {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(.plain)
         }
+        // Without this, the HStack's own hit area is only as big as its
+        // rendered content (the text, the buttons) — right-clicking the
+        // `Spacer()`'s empty space did nothing. `contentShape` extends the
+        // container's hit area to its full bounds for the context menu
+        // without stealing taps from the buttons above: SwiftUI still
+        // routes a click to the deepest view under it first, so each
+        // button keeps getting its own clicks.
+        .contentShape(Rectangle())
         .dropDestination(for: DraggedLinkID.self) { dragged, _ in
             guard let dragged = dragged.first else { return false }
             let packageID = package.id
@@ -145,6 +160,11 @@ struct LinkGrabberView: View {
                 }
                 .controlSize(.small)
                 .disabled(snapshot.failedCount == 0)
+                Button("Clear", role: .destructive) {
+                    Task { await controller.clear() }
+                }
+                .controlSize(.small)
+                .disabled(snapshot.packages.isEmpty)
             }
         }
         .padding()

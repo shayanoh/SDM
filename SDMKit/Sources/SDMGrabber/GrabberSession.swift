@@ -77,6 +77,28 @@ public actor GrabberSession {
         recluster()
     }
 
+    /// Removes every member link of one package. Identified by id — see
+    /// `moveLink(_:toPackage:)`'s doc comment for why.
+    public func removePackage(_ id: UUID) {
+        guard let package = packages.first(where: { $0.id == id }) else { return }
+        for linkID in package.linkIDs {
+            guard let link = links.removeValue(forKey: linkID) else { continue }
+            seenURLs.remove(link.originalURL)
+        }
+        order.removeAll { linkID in package.linkIDs.contains(linkID) }
+        for linkID in package.linkIDs { manualOverrides[linkID] = nil }
+        recluster()
+    }
+
+    /// Removes every link in the session, clearing the list back to empty.
+    public func clear() {
+        links.removeAll()
+        order.removeAll()
+        seenURLs.removeAll()
+        manualOverrides.removeAll()
+        packages.removeAll()
+    }
+
     /// Forces a link into a package, overriding automatic clustering. Spec
     /// §7.4: "All of it is fully overridable."
     ///
