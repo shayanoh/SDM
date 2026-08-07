@@ -294,6 +294,11 @@ final class EngineController {
         publish(await engine.snapshot())
     }
 
+    func reorderItems(_ itemIDs: [UUID], inPackage packageID: UUID) async {
+        await engine.reorderItems(itemIDs, inPackage: packageID)
+        publish(await engine.snapshot())
+    }
+
     /// Global pause/resume: stops or (re-)queues every stoppable/resumable
     /// item in one call. Never touches any item's `isEnabled`.
     func pauseAll() async {

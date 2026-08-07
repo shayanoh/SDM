@@ -225,7 +225,7 @@ struct PackagesListView: View {
         }
         .disabled(!items.contains(where: canStop))
         Divider()
-        if(items.contains(where:canDisable)) {
+        if items.contains(where: canDisable) {
             Button(isMultiple ? "Disable All" : "Disable") {
                 Task {
                     for item in items where canDisable(item) {
@@ -234,7 +234,7 @@ struct PackagesListView: View {
                 }
             }
         }
-        if(items.contains(where: canEnable)) {
+        if items.contains(where: canEnable) {
             Button(isMultiple ? "Enable All" : "Enable") {
                 Task {
                     for item in items where canEnable(item) {
@@ -325,6 +325,14 @@ private struct PackageHeaderRow: View {
             .padding(.vertical, 4)
             .contentShape(Rectangle())
             .contextMenu {
+                Button("Sort Items by Name") {
+                    let sortedIDs = package.items
+                        .sorted {
+                            $0.filename.localizedStandardCompare($1.filename) == .orderedAscending
+                        }
+                        .map(\.id)
+                    Task { await controller.reorderItems(sortedIDs, inPackage: package.id) }
+                }
                 Button("Remove from List") {
                     Task { await controller.removePackage(package.id, deleteFiles: false) }
                 }
@@ -682,8 +690,8 @@ private struct DraggableItemRow<Content: View>: View {
         speedHistory: [100000, 90000, 80000])
     let theme = ThemeCatalog.builtInThemes()[5]
     let controller = EngineController()
-    
-    List(selection:$selectedItemIDs) {
+
+    List(selection: $selectedItemIDs) {
         ItemRow(
             item: item, index: 1, controller: controller, isSelected: false,
             theme: theme)
@@ -699,7 +707,7 @@ private struct DraggableItemRow<Content: View>: View {
         ItemRow(
             item: item, index: 5, controller: controller, isSelected: true,
             theme: theme)
-        
+
     }
 }
 private struct ItemRow: View {
@@ -746,14 +754,18 @@ private struct ItemRow: View {
                             .foregroundStyle(theme.faultyColor)
                     }
                     Spacer()
-                    ItemTelemetryFields(itemID: item.id, fallback: item, controller: controller, theme: theme)
+                    ItemTelemetryFields(
+                        itemID: item.id, fallback: item, controller: controller, theme: theme)
                 }
-                ItemProgressBar(itemID: item.id, fallback: item, controller: controller, theme: theme)
-                    .frame(height: 6)
+                ItemProgressBar(
+                    itemID: item.id, fallback: item, controller: controller, theme: theme
+                )
+                .frame(height: 6)
                 HStack {
                     statusLine
                     Spacer()
-                    ItemBytesText(itemID: item.id, fallback: item, controller: controller, theme: theme)
+                    ItemBytesText(
+                        itemID: item.id, fallback: item, controller: controller, theme: theme)
                 }
             }
         }
