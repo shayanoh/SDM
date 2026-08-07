@@ -47,6 +47,13 @@ struct LinkGrabberView: View {
             // never actually shows through.
             .scrollContentBackground(.hidden)
             .background(theme.surfacePrimaryColor)
+            // macOS floats `Section` headers over their content by default
+            // (`NSTableView.floatsGroupRows`, the same look as Mail's/
+            // Finder's pinned group headers) — `.plain` is the one built-in
+            // style that turns this off, which is also what lets our own
+            // background color on `packageHeader` show through undisturbed
+            // rather than being drawn under the system's floating chrome.
+            .listStyle(.plain)
         }
         .alert("Rename package", isPresented: $isShowingRenameAlert) {
             TextField("Name", text: $newPackageName)
@@ -81,6 +88,7 @@ struct LinkGrabberView: View {
     private func packageHeader(_ package: PackageCandidate) -> some View {
         HStack {
             Text(package.name)
+                .font(.title3.bold())
             Spacer()
             Button("Add to downloads") {
                 addToDownloads(package, startImmediately: false)
@@ -98,6 +106,9 @@ struct LinkGrabberView: View {
             }
             .buttonStyle(.plain)
         }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 4)
+        .background(theme.surfaceSecondaryColor)
         // Without this, the HStack's own hit area is only as big as its
         // rendered content (the text, the buttons) — right-clicking the
         // `Spacer()`'s empty space did nothing. `contentShape` extends the
