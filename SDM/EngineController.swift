@@ -59,17 +59,9 @@ final class EngineController {
     /// thread and cannot await anything — can still reach the engine. Safe
     /// because `DownloadEngine` is an actor, and therefore `Sendable`.
     private nonisolated let engine: DownloadEngine
-    /// Guards against a second `shutdown()` call, since SwiftUI's
-    /// `WindowGroup` does not guarantee the process exits when its window
-    /// closes: the `@State` controller can survive a close/reopen and
-    /// `.task { startHeartbeat() }` can re-fire.
-    ///
-    /// `DownloadEngine.shutdown()` is now itself idempotent, which is what
-    /// makes the two shutdown paths (this one and the terminate hook) safe to
-    /// compose — they can and on ⌘Q do both fire. This flag stays as the
-    /// main-actor-side half of that: it stops the heartbeat path from
-    /// re-entering at all.
-    private var hasShutDown = false
+    /// Retains the heartbeat's own `Task`, started once and independent of
+    /// any SwiftUI view's `.task` — see `startHeartbeatIfNeeded()`.
+    private var heartbeatTask: Task<Void, Never>?
     private let notifications = NotificationManager()
     private var previousSnapshot: EngineSnapshot?
     private let downloadFolder: URL
@@ -110,28 +102,40 @@ final class EngineController {
         )
     }
 
+    /// Starts the heartbeat exactly once for the process's lifetime, in a
+    /// `Task` this controller owns directly rather than one hung off a
+    /// SwiftUI view's `.task`.
+    ///
+    /// SDM keeps downloading (and the menu bar ring keeps updating) with the
+    /// main window closed — closing it only switches the dock/menu-bar
+    /// activation policy, per `ActivationPolicyController`; it does not quit.
+    /// A `.task` attached to the window's content view is cancelled by
+    /// SwiftUI the moment that view leaves the hierarchy, i.e. on every
+    /// window close, so the heartbeat must not live there: cancellation used
+    /// to call `engine.shutdown()`, which cancels every running job and
+    /// permanently flips `DownloadEngine.isShutDown` — reopening the window
+    /// restarted the loop, but `reconcile()` had become a no-op forever,
+    /// so everything sat `.queued` and nothing ever ran again.
+    ///
+    /// Real shutdown only needs to happen once, at actual process
+    /// termination, and `AppDelegate.applicationWillTerminate` already
+    /// covers that reliably (see its doc comment in `SDMApp.swift`) — so
+    /// this task simply never calls `engine.shutdown()` itself.
+    func startHeartbeatIfNeeded() {
+        guard heartbeatTask == nil else { return }
+        heartbeatTask = Task { await self.runHeartbeat() }
+    }
+
     /// Loads durable state and runs the engine's `AppTiming.ticksPerSecond`
-    /// Hz heartbeat, refreshing the published snapshot.
+    /// Hz heartbeat, refreshing the published snapshot, for as long as the
+    /// process lives. See `startHeartbeatIfNeeded()`, its only caller.
     ///
-    /// `restore()` runs first so packages persisted by a previous launch
-    /// exist before anything is scheduled; it is `await`-only I/O against an
-    /// injected `stateStore`, which is why it happens here rather than in
-    /// `init()` — `init()` cannot `await`, and doing that I/O implicitly
-    /// inside an initializer would hide it from callers and from tests that
-    /// construct a controller without wanting disk access yet. `restore()`
-    /// itself is idempotent, so a second `startHeartbeat()` call restores
-    /// nothing further.
-    ///
-    /// Exits its loop as soon as the enclosing `.task` is cancelled (window
-    /// close / app termination), then shuts the engine down so its durable
-    /// state actually reaches disk — `DownloadEngine.tick()` only queues a
-    /// save in memory; `shutdown()` is the only public call that flushes it.
-    /// The engine reference itself is retained by this controller regardless,
-    /// so a redundant `tick()`/`snapshot()` call after shutdown is harmless
-    /// (`reconcile()` is a no-op once shut down). `hasShutDown` stops that
-    /// final call itself from firing twice, in case the window closes and
-    /// reopens without the process exiting.
-    func startHeartbeat() async {
+    /// `restore()` is `await`-only I/O against an injected `stateStore`,
+    /// which is why it happens here rather than in `init()` — `init()`
+    /// cannot `await`, and doing that I/O implicitly inside an initializer
+    /// would hide it from callers and from tests that construct a
+    /// controller without wanting disk access yet.
+    private func runHeartbeat() async {
         await engine.restore()
         // `restore()` always lands every non-terminal item `.stopped` — the
         // store never persists `.queued`/`.running` (see
@@ -154,10 +158,6 @@ final class EngineController {
             publish(newSnapshot)
             try? await Task.sleep(for: .seconds(1.0 / Double(AppTiming.ticksPerSecond)))
         }
-
-        guard !hasShutDown else { return }
-        hasShutDown = true
-        await engine.shutdown()
     }
 
     /// The one place `snapshot`/`structuralPackages`/`itemTelemetry` are

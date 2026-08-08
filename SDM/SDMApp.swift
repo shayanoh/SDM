@@ -13,14 +13,15 @@ import SwiftUI
 
 /// Exists for one reason: to flush durable state on quit.
 ///
-/// SwiftUI gives a `WindowGroup` no termination hook. `EngineController`'s
-/// heartbeat shuts the engine down when its `.task` is cancelled, but on ⌘Q
-/// the cancelled continuation is not guaranteed to be scheduled before the
-/// process dies, and on last-window-close it races process exit. Since
-/// `flush()` is the only thing that writes `state.json`, the ordinary quit
-/// path wrote nothing at all — `.incomplete` files and their `.sdmpart`
-/// sidecars survived with no record of the item owning them, and the next
-/// launch restored an empty list.
+/// SwiftUI gives a `WindowGroup` no termination hook, and `EngineController`'s
+/// heartbeat deliberately does not shut the engine down on its own — see
+/// `EngineController.startHeartbeatIfNeeded()`, since closing the main window
+/// does not mean the app is quitting. Since `flush()` is the only thing that
+/// writes `state.json`, something has to call it reliably at real
+/// termination, or the ordinary quit path writes nothing at all —
+/// `.incomplete` files and their `.sdmpart` sidecars would survive with no
+/// record of the item owning them, and the next launch would restore an
+/// empty list.
 ///
 /// `applicationWillTerminate` is the one callback AppKit guarantees before a
 /// normal quit, and it is synchronous, so the flush blocks here.
@@ -131,7 +132,12 @@ struct SDMApp: App {
                 .task {
                     appDelegate.controller = controller
                     appDelegate.activationPolicyController = activationPolicyController
-                    await controller.startHeartbeat()
+                    // Kicks off the controller's own heartbeat `Task` and
+                    // returns immediately — deliberately not `await`ed, so
+                    // this view's `.task` (and hence the heartbeat) is not
+                    // tied to the window's lifetime. See
+                    // `EngineController.startHeartbeatIfNeeded()`.
+                    controller.startHeartbeatIfNeeded()
                 }
                 .onAppear {
                     // Deliberately not tied to this window's lifecycle
