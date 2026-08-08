@@ -31,6 +31,9 @@ struct LinkGrabberView: View {
             header
             Divider()
             List {
+                ForEach(linksInNoPackage()) {
+                    LinkRow(link: $0, controller: controller, theme: theme)
+                }
                 ForEach(controller.snapshot.packages) { package in
                     // Deliberately not a `Section` with a `header:` — macOS
                     // renders a `Section` header as an AppKit "group row"
@@ -83,6 +86,13 @@ struct LinkGrabberView: View {
             AddLinksSheet()
         }
         .frame(minWidth: 640, minHeight: 420)
+        .task {
+            while !Task.isCancelled {
+                await updateControllerSnapshot()
+
+                try? await Task.sleep(for: .seconds(0.25))
+            }
+        }
     }
 
     @ViewBuilder
@@ -199,6 +209,10 @@ struct LinkGrabberView: View {
             .foregroundStyle(color)
     }
 
+    private func updateControllerSnapshot() async {
+        await controller.updateSnapshot()
+    }
+
     /// Hands the package's links to the engine, then clears them out of the
     /// grabber — once a link is a download it has no reason to still show up
     /// as something waiting to be grabbed.
@@ -222,6 +236,11 @@ struct LinkGrabberView: View {
         let ids = Set(package.linkIDs)
         return controller.snapshot.links.filter { ids.contains($0.id) }
     }
+
+    private func linksInNoPackage() -> [ProbedLink] {
+        let packagedLinkIDs = Set(controller.snapshot.packages.flatMap(\.linkIDs))
+        return controller.snapshot.links.filter { !packagedLinkIDs.contains($0.id) }
+    }
 }
 
 private struct LinkRow: View {
@@ -240,13 +259,15 @@ private struct LinkRow: View {
             Spacer()
             verdictBadge
             Text(fileSize)
-            Button(role: .destructive) {
-                let id = link.id
-                Task { await controller.removeLink(id) }
-            } label: {
-                Image(systemName: "trash")
+            if link.verdict != nil {
+                Button(role: .destructive) {
+                    let id = link.id
+                    Task { await controller.removeLink(id) }
+                } label: {
+                    Image(systemName: "trash")
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .padding(.vertical, 2)
     }

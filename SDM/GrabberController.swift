@@ -25,6 +25,13 @@ final class GrabberController {
         )
     }
 
+    func updateSnapshot() async {
+        let newSnapshot = await session.snapshot()
+        if newSnapshot != snapshot {
+            snapshot = newSnapshot
+        }
+    }
+
     func ingest(text: String) async {
         await session.ingest(text: text)
         snapshot = await session.snapshot()
