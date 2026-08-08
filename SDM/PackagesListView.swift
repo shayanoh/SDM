@@ -220,7 +220,21 @@ struct PackagesListView: View {
         let items = packages.flatMap(\.items).filter { ids.contains($0.id) }
         let isMultiple = items.count > 1
         let suffix = isMultiple ? "s" : ""
-        Button(isMultiple ? "Start All" : "Start") {
+        if items.contains(where: canOpen) {
+            Button(isMultiple ? "Open Files" : "Open File") {
+                for item in items where canOpen(item) {
+                    openFile(item)
+                }
+            }
+            .keyboardShortcut(.return, modifiers: [])
+        }
+        Button("Copy URL\(suffix) to Clipboard") {
+            let urls = items.map(\.url.absoluteString).joined(separator: "\n")
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(urls, forType: .string)
+        }
+        Divider()
+        Button("Start Download\(suffix)") {
             Task {
                 for item in items where canStart(item) {
                     await controller.startItem(item.id)
@@ -228,7 +242,7 @@ struct PackagesListView: View {
             }
         }
         .disabled(!items.contains(where: canStart))
-        Button(isMultiple ? "Stop All" : "Stop") {
+        Button("Stop Download\(suffix)") {
             Task {
                 for item in items where canStop(item) {
                     await controller.stopItem(item.id)
@@ -237,15 +251,6 @@ struct PackagesListView: View {
         }
         .disabled(!items.contains(where: canStop))
         Divider()
-        if items.contains(where: canDisable) {
-            Button(isMultiple ? "Disable All" : "Disable") {
-                Task {
-                    for item in items where canDisable(item) {
-                        await controller.setEnabled(false, for: item.id)
-                    }
-                }
-            }
-        }
         if items.contains(where: canEnable) {
             Button(isMultiple ? "Enable All" : "Enable") {
                 Task {
@@ -255,22 +260,23 @@ struct PackagesListView: View {
                 }
             }
         }
+        if items.contains(where: canDisable) {
+            Button(isMultiple ? "Disable All" : "Disable") {
+                Task {
+                    for item in items where canDisable(item) {
+                        await controller.setEnabled(false, for: item.id)
+                    }
+                }
+            }
+        }
         if items.contains(where: isFailedItem) {
-            Button("Retry") {
+            Button("Retry Failed Item\(suffix)") {
                 Task {
                     for item in items where isFailedItem(item) {
                         await controller.retry(item.id)
                     }
                 }
             }
-        }
-        if items.contains(where: canOpen) {
-            Button(isMultiple ? "Open Files" : "Open File") {
-                for item in items where canOpen(item) {
-                    openFile(item)
-                }
-            }
-            .keyboardShortcut(.return, modifiers: [])
         }
         Button("Reset Download\(suffix)") {
             Task { for id in ids { await controller.resetDownload(id) } }
