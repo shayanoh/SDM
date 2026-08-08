@@ -408,15 +408,34 @@ public actor DownloadTask {
     /// a lowered target count.
     private func workerLoop(index: Int) async throws {
         let workerID = UUID()
+        #if SDM_ENGINE_LOGGING
+            let tag = workerTag(id, filename: destinationURL.lastPathComponent, worker: index)
+            let workerStart = ContinuousClock.now
+            engineLog.debug("\(tag, privacy: .public) started")
+        #endif
         defer {
             reserved[workerID] = nil
             writeCursor[workerID] = nil
             liveWorkerIndices.remove(index)
+            #if SDM_ENGINE_LOGGING
+                engineLog.debug(
+                    "\(tag, privacy: .public) closed (total \(formatted(ContinuousClock.now - workerStart), privacy: .public))"
+                )
+            #endif
         }
 
         while !shouldRetire(index: index) {
             guard let claim = claimNext(for: workerID) else { return }
-            try await download(claim, workerID: workerID)
+            do {
+                try await download(claim, workerID: workerID, index: index)
+            } catch {
+                #if SDM_ENGINE_LOGGING
+                    engineLog.debug(
+                        "\(tag, privacy: .public) failed: \(String(describing: error), privacy: .public) (elapsed \(formatted(ContinuousClock.now - workerStart), privacy: .public))"
+                    )
+                #endif
+                throw error
+            }
             reserved[workerID] = nil
             writeCursor[workerID] = nil
         }
@@ -496,14 +515,32 @@ public actor DownloadTask {
         return best.map { (workerID: $0.0, remainder: $0.1) }
     }
 
-    private func download(_ claim: ByteRange, workerID: UUID) async throws {
+    private func download(_ claim: ByteRange, workerID: UUID, index: Int) async throws {
+        #if SDM_ENGINE_LOGGING
+            let tag = workerTag(id, filename: destinationURL.lastPathComponent, worker: index)
+            let requestStart = ContinuousClock.now
+            engineLog.debug(
+                "\(tag, privacy: .public) requesting url=\(self.sourceURL.absoluteString, privacy: .public) range=\(claim.start, privacy: .public)-\(claim.end, privacy: .public)"
+            )
+        #endif
         let response = try await transport.fetch(RangeRequest(url: sourceURL, range: claim))
         guard (200..<300).contains(response.statusCode) else {
             throw DownloadError.serverError(status: response.statusCode)
         }
 
         var offset = claim.start
+        #if SDM_ENGINE_LOGGING
+            var firstByteLogged = false
+        #endif
         for try await chunk in response.body {
+            #if SDM_ENGINE_LOGGING
+                if !firstByteLogged {
+                    firstByteLogged = true
+                    engineLog.debug(
+                        "\(tag, privacy: .public) first byte after \(formatted(ContinuousClock.now - requestStart), privacy: .public)"
+                    )
+                }
+            #endif
             // The live end of this claim, not the one captured when the
             // request was issued: another worker may have stolen this
             // claim's unwritten tail since (`claimNext` above), shrinking
@@ -546,6 +583,11 @@ public actor DownloadTask {
                 received: offset - claim.start
             )
         }
+        #if SDM_ENGINE_LOGGING
+            engineLog.debug(
+                "\(tag, privacy: .public) downloading done: \(offset - claim.start, privacy: .public) bytes (elapsed \(formatted(ContinuousClock.now - requestStart), privacy: .public))"
+            )
+        #endif
     }
 
     /// Folds a freshly written range into the completed set, checkpointing

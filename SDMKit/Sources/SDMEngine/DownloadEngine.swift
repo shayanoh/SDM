@@ -415,7 +415,9 @@ public actor DownloadEngine {
 
         // Snapshot the moved items themselves before any removal below
         // touches the arrays they currently sit in.
-        let movedItems = itemIDs.map { packages[sources[$0]!.packageIndex].items[sources[$0]!.itemIndex] }
+        let movedItems = itemIDs.map {
+            packages[sources[$0]!.packageIndex].items[sources[$0]!.itemIndex]
+        }
 
         // How many of the batch sit ahead of `index` within the destination
         // package itself — same "removing it first shifts everything after
@@ -1032,6 +1034,17 @@ public actor DownloadEngine {
             )
         )
 
+        #if SDM_ENGINE_LOGGING
+            let runningNow = Set(runners.keys)
+            if desired != runningNow {
+                let starting = desired.subtracting(runningNow)
+                let stopping = runningNow.subtracting(desired)
+                engineLog.debug(
+                    "[scheduler] assigning: +\(starting.count, privacy: .public) -\(stopping.count, privacy: .public) (desired=\(desired.count, privacy: .public) running=\(runningNow.count, privacy: .public))"
+                )
+            }
+        #endif
+
         let allocatedSegments = ConnectionAllocator.allocate(
             demands: connectionDemands(for: desired),
             budget: ConnectionBudget(
@@ -1415,7 +1428,18 @@ public actor DownloadEngine {
         for packageIndex in packages.indices {
             for itemIndex in packages[packageIndex].items.indices
             where packages[packageIndex].items[itemIndex].id == itemID {
+                #if SDM_ENGINE_LOGGING
+                    let before = packages[packageIndex].items[itemIndex].state
+                #endif
                 transform(&packages[packageIndex].items[itemIndex])
+                #if SDM_ENGINE_LOGGING
+                    let item = packages[packageIndex].items[itemIndex]
+                    if item.state != before {
+                        engineLog.debug(
+                            "\(itemTag(itemID, filename: item.filename), privacy: .public) state: \(String(describing: before), privacy: .public) -> \(String(describing: item.state), privacy: .public)"
+                        )
+                    }
+                #endif
             }
         }
     }
