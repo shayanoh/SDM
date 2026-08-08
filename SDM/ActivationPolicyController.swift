@@ -30,8 +30,12 @@ final class ActivationPolicyController {
         case .menuBarOnly:
             // Only `.accessory` while genuinely windowless — a mode switch
             // made while a window is open should not yank the dock icon out
-            // from under it.
-            let hasVisibleWindow = NSApp.windows.contains { $0.isVisible }
+            // from under it. `NSApp.windows` also includes the menu bar
+            // extra's own status-item window, which is `isVisible` for as
+            // long as the icon is showing — i.e. always, in this mode. That
+            // window can never become main, unlike our actual content
+            // windows, so filter on `canBecomeMain` to see past it.
+            let hasVisibleWindow = NSApp.windows.contains { $0.isVisible && $0.canBecomeMain }
             NSApp.setActivationPolicy(hasVisibleWindow ? .regular : .accessory)
         }
     }
