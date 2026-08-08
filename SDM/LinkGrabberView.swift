@@ -203,12 +203,15 @@ struct LinkGrabberView: View {
     /// grabber — once a link is a download it has no reason to still show up
     /// as something waiting to be grabbed.
     private func addToDownloads(_ package: PackageCandidate, startImmediately: Bool) {
-        let urls = controller.urls(inPackage: package.id)
+        let probedLinks = controller.probedLinks(inPackage: package.id)
+        let urlItems = probedLinks.map {
+            PackageUrlItem(url: $0.originalURL, size: $0.contentLength)
+        }
         let name = package.name
         let linkIDs = package.linkIDs
         Task {
             await engineController.addPackage(
-                name: name, urls: urls, startImmediately: startImmediately)
+                name: name, urlItems: urlItems, startImmediately: startImmediately)
             for linkID in linkIDs {
                 await controller.removeLink(linkID)
             }

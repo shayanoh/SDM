@@ -87,4 +87,10 @@ final class GrabberController {
         let ids = Set(package.linkIDs)
         return snapshot.links.filter { ids.contains($0.id) }.map(\.originalURL)
     }
+
+    func probedLinks(inPackage id: UUID) -> [ProbedLink] {
+        guard let package = snapshot.packages.first(where: { $0.id == id }) else { return [] }
+        let ids = Set(package.linkIDs)
+        return snapshot.links.filter { ids.contains($0.id) }
+    }
 }

@@ -173,10 +173,13 @@ struct SDMApp: App {
                         }
                         autoAddedLinkIDs.formUnion(ids)
                         let name = package.name
-                        let urls = links.map(\.originalURL)
+                        let urlItems = links.map {
+                            PackageUrlItem(url: $0.originalURL, size: $0.contentLength)
+                        }
+
                         Task {
                             await controller.addPackage(
-                                name: name, urls: urls, startImmediately: true)
+                                name: name, urlItems: urlItems, startImmediately: true)
                         }
                     }
                 }

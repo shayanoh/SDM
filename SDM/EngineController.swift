@@ -17,6 +17,12 @@ struct ItemTelemetry: Equatable {
     var speedHistory: [Double]
 }
 
+/// A package's URL and optional size, as grabbed from LinkGrabber
+struct PackageUrlItem {
+    let url: URL
+    let size: Int64?
+}
+
 /// Bridges the engine actor to SwiftUI: drives the `AppTiming.ticksPerSecond`
 /// tick and republishes on the main actor at that same rate.
 @MainActor
@@ -351,15 +357,17 @@ final class EngineController {
 
     /// Hands a grabbed package off to the download engine. Spec §7.5's "Add
     /// to downloads" / "Add and start".
-    func addPackage(name: String, urls: [URL], startImmediately: Bool) async {
-        guard !urls.isEmpty else { return }
+    func addPackage(name: String, urlItems: [PackageUrlItem], startImmediately: Bool) async {
+        guard !urlItems.isEmpty else { return }
         // `startImmediately` is a scheduling choice (queued vs. stopped), not
         // a disable — a freshly grabbed item is always enabled; see
         // `ItemState`'s doc comment for why the two axes stay independent.
-        let items = urls.map { url in
+        let items = urlItems.map { urlItem in
             DownloadItem(
-                url: url,
-                filename: url.lastPathComponent.isEmpty ? "download" : url.lastPathComponent,
+                url: urlItem.url,
+                filename: urlItem.url.lastPathComponent.isEmpty
+                    ? "download" : urlItem.url.lastPathComponent,
+                totalBytes: urlItem.size,
                 state: startImmediately ? .queued : .stopped
             )
         }
