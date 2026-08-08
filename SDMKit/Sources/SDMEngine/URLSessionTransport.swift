@@ -45,6 +45,10 @@ public final class URLSessionTransport: HTTPTransport, @unchecked Sendable {
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.urlCache = nil
         configuration.httpShouldUsePipelining = false
+        // Set it to maximum possible so NSURLSession doesn't throttle the number of concurrent
+        // connections to a single host. The default is 6, which is too low for segmented downloads.
+        // We already manage total number of connections ourselves.
+        configuration.httpMaximumConnectionsPerHost = 256
         return configuration
     }
 

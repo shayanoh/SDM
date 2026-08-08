@@ -527,6 +527,11 @@ public actor DownloadTask {
         guard (200..<300).contains(response.statusCode) else {
             throw DownloadError.serverError(status: response.statusCode)
         }
+        #if SDM_ENGINE_LOGGING
+            engineLog.debug(
+                "\(tag, privacy: .public) fetch response after \(formatted(ContinuousClock.now - requestStart), privacy: .public) is \(response.statusCode, privacy: .public)"
+            )
+        #endif
 
         var offset = claim.start
         #if SDM_ENGINE_LOGGING
@@ -537,7 +542,7 @@ public actor DownloadTask {
                 if !firstByteLogged {
                     firstByteLogged = true
                     engineLog.debug(
-                        "\(tag, privacy: .public) first byte after \(formatted(ContinuousClock.now - requestStart), privacy: .public)"
+                        "\(tag, privacy: .public) first byte after \(formatted(ContinuousClock.now - requestStart), privacy: .public), size: \(chunk.count, privacy: .public)"
                     )
                 }
             #endif
