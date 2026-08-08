@@ -25,12 +25,16 @@ public actor DownloadTask {
         /// §4.3's "every ~8 MB per worker or every 5 s, whichever comes
         /// first". Five seconds' worth of ticks at `AppTiming.ticksPerSecond`.
         public var checkpointStalenessTicks: Int
+        /// Receive previously stored completed so UI can display its status.
+        /// It will be automatically updated from sidecar when fetch starts.
+        public var cachedCompleted: RangeSet?
 
         public init(
             workerCount: Int,
             minChunk: Int64,
             checkpointInterval: Int64,
-            checkpointStalenessTicks: Int = AppTiming.ticksPerSecond * 5
+            checkpointStalenessTicks: Int = AppTiming.ticksPerSecond * 5,
+            cachedCompleted: RangeSet?
         ) {
             precondition(workerCount >= 1, "workerCount must be at least 1")
             precondition(minChunk > 0, "minChunk must be positive")
@@ -40,6 +44,7 @@ public actor DownloadTask {
             self.minChunk = minChunk
             self.checkpointInterval = checkpointInterval
             self.checkpointStalenessTicks = checkpointStalenessTicks
+            self.cachedCompleted = cachedCompleted
         }
     }
 
@@ -116,6 +121,7 @@ public actor DownloadTask {
         self.destinationURL = destinationURL
         self.transport = transport
         self.configuration = configuration
+        self.completed = configuration.cachedCompleted ?? RangeSet()
     }
 
     public var completedRanges: RangeSet { completed }

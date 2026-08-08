@@ -2,7 +2,7 @@ import SDMCore
 import SwiftUI
 
 #Preview {
-    VStack(spacing:25) {
+    VStack(spacing: 25) {
         MenuBarRingIcon(fraction: 0.25, drawCircle: true, theme: ThemeCatalog.builtInThemes()[0])
         MenuBarRingIcon(fraction: 0, drawCircle: false, theme: ThemeCatalog.builtInThemes()[0])
     }
@@ -22,10 +22,10 @@ struct MenuBarRingIcon: View {
 
     var body: some View {
         ZStack {
-            if (drawCircle) {
+            if drawCircle {
                 Circle().stroke(theme.borderColor.opacity(0.6), lineWidth: 1)
                     .padding(2)
-                    Circle()
+                Circle()
                     .trim(from: 0, to: max(0.02, min(fraction, 1)))
                     .stroke(theme.accentColor, style: StrokeStyle(lineWidth: 1, lineCap: .round))
                     .rotationEffect(.degrees(-90))

@@ -479,8 +479,18 @@ private struct PackageHeaderSparkline: View {
     let theme: Theme
 
     var body: some View {
-        Sparkline(samples: liveSpeedHistory, color: theme.graphStrokeColor)
-            .frame(width: 60, height: 20)
+        HStack {
+            Text(
+                formatted(
+                    package.items.map {
+                        controller.itemTelemetry[$0.id]?.bytesPerSecond ?? $0.bytesPerSecond
+                    }
+                    .reduce(0, { $0 + $1 })
+                )
+            )
+            Sparkline(samples: liveSpeedHistory, color: theme.graphStrokeColor)
+                .frame(width: 60, height: 20)
+        }
     }
 
     private var liveSpeedHistory: [Double] {

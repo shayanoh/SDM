@@ -23,7 +23,8 @@ extension DownloadTask.Configuration {
         DownloadTask.Configuration(
             workerCount: workers,
             minChunk: minChunk,
-            checkpointInterval: 128
+            checkpointInterval: 128,
+            cachedCompleted: nil
         )
     }
 }

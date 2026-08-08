@@ -1086,7 +1086,11 @@ public actor DownloadEngine {
             mutateItem(itemID) { $0.state = .running }
             startedAtTick[itemID] = currentTick
             changed = true
-            attemptStartBytes[itemID] = completedBytes(of: itemID)
+
+            let completed = completedRanges(of: itemID)
+            let completedTotalBytes = completed.totalBytes
+
+            attemptStartBytes[itemID] = completedTotalBytes
             // The one place a byte total may legitimately go backwards: a new
             // task starts over from whatever the sidecar lets it resume at.
             // Seeding the sampler baseline here — rather than letting
@@ -1094,7 +1098,7 @@ public actor DownloadEngine {
             // monotonic everywhere else, so a tick that reads a stale total
             // while a job completes underneath it cannot cause the same span
             // to be counted twice across a preempt/resume cycle.
-            sampledBytes[itemID] = completedBytes(of: itemID)
+            sampledBytes[itemID] = completedTotalBytes
             let task = DownloadTask(
                 id: itemID,
                 sourceURL: runContext.sourceURL,
@@ -1103,7 +1107,8 @@ public actor DownloadEngine {
                 configuration: DownloadTask.Configuration(
                     workerCount: allocatedSegments[itemID] ?? runContext.segments,
                     minChunk: settings.minSegmentSizeBytes,
-                    checkpointInterval: settings.checkpointIntervalBytes
+                    checkpointInterval: settings.checkpointIntervalBytes,
+                    cachedCompleted: completed
                 )
             )
             let job = Task { [weak self] in
@@ -1422,6 +1427,15 @@ public actor DownloadEngine {
             }
         }
         return 0
+    }
+
+    private func completedRanges(of itemID: UUID) -> RangeSet {
+        for package in packages {
+            if let item = package.items.first(where: { $0.id == itemID }) {
+                return item.completed
+            }
+        }
+        return RangeSet()
     }
 
     private func mutateItem(_ itemID: UUID, _ transform: (inout DownloadItem) -> Void) {
