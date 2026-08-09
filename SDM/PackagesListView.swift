@@ -217,7 +217,19 @@ struct PackagesListView: View {
 
     @ViewBuilder
     private func itemsContextMenu(_ ids: Set<UUID>) -> some View {
-        let items = packages.flatMap(\.items).filter { ids.contains($0.id) }
+        var finalIds: [UUID] = []
+        let _ = ids.forEach { id in
+            let isPackage = packages.count { $0.id == id } > 0
+            if isPackage {
+                finalIds.append(
+                    contentsOf: packages.first(where: { $0.id == id })?.items.map(\.id) ?? [])
+            } else {
+                finalIds.append(id)
+            }
+        }
+        let finalIdsSet = Set<UUID>(finalIds)
+
+        let items = packages.flatMap(\.items).filter { finalIdsSet.contains($0.id) }
         let isMultiple = items.count > 1
         let suffix = isMultiple ? "s" : ""
         if items.contains(where: canOpen) {
@@ -279,16 +291,16 @@ struct PackagesListView: View {
             }
         }
         Button("Reset Download\(suffix)") {
-            Task { for id in ids { await controller.resetDownload(id) } }
+            Task { for id in finalIdsSet { await controller.resetDownload(id) } }
         }
         .disabled(!items.contains(where: canReset))
         Divider()
         Button("Remove from List") {
-            Task { await controller.removeItems(Array(ids), deleteFile: false) }
+            Task { await controller.removeItems(Array(finalIdsSet), deleteFile: false) }
         }
         .keyboardShortcut(.delete, modifiers: [])
         Button("Remove and Delete File\(suffix)", role: .destructive) {
-            pendingDeletion = .items(ids)
+            pendingDeletion = .items(finalIdsSet)
         }
         .keyboardShortcut(.delete, modifiers: .command)
     }

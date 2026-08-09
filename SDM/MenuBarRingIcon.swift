@@ -24,22 +24,25 @@ struct MenuBarRingIcon: View {
             Image("MenuBarLogo")
                 .resizable()
                 .scaledToFit()
-                .opacity(drawCircle ? 0.25: 1)
-            if (drawCircle) {
+                .opacity(drawCircle ? 0.25 : 1)
+            if drawCircle {
                 GeometryReader { geometry in
                     Image("MenuBarLogo")
                         .resizable()
                         .scaledToFit()
-                        .frame(width: geometry.size.width,
-                               height: geometry.size.height)
+                        .frame(
+                            width: geometry.size.width,
+                            height: geometry.size.height
+                        )
                         .clipShape(
                             Rectangle()
-                                .path(in: CGRect(
-                                    x: 0,
-                                    y: 0,
-                                    width: geometry.size.width * fraction,
-                                    height: geometry.size.height
-                                ))
+                                .path(
+                                    in: CGRect(
+                                        x: 0,
+                                        y: 0,
+                                        width: geometry.size.width * fraction,
+                                        height: geometry.size.height
+                                    ))
                         )
                 }
             }

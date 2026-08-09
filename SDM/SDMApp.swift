@@ -225,7 +225,7 @@ struct SDMApp: App {
     private var overallFraction: Double {
         let running = controller.snapshot.packages.flatMap(\.items).filter {
             ($0.state == .running || $0.state == .queued || $0.state == .completed)
-            && ($0.totalBytes ?? 0) > 0
+                && ($0.totalBytes ?? 0) > 0
         }
         guard !running.isEmpty else { return 0 }
         return running.reduce(0.0) { $0 + $1.fractionCompleted } / Double(running.count)
@@ -243,20 +243,20 @@ struct SDMApp: App {
     /// only ever sees a plain bitmap at the exact size we ask for.
     private var statusItemImage: NSImage {
         let renderer = ImageRenderer(
-                content: MenuBarRingIcon(
-                    fraction: overallFraction,
-                    drawCircle: downloadsRunning,
-                )
+            content: MenuBarRingIcon(
+                fraction: overallFraction,
+                drawCircle: downloadsRunning,
             )
+        )
 
-            renderer.scale = 2
+        renderer.scale = 2
 
-            guard let image = renderer.nsImage else {
-                return NSImage()
-            }
+        guard let image = renderer.nsImage else {
+            return NSImage()
+        }
 
-            image.isTemplate = true
+        image.isTemplate = true
 
-            return image
+        return image
     }
 }

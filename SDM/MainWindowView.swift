@@ -154,27 +154,50 @@ struct MainWindowView: View {
     /// their combined size, and their names — fresh from the current
     /// snapshot each time a deletion is pending.
     private func deletionInfo(for deletion: PendingDeletion) -> DeletionInfo {
+        let baseItems: [ItemSnapshot]
         switch deletion {
         case .items(let ids):
-            let items = controller.snapshot.packages.flatMap(\.items).filter { ids.contains($0.id) }
-            let totalBytes = items.reduce(Int64(0)) {
-                $0 + max($1.totalBytes ?? 0, $1.completed.totalBytes)
-            }
-            return DeletionInfo(
-                title: items.count > 1 ? "Delete \(items.count) Files?" : "Delete File?",
-                totalBytes: totalBytes,
-                names: items.map(\.filename)
-            )
+            baseItems = controller.snapshot.packages.flatMap(\.items).filter { ids.contains($0.id) }
+
         case .package(let id):
             guard let package = controller.snapshot.packages.first(where: { $0.id == id }) else {
-                return DeletionInfo(title: "Delete Package?", totalBytes: 0, names: [])
+                return DeletionInfo(title: "Delete Package From Disk?", totalBytes: 0, names: [])
             }
-            return DeletionInfo(
-                title: "Delete “\(package.name)”?",
-                totalBytes: max(package.totalBytes, package.completedBytes),
-                names: package.items.map(\.filename)
-            )
+            baseItems = package.items
         }
+        let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
+        let finalItems = baseItems.filter { item in
+            guard
+                let package = controller.snapshot.packages.first(where: {
+                    $0.items.map(\.id).contains(item.id)
+                })
+            else {
+                return true
+            }
+            let destination =
+                downloads
+                .appendingPathComponent(package.name)
+                .appendingPathComponent(item.filename)
+            let destinationIncomplete = destination.appendingPathExtension("incomplete")
+            return FileManager.default.fileExists(atPath: destination.path)
+                || FileManager.default.fileExists(atPath: destinationIncomplete.path)
+        }
+        let finalBytes = finalItems.reduce(Int64(0)) {
+            $0 + max($1.totalBytes ?? 0, $1.completed.totalBytes)
+        }
+
+        let title: String!
+        if finalItems.count == 0 {
+            title = "Remove From List?"
+        } else {
+            title = "Remove From List And Delete Files?"
+        }
+
+        return DeletionInfo(
+            title: title,
+            totalBytes: finalBytes,
+            names: finalItems.map(\.filename)
+        )
     }
 
     private func performDeletion(_ deletion: PendingDeletion) {
@@ -297,11 +320,17 @@ struct DeletionConfirmationView: View {
                     .foregroundStyle(.red)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(info.title).font(.title2.bold())
-                    Text(
-                        "\(info.count) file\(info.count == 1 ? "" : "s") · \(formattedBytes(info.totalBytes)) will be moved to the Trash."
-                    )
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    if info.count == 0 {
+                        Text("No files will be moved to the Trash")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(
+                            "\(info.count) file\(info.count == 1 ? "" : "s") · \(formattedBytes(info.totalBytes)) will be moved to the Trash."
+                        )
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    }
                 }
             }
 
@@ -327,11 +356,16 @@ struct DeletionConfirmationView: View {
                 Spacer()
                 Button("Cancel", role: .cancel, action: onCancel)
                     .keyboardShortcut(.cancelAction)
-                Button("Move to Trash", role: .destructive, action: onDelete)
-                    .keyboardShortcut(.defaultAction)
+                if (info.count==0) {
+                    Button("Remove from List", role: .destructive, action: onDelete)
+                        .keyboardShortcut(.defaultAction)
+                } else {
+                    Button("Move to Trash", role: .destructive, action: onDelete)
+                        .keyboardShortcut(.defaultAction)
+                }
             }
         }
         .padding(24)
-        .frame(width: 440)
+        .frame(minWidth: 440, maxWidth: 640)
     }
 }
