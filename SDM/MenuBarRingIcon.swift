@@ -3,8 +3,8 @@ import SwiftUI
 
 #Preview {
     VStack(spacing: 25) {
-        MenuBarRingIcon(fraction: 0.5, drawCircle: true, theme: ThemeCatalog.builtInThemes()[0])
-        MenuBarRingIcon(fraction: 0, drawCircle: false, theme: ThemeCatalog.builtInThemes()[0])
+        MenuBarRingIcon(fraction: 0.5, drawCircle: true)
+        MenuBarRingIcon(fraction: 0, drawCircle: false)
     }
     .padding(16)
 }
@@ -18,7 +18,6 @@ import SwiftUI
 struct MenuBarRingIcon: View {
     let fraction: Double
     let drawCircle: Bool
-    let theme: Theme
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -46,25 +45,5 @@ struct MenuBarRingIcon: View {
             }
         }
         .frame(width: 14, height: 14)
-        /*
-        ZStack {
-            Image("MenuBarLogo")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 14, height: 14)
-                .opacity(drawCircle ? 0.4:1)
-            if drawCircle {
-                Circle().stroke(theme.accentColor, lineWidth: 2)
-                    .opacity(0.5)
-                    .padding(2)
-                Circle()
-                    .trim(from: 0, to: max(0.02, min(fraction, 1)))
-                    .stroke(theme.accentColor, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
-                    .padding(2)
-            }
-        }
-        .frame(width: 16, height: 16)
-         */
     }
 }
