@@ -1,7 +1,7 @@
 {
   "images" : [
     {
-      "filename" : "icon-black-logo-64.png",
+      "filename" : "icon-white-logo-64.png",
       "idiom" : "mac",
       "scale" : "1x"
     },
@@ -12,12 +12,11 @@
           "value" : "dark"
         }
       ],
-      "filename" : "icon-white-logo-64.png",
       "idiom" : "mac",
       "scale" : "1x"
     },
     {
-      "filename" : "icon-black-logo-128.png",
+      "filename" : "icon-white-logo-128.png",
       "idiom" : "mac",
       "scale" : "2x"
     },
@@ -28,7 +27,6 @@
           "value" : "dark"
         }
       ],
-      "filename" : "icon-white-logo-128.png",
       "idiom" : "mac",
       "scale" : "2x"
     }

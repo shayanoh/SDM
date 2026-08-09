@@ -224,7 +224,8 @@ struct SDMApp: App {
 
     private var overallFraction: Double {
         let running = controller.snapshot.packages.flatMap(\.items).filter {
-            $0.state == .running || $0.state == .queued || $0.state == .completed
+            ($0.state == .running || $0.state == .queued || $0.state == .completed)
+            && ($0.totalBytes ?? 0) > 0
         }
         guard !running.isEmpty else { return 0 }
         return running.reduce(0.0) { $0 + $1.fractionCompleted } / Double(running.count)
