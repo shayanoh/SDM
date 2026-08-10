@@ -33,8 +33,27 @@ struct PackagesListView: View {
     @Binding var selectedItemIDs: Set<UUID>
     @Binding var collapsedPackageIDs: Set<UUID>
     @Binding var pendingDeletion: MainWindowView.PendingDeletion?
+    @State var isPanelVisible: Bool = true
+    @State var panelHeight: CGFloat = 150
+    @GestureState private var panelDragOffset: CGFloat = 0
 
     private var theme: Theme { themeStore.resolved(for: colorScheme) }
+    private func resolveUUIDList(_ ids: [UUID]) -> [ItemSnapshot] {
+        var finalIds: [UUID] = []
+        for id in ids {
+            if let package = packages.first(where: { $0.id == id }) {
+                finalIds.append(contentsOf: package.items.map(\.id))
+            } else {
+                finalIds.append(id)
+            }
+        }
+        let finalIdsSet = Set<UUID>(finalIds)
+
+        return packages.flatMap(\.items).filter { finalIdsSet.contains($0.id) }
+    }
+    private func resolveSelectedItems() -> [ItemSnapshot] {
+        return resolveUUIDList(Array(selectedItemIDs))
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -44,8 +63,8 @@ struct PackagesListView: View {
                 ZStack(alignment: .top) {
                     BottomPanel(
                         theme: theme,
-                        downloadItem: resolveDownloadItemForBottomPanel(),
-                        package: resolvePackageForBottomPanel()
+                        downloadItems: resolveSelectedItems(),
+                        allPackages: packages
                     )
                     .frame(maxWidth: .infinity)
                     .frame(
@@ -58,7 +77,6 @@ struct PackagesListView: View {
                         .frame(width: 40, height: 5)
                         .contentShape(Rectangle())
                         .onContinuousHover { phase in
-                            debugPrint(phase)
                             switch phase {
                             case .active:
                                 NSCursor.resizeUpDown.set()
@@ -90,34 +108,11 @@ struct PackagesListView: View {
         }
         .background(keyboardShortcuts)
         .onDisappear {
+            // This fixes lingering ItemRow bug when something is selected
+            // when view is disappearing. Do not remove.
             selectedItemIDs.removeAll()
         }
     }
-
-    private func resolvePackageForBottomPanel() -> PackageSnapshot? {
-        guard !selectedItemIDs.isEmpty else { return nil }
-        let downloadItems = packages.flatMap(\.items).filter({
-            selectedItemIDs.contains($0.id)
-        }
-        )
-        guard !downloadItems.isEmpty else { return nil }
-        let packages = packages.filter({ $0.items.map(\.id).contains(downloadItems[0].id) })
-        guard !packages.isEmpty else { return nil }
-        return packages[0]
-    }
-    private func resolveDownloadItemForBottomPanel() -> ItemSnapshot? {
-        guard !selectedItemIDs.isEmpty else { return nil }
-        let downloadItems = packages.flatMap(\.items).filter({
-            selectedItemIDs.contains($0.id)
-        }
-        )
-        guard !downloadItems.isEmpty else { return nil }
-        return downloadItems[0]
-    }
-
-    @State var isPanelVisible: Bool = false
-    @State var panelHeight: CGFloat = 150
-    @GestureState private var panelDragOffset: CGFloat = 0
 
     private var list: some View {
         List(selection: $selectedItemIDs) {
@@ -133,32 +128,15 @@ struct PackagesListView: View {
                         allowsReordering: allowsReordering, theme: theme,
                         pendingDeletion: $pendingDeletion)
                 }
-                // Tags the header into the same selection set item rows use
-                // — `Set<UUID>` has room for both since item and package ids
-                // are drawn from the same random space, and it's what lets
-                // native Cmd/Shift-click multi-select a run of packages the
-                // same way it already does items, which a multi-package
-                // drag then relies on (see `orderedDraggedPackageIDs`).
-                .tag(package.id)
                 .listRowBackground(
                     packageHeaderBackground(
-                        index: packageIndex, isSelected: selectedItemIDs.contains(package.id)))
+                        index: packageIndex, isSelected: selectedItemIDs.contains(package.id))
+                )
+                .tag(package.id)
             }
         }
-        // `List` paints its own opaque system background regardless of what
-        // sits behind it — without hiding that, `surfacePrimary` never
-        // actually shows through, no matter how many rows/icons/text read
-        // theme roles correctly.
         .scrollContentBackground(.hidden)
         .background(theme.surfacePrimaryColor)
-        // `List`'s native selection highlight is a separate layer drawn on
-        // top of `.listRowBackground`, tinted by the system control accent
-        // (blue by default). Neither `.tint(_:)` nor `.listItemTint(_:)`
-        // reaches it — verified against current SwiftUI docs;
-        // `.listItemTint` is documented as affecting only sidebar `Label`
-        // icons and watchOS platters. `hidesNativeSelectionHighlight()`
-        // turns the native layer off entirely so `alternatingRowBackground`
-        // above is the only thing drawn.
     }
 
     /// Every row is both a drag source and a drop target for
@@ -289,19 +267,7 @@ struct PackagesListView: View {
 
     @ViewBuilder
     private func itemsContextMenu(_ ids: Set<UUID>) -> some View {
-        var finalIds: [UUID] = []
-        let _ = ids.forEach { id in
-            let isPackage = packages.count { $0.id == id } > 0
-            if isPackage {
-                finalIds.append(
-                    contentsOf: packages.first(where: { $0.id == id })?.items.map(\.id) ?? [])
-            } else {
-                finalIds.append(id)
-            }
-        }
-        let finalIdsSet = Set<UUID>(finalIds)
-
-        let items = packages.flatMap(\.items).filter { finalIdsSet.contains($0.id) }
+        let items = resolveUUIDList(Array(ids))
         let isMultiple = items.count > 1
         let suffix = isMultiple ? "s" : ""
         if items.contains(where: canOpen) {
@@ -365,16 +331,16 @@ struct PackagesListView: View {
             }
         }
         Button("Reset Download\(suffix)") {
-            Task { for id in finalIdsSet { await controller.resetDownload(id) } }
+            Task { for item in items { await controller.resetDownload(item.id) } }
         }
         .disabled(!items.contains(where: canReset))
         Divider()
         Button("Remove from List") {
-            Task { await controller.removeItems(Array(finalIdsSet), deleteFile: false) }
+            Task { await controller.removeItems(items.map(\.id), deleteFile: false) }
         }
         .keyboardShortcut(.delete, modifiers: [])
         Button("Remove and Delete File\(suffix)", role: .destructive) {
-            pendingDeletion = .items(finalIdsSet)
+            pendingDeletion = .items(Set(items.map(\.id)))
         }
         .keyboardShortcut(.delete, modifiers: .command)
     }
@@ -386,104 +352,291 @@ struct BottomPanel: View {
     @Environment(EngineController.self) private var controller
     @Environment(ClipboardWatcher.self) private var clipboardWatcher
     public var theme: Theme
-    public var downloadItem: ItemSnapshot?
-    public var package: PackageSnapshot?
+    public var downloadItems: [ItemSnapshot]
+    public var allPackages: [PackageSnapshot]
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading) {
-                if let downloadItem, let package {
-                    let telemetry = controller.itemTelemetry[downloadItem.id]
-                    Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 4) {
-                        GridRow {
-                            HStack {
-                                Sparkline(
-                                    samples: telemetry?.speedHistory
-                                        ?? downloadItem.speedHistory,
-                                    color: theme.graphStrokeColor
-                                )
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 16)
-                                Text(
-                                    formatted(
-                                        telemetry?.bytesPerSecond ?? downloadItem.bytesPerSecond
-                                    )
-                                )
-                                .font(.caption.monospacedDigit())
-                            }
-                            .gridCellColumns(2)
-                        }
-                        GridRow {
-                            ItemProgressBar(
-                                itemID: downloadItem.id, fallback: downloadItem,
-                                controller: controller, theme: theme
-                            )
-                            .frame(height: 6)
-                            .gridCellColumns(2)
-                        }
-                        GridRow {
-                            Text("Filename")
-                            HStack {
-                                Text(downloadItem.filename)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                Button("Open") {
-                                    let downloads = FileManager.default.urls(
-                                        for: .downloadsDirectory, in: .userDomainMask)[0]
-                                    let destination = downloads.appendingPathComponent(package.name)
-                                        .appendingPathComponent(downloadItem.filename)
-                                    NSWorkspace.shared.open(destination)
-                                }
-                                .disabled(
-                                    downloadItem.state != .completed || downloadItem.fileMissing)
-                            }
-                        }
-                        GridRow {
-                            Text("Destination Folder")
-                            let downloads = FileManager.default.urls(
-                                for: .downloadsDirectory, in: .userDomainMask)[0]
-                            let destination = downloads.appendingPathComponent(package.name)
-                            HStack {
-                                Text(destination.path(percentEncoded: false))
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                Button("Show in Finder") {
-                                    NSWorkspace.shared.open(destination)
-                                }
-                            }
-                        }
-                        GridRow {
-                            Text("URL")
-                            HStack {
-                                HStack {
-                                    Text(downloadItem.url.absoluteString)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                    Button("Copy URL") {
-                                        clipboardWatcher
-                                            .ignoreOwnWrite([downloadItem.url])
-                                        NSPasteboard.general.clearContents()
-                                        NSPasteboard.general
-                                            .setString(
-                                                downloadItem.url.absoluteString,
-                                                forType: .string
-                                            )
-                                    }
-                                }
-                            }
-                        }
-                        //                        downloadItem.totalBytes
-                        //                        downloadItem.activeSegments downloadItem.configuredSegments
-                        //                        downloadItem.isResumable
-                        //                        downloadItem.fractionCompleted
-                        //                        downloadItem.state
-                        //                        downloadItem.isEnabled
-                    }
-                } else {
-                    Text("Select an item to view its details here")
+            if downloadItems.isEmpty {
+                Text("Select an item to view its details here")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(20)
+            } else if downloadItems.count == 1 {
+                if let package = allPackages.filter({
+                    $0.items.map(\.id).contains(downloadItems[0].id)
+                })
+                .first {
+                    singleItemData(downloadItem: downloadItems[0], inPackage: package)
                 }
+            } else {
+                multipleItemData(theme: theme)
             }
-            .padding(.top, 7)
-            .padding(.horizontal, 10)
-            .frame(maxWidth: .infinity)
         }
         .background(theme.surfaceSecondaryColor)
+    }
+
+    @ViewBuilder
+    private func multipleItemData(theme: Theme) -> some View {
+        var speedHistory: [Double] = []
+        var bytesPerSecond: Double = 0
+        var completedRangeSet = RangeSet()
+        var downloadedBytes: Int64 = 0
+        var totalBytes: Int64 = 0
+        var sumFractionCompleted: Double = 0
+        var activeSegments: Int = 0
+        var configuredSegments: Int = 0
+        var destinationFolders: Set<URL> = []
+        let _ = downloadItems.forEach({ item in
+            let telemetry = controller.itemTelemetry[item.id]
+            let completed = telemetry?.completed ?? item.completed
+            let bytes = telemetry?.totalBytes ?? item.totalBytes ?? 0
+            guard bytes > 0 else { return }
+            completed.ranges.forEach({
+                completedRangeSet.insert(
+                    ByteRange(start: $0.start + totalBytes, end: $0.end + totalBytes))
+            })
+            downloadedBytes += completed.totalBytes
+            totalBytes += bytes
+            bytesPerSecond += telemetry?.bytesPerSecond ?? item.bytesPerSecond
+            sumFractionCompleted += item.fractionCompleted
+            activeSegments += telemetry?.activeSegments ?? item.activeSegments
+            configuredSegments += telemetry?.configuredSegments ?? item.configuredSegments
+            let itemSpeedHistory = telemetry?.speedHistory ?? item.speedHistory
+            if speedHistory.isEmpty {
+                speedHistory = itemSpeedHistory
+            } else {
+                speedHistory = zip(speedHistory, itemSpeedHistory).map(+)
+            }
+            if let package = allPackages.filter({ $0.items.map(\.id).contains(item.id) }).first {
+                destinationFolders.insert(
+                    controller.destinationPackageUrl(for: package)
+                )
+            }
+        })
+
+        Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 4) {
+            GridRow {
+                HStack {
+                    Sparkline(
+                        samples: speedHistory,
+                        color: theme.graphStrokeColor
+                    )
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 48)
+                    Text(formatted(bytesPerSecond))
+                        .font(.caption.monospacedDigit())
+                }
+                .gridCellColumns(2)
+            }
+            GridRow {
+                SegmentedProgressBar(completed: completedRangeSet, total: totalBytes, theme: theme)
+                    .frame(height: 6)
+                    .gridCellColumns(2)
+            }
+            GridRow {
+                let states = downloadItems.reduce(into: [ItemState: Int]()) { counts, item in
+                    let state: ItemState
+
+                    switch item.state {
+                    case .failed:
+                        state = .failed(reason: "")
+                    default:
+                        state = item.state
+                    }
+
+                    counts[state, default: 0] += 1
+                }
+                Text("Item States")
+                HStack {
+                    let completed = states[.completed] ?? 0
+                    let running = states[.running] ?? 0
+                    let queued = states[.queued] ?? 0
+                    let stopped = states[.stopped] ?? 0
+                    let failed = states[.failed(reason: "")] ?? 0
+                    if completed > 0 {
+                        Text("\(completed) Completed")
+                            .foregroundStyle(theme.onlineColor)
+                    }
+                    if running > 0 {
+                        Text("\(running) Running")
+                            .foregroundStyle(theme.accentColor)
+                    }
+                    if queued > 0 {
+                        Text("\(queued) Queued")
+                            .foregroundStyle(theme.textSecondaryColor)
+                    }
+                    if stopped > 0 {
+                        Text("\(stopped) Stopped")
+                            .foregroundStyle(theme.textSecondaryColor)
+                    }
+                    if failed > 0 {
+                        Text("\(failed) ?? 0) Failed")
+                            .foregroundStyle(theme.failedColor)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if destinationFolders.count == 1 {
+                GridRow {
+                    Text("Destination Folder")
+                    HStack {
+                        let destination = destinationFolders.first!
+                        Text(destination.path(percentEncoded: false))
+                            .frame(
+                                maxWidth: .infinity,
+                                alignment: .leading
+                            )
+                        Button("Show in Finder") {
+                            NSWorkspace.shared
+                                .open(destination)
+                        }
+                    }
+                }
+            }
+
+            GridRow {
+                Text("Total Progress")
+                Text(
+                    "\(formattedBytes(downloadedBytes))/\(formattedBytes(totalBytes)) - \((sumFractionCompleted/Double(downloadItems.count)) * 100, specifier: "%.1f")%"
+                )
+                .font(.body.monospacedDigit())
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            GridRow {
+                Text("Total Segments")
+                Text("\(activeSegments)/\(configuredSegments)")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+        }
+        .padding(.top, 7)
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private func singleItemData(downloadItem: ItemSnapshot, inPackage package: PackageSnapshot)
+        -> some View
+    {
+        let telemetry = controller.itemTelemetry[downloadItem.id]
+        Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 4) {
+            GridRow {
+                HStack {
+                    Sparkline(
+                        samples: telemetry?.speedHistory
+                            ?? downloadItem.speedHistory,
+                        color: theme.graphStrokeColor
+                    )
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 48)
+                    Text(
+                        formatted(
+                            telemetry?.bytesPerSecond ?? downloadItem.bytesPerSecond
+                        )
+                    )
+                    .font(.caption.monospacedDigit())
+                }
+                .gridCellColumns(2)
+            }
+            GridRow {
+                ItemProgressBar(
+                    itemID: downloadItem.id, fallback: downloadItem,
+                    controller: controller, theme: theme
+                )
+                .frame(height: 6)
+                .gridCellColumns(2)
+            }
+            GridRow {
+                Text("Filename")
+                HStack {
+                    Text(downloadItem.filename)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button("Open") {
+                        NSWorkspace.shared
+                            .open(
+                                controller
+                                    .destinationURL(
+                                        for: downloadItem,
+                                        inPackage: package
+                                    )
+                            )
+                    }
+                    .disabled(
+                        downloadItem.state != .completed || downloadItem.fileMissing)
+                }
+            }
+            GridRow {
+                Text("Destination Folder")
+                HStack {
+                    let destination = controller.destinationPackageUrl(
+                        for: package
+                    )
+                    Text(destination.path(percentEncoded: false))
+                        .frame(
+                            maxWidth: .infinity,
+                            alignment: .leading
+                        )
+                    Button("Show in Finder") {
+                        NSWorkspace.shared
+                            .open(destination)
+                    }
+                }
+            }
+            GridRow {
+                Text("URL")
+                HStack {
+                    HStack {
+                        Text(downloadItem.url.absoluteString)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Button("Copy URL") {
+                            clipboardWatcher
+                                .ignoreOwnWrite([downloadItem.url])
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general
+                                .setString(
+                                    downloadItem.url.absoluteString,
+                                    forType: .string
+                                )
+                        }
+                    }
+                }
+            }
+            GridRow {
+                let downloadedBytes = formattedBytes(
+                    telemetry?.completed.totalBytes ?? downloadItem.completed.totalBytes
+                )
+                let totalBytes = formattedBytes(
+                    telemetry?.totalBytes ?? downloadItem.totalBytes ?? 0
+                )
+                let progress = downloadItem.fractionCompleted
+                Text("Progress")
+                Text(
+                    "\(downloadedBytes)/\(totalBytes) - \(progress * 100, specifier: "%.1f")%"
+                )
+                .font(.body.monospacedDigit())
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            GridRow {
+                let active = telemetry?.activeSegments ?? downloadItem.activeSegments
+                let configured =
+                    telemetry?.configuredSegments ?? downloadItem.configuredSegments
+                Text("Segments")
+                Text("\(active)/\(configured)")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            GridRow {
+                Text("Can Resume?")
+                if let resumable = downloadItem.isResumable {
+                    Text(resumable ? "Yes" : "No")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    Text("-")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+        .padding(.top, 7)
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity)
     }
 }
 
@@ -527,10 +680,18 @@ private struct PackageHeaderRow: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(package.name).font(.title3.bold())
-                    PackageHeaderBytesText(package: package, controller: controller, theme: theme)
+                    PackageHeaderBytesText(
+                        package: package,
+                        controller: controller,
+                        theme: theme
+                    )
                 }
                 Spacer()
-                PackageHeaderSparkline(package: package, controller: controller, theme: theme)
+                PackageHeaderSparkline(
+                    package: package,
+                    controller: controller,
+                    theme: theme
+                )
             }
             .padding(.vertical, 4)
             .contentShape(Rectangle())
@@ -538,13 +699,22 @@ private struct PackageHeaderRow: View {
                 Button("Sort Items by Name") {
                     let sortedIDs = package.items
                         .sorted {
-                            $0.filename.localizedStandardCompare($1.filename) == .orderedAscending
+                            $0.filename
+                                .localizedStandardCompare(
+                                    $1.filename
+                                ) == .orderedAscending
                         }
                         .map(\.id)
-                    Task { await controller.reorderItems(sortedIDs, inPackage: package.id) }
+                    Task {
+                        await controller
+                            .reorderItems(sortedIDs, inPackage: package.id)
+                    }
                 }
                 Button("Remove from List") {
-                    Task { await controller.removePackage(package.id, deleteFiles: false) }
+                    Task {
+                        await controller
+                            .removePackage(package.id, deleteFiles: false)
+                    }
                 }
                 Button("Remove and Delete Files", role: .destructive) {
                     pendingDeletion = .package(package.id)
@@ -567,19 +737,30 @@ private struct PackageHeaderRow: View {
                 .draggable(DraggedRowID.package(package.id))
                 .dropDestination(
                     for: DraggedRowID.self,
-                    action: { dragged, location in
+                    action: {
+                        dragged,
+                        location in
                         // A selected item row dragged alongside a selected
                         // package header arrives here as one mixed payload —
                         // both ordering helpers return `nil` for that, so
                         // this correctly falls through to "do nothing"
                         // rather than guessing which kind the operator
                         // meant.
-                        if let itemIDs = orderedDraggedItemIDs(dragged, in: packages) {
+                        if let itemIDs = orderedDraggedItemIDs(
+                            dragged,
+                            in: packages
+                        ) {
                             let packageID = package.id
-                            Task { await controller.moveItems(itemIDs, toPackage: packageID) }
+                            Task {
+                                await controller
+                                    .moveItems(itemIDs, toPackage: packageID)
+                            }
                             return true
                         }
-                        if let draggedPackageIDs = orderedDraggedPackageIDs(dragged, in: packages) {
+                        if let draggedPackageIDs = orderedDraggedPackageIDs(
+                            dragged,
+                            in: packages
+                        ) {
                             // Same "there's no row after the last one to
                             // drop on" problem as items — dropping on the
                             // bottom half of a header means "after this
@@ -920,7 +1101,6 @@ private struct DraggableItemRow<Content: View>: View {
 
     var body: some View {
         content()
-        /*
             .draggable(DraggedRowID.item(itemID))
             .dropDestination(
                 for: DraggedRowID.self,
@@ -964,7 +1144,6 @@ private struct DraggableItemRow<Content: View>: View {
                         .strokeBorder(theme.accentColor, lineWidth: 2)
                 }
             }
-         */
     }
 }
 

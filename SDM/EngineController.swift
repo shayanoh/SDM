@@ -343,7 +343,12 @@ final class EngineController {
     /// `ItemSnapshot`/`PackageSnapshot` don't carry a destination URL of
     /// their own. Used to open a finished download from the list.
     func destinationURL(for item: ItemSnapshot, inPackage package: PackageSnapshot) -> URL {
-        downloadFolder.appendingPathComponent(package.name).appendingPathComponent(item.filename)
+        destinationPackageUrl(for: package).appendingPathComponent(item.filename)
+    }
+
+    /// The container folder for the download item
+    func destinationPackageUrl(for package: PackageSnapshot) -> URL {
+        downloadFolder.appendingPathComponent(package.name)
     }
 
     /// Batch variant for multi-selection delete: each item is stopped and

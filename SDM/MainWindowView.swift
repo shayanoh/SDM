@@ -147,7 +147,7 @@ struct MainWindowView: View {
     /// disabling the native highlight would leave the selected sidebar row
     /// with no visual indicator at all.
     private func sidebarRowBackground(_ item: SidebarItem) -> Color {
-        selection == item ? theme.selectionTintColor.opacity(0.35) : Color.clear
+        selection == item ? theme.selectionTintColor : Color.clear
     }
 
     /// Gathers what the confirmation sheet needs to show — how many files,
