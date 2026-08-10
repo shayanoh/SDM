@@ -58,23 +58,21 @@ public enum PackageClustering {
 
         var candidates: [PackageCandidate] = []
         var singletons: [ClusterableLink] = []
-        for members in templateGroups.values {
-            if members.count > 1 {
+        for members in templateGroups {
+            if members.value.count > 1 || members.key.starts(with: "**SHOW**:") {
                 candidates.append(
-                    PackageCandidate(name: name(for: members), linkIDs: members.map(\.id)))
+                    PackageCandidate(
+                        name: name(for: members.value), linkIDs: members.value.map(\.id)))
             } else {
-                singletons.append(contentsOf: members)
+                singletons.append(contentsOf: members.value)
             }
         }
 
-        var byHostPath: [String: [ClusterableLink]] = [:]
+        // Cluster singletons by beautified filename
         for candidate in singletons {
-            byHostPath["\(candidate.host)|\(candidate.directoryPath)", default: []].append(
-                candidate)
-        }
-        for members in byHostPath.values {
             candidates.append(
-                PackageCandidate(name: name(for: members), linkIDs: members.map(\.id)))
+                PackageCandidate(name: name(for: [candidate]), linkIDs: [candidate.id])
+            )
         }
 
         for (base, members) in archiveGroups {
@@ -100,9 +98,30 @@ public enum PackageClustering {
 
     /// Lowercased, extension stripped, separators normalized, digit runs
     /// collapsed to `#` so `Show.S01E01.mkv` and `Show.S01E02.mkv` reduce to
-    /// the same template and cluster with no episode-specific regex.
+    /// the same template and cluster with no episode-specific regex. Also
+    /// we keep the season number intact so different seasons of a show
+    /// will have different templates.
+    /// Also will mark show-like filenames with a marker "**SHOW**:" to hint
+    /// the clusterer about namings.
     private static func template(for filename: String) -> String {
-        let stem = stripExtension(filename).lowercased()
+        var stem = stripExtension(filename).lowercased()
+
+        // We don't want S01E01 to be parsed to S#E# but S01E#, the only
+        // way is to replace 01 with some placeholder, and replace it back at the end
+        let seasonPattern = #"(?i)^.*\.s(\d{2})e\d{2}\..*$"#
+        // This must be some string that we'll never see in a file name!
+        let seasonPlaceholder = "THESEASONNUMBERPLACEHOLDERFORCOMSHAYANOHSDM"
+        var seasonPreviousValue = ""
+        if let regex = try? NSRegularExpression(pattern: seasonPattern) {
+            let range = NSRange(stem.startIndex..<stem.endIndex, in: stem)
+            if let match = regex.firstMatch(in: stem, range: range),
+                let seasonNumberRange = Range(match.range(at: 1), in: stem)
+            {
+                seasonPreviousValue = String(stem[seasonNumberRange])
+                stem.replaceSubrange(seasonNumberRange, with: seasonPlaceholder)
+            }
+        }
+
         var result = ""
         var lastWasDigit = false
         for character in stem {
@@ -118,6 +137,10 @@ public enum PackageClustering {
                 result.append(" ")
                 lastWasDigit = false
             }
+        }
+        result.replace(seasonPlaceholder, with: seasonPreviousValue)
+        if !seasonPreviousValue.isEmpty {
+            result = "**SHOW**:" + result
         }
         return result.split(separator: " ").joined(separator: " ")
     }

@@ -33,6 +33,52 @@ private func link(_ filename: String, host: String = "cdn.example.com", path: St
     #expect(candidates[0].name == "S01")
 }
 
+@Test func seasonEpisodePatternProperlySplitsTwoDifferentSeasons() {
+    let season1 = [
+        link("Show.S01E01.1080p.mkv"),
+        link("Show.S01E02.1080p.mkv"),
+    ]
+    let season2 = [
+        link("Show.S02E01.1080p.mkv"),
+        link("Show.S02E02.1080p.mkv"),
+    ]
+
+    let links = season1 + season2
+    let candidates = PackageClustering.cluster(links)
+
+    #expect(candidates.count == 2)
+    #expect(candidates[0].name == "Show S01")
+    #expect(Set(candidates[0].linkIDs) == Set(season1.map(\.id)))
+    #expect(candidates[1].name == "Show S02")
+    #expect(Set(candidates[1].linkIDs) == Set(season2.map(\.id)))
+}
+
+@Test func farsiNamesAreHandledCorrectlyWithRandomNames() {
+    let links = [
+        link("برنامه هفتگی.xlsx"),
+        link("رزومه.docx"),
+        link("سریال خوب.S01E01.کیفیت بالا.mkv"),
+        link("سریال خوب.S01E02.کیفیت بالا.mkv"),
+        link("سریال خوب.S01E03.کیفیت بالا.mkv"),
+        link("سریال خوب.S02E01.کیفیت بالا.mkv"),
+        link("سریال خوب.txt"),
+        link("کتاب اول.pdf"),
+        link("کتاب دوم.pdf"),
+    ]
+
+    let candidates = PackageClustering.cluster(links)
+    #expect(candidates.count == 7)
+    let candidateNames = candidates.map(\.name)
+    #expect(candidateNames.contains("سریال خوب S01"))
+    #expect(candidateNames.contains("سریال خوب S02"))
+    #expect(candidateNames.contains("کتاب اول"))
+    #expect(candidateNames.contains("کتاب دوم"))
+    #expect(candidateNames.contains("برنامه هفتگی"))
+    #expect(candidateNames.contains("رزومه"))
+    #expect(candidateNames.contains("سریال خوب"))
+    #expect(Set(candidates.flatMap(\.linkIDs)) == Set(links.map(\.id)))
+}
+
 @Test func dotsAndDashesInAPackageNameBecomeSpaces() {
     let a = link("the.matrix.1999.bluray.mkv")
     let b = link("the.matrix.1999.bluray.nfo")
@@ -56,14 +102,16 @@ private func link(_ filename: String, host: String = "cdn.example.com", path: St
     #expect(Set(candidates[0].linkIDs) == Set(parts.map(\.id)))
 }
 
-@Test func singletonTemplatesGroupByHostAndPath() {
+@Test func singletonTemplatesGroupByName() {
     let a = link("readme.txt")
     let b = link("changelog.md")
     let candidates = PackageClustering.cluster([a, b])
 
-    #expect(candidates.count == 1)
-    #expect(candidates[0].name == "cdn.example.com")
-    #expect(Set(candidates[0].linkIDs) == Set([a.id, b.id]))
+    #expect(candidates.count == 2)
+    #expect(candidates[0].name == "Readme")
+    #expect(Set(candidates[0].linkIDs) == Set([a.id]))
+    #expect(candidates[1].name == "Changelog")
+    #expect(Set(candidates[1].linkIDs) == Set([b.id]))
 }
 
 @Test func dissimilarTemplatesOnDifferentHostsStaySeparate() {

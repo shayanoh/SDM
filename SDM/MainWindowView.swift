@@ -356,7 +356,7 @@ struct DeletionConfirmationView: View {
                 Spacer()
                 Button("Cancel", role: .cancel, action: onCancel)
                     .keyboardShortcut(.cancelAction)
-                if (info.count==0) {
+                if info.count == 0 {
                     Button("Remove from List", role: .destructive, action: onDelete)
                         .keyboardShortcut(.defaultAction)
                 } else {
