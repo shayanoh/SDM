@@ -1081,22 +1081,54 @@ private struct ItemRow: View {
             ? theme.surfacePrimaryColor : theme.surfaceSecondaryColor.opacity(0.6)
     }
 
-    /// Replaces the old per-row Start/Stop button: an at-a-glance state icon,
-    /// with every mutating action moved to the right-click menu.
-    @ViewBuilder
-    private var stateIcon: some View {
+    private var stateIconName: String {
         switch item.state {
         case .running:
-            Image(systemName: "arrow.down.circle.fill").foregroundStyle(theme.accentColor)
+            "arrow.down.circle"
         case .completed:
-            Image(systemName: "checkmark.circle.fill").foregroundStyle(theme.onlineColor)
+            "checkmark.circle"
         case .failed:
-            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(theme.failedColor)
+            "exclamationmark.arrow.trianglehead.counterclockwise.rotate.90"
         case .queued:
-            Image(systemName: "clock.fill").foregroundStyle(theme.textSecondaryColor)
+            "clock.circle"
         case .stopped:
-            Image(systemName: "pause.circle.fill").foregroundStyle(theme.textSecondaryColor)
+            "pause.circle"
         }
+    }
+    
+    private var stateIconVariableValue: Double? {
+        switch item.state {
+        case .running, .queued, .stopped:
+            item.fractionCompleted
+        case .completed, .failed:
+            nil
+        }
+    }
+    
+    private var stateIconColor:Color {
+        switch item.state {
+        case .running:
+            theme.accentColor
+        case .completed:
+            theme.onlineColor
+        case .failed:
+            theme.failedColor
+        case .queued, .stopped:
+            theme.textSecondaryColor
+        }
+    }
+    
+    @ViewBuilder
+    private var stateIcon: some View {
+        Image(
+            systemName: stateIconName,
+            variableValue: stateIconVariableValue
+        )
+        .applyMacOS26SymbolEffects()
+        .symbolRenderingMode(.palette)
+        .foregroundStyle(stateIconColor)
+        .contentTransition(.symbolEffect(.replace))
+        .animation(.default, value: item.state)
     }
 
     /// Surfaces `item.state`, which was never rendered. `.failed(reason:)` is
@@ -1151,6 +1183,18 @@ private struct ItemRow: View {
                 .foregroundStyle(theme.textSecondaryColor)
         case true, nil:
             EmptyView()
+        }
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func applyMacOS26SymbolEffects() -> some View {
+        if #available(macOS 26, *) {
+            self.symbolVariableValueMode(.draw)
+                .symbolColorRenderingMode(.gradient)
+        } else {
+            self
         }
     }
 }
