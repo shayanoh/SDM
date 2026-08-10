@@ -102,10 +102,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 struct SDMApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var controller: EngineController
-    @State private var grabberController = GrabberController()
+    @State private var grabberController: GrabberController
     @State private var themeStore = ThemeStore()
-    @State private var activationPolicyController = ActivationPolicyController()
-    @State private var clipboardWatcher = ClipboardWatcher()
+    @State private var activationPolicyController: ActivationPolicyController
+    @State private var clipboardWatcher: ClipboardWatcher
     /// Link ids already handed to the download engine by auto-add-and-start,
     /// so a later snapshot change (e.g. an unrelated link finishing its
     /// probe) does not re-add the same package a second time — `addPackage`
@@ -117,17 +117,39 @@ struct SDMApp: App {
     @Environment(\.openWindow) private var openWindow
 
     init() {
-        let notifications = NotificationManager()
+        let notification = NotificationManager()
+        let engine = EngineController(notificationManager: notification)
+        let clipboard = ClipboardWatcher()
+        let grabber = GrabberController()
+        let activationPolicy = ActivationPolicyController()
+        _linkNotifications = State(initialValue: notification)
+        _controller = State(initialValue: engine)
+        _clipboardWatcher = State(initialValue: clipboard)
+        _grabberController = State(initialValue: grabber)
+        _activationPolicyController = State(initialValue: activationPolicy)
 
-        _linkNotifications = State(initialValue: notifications)
-        _controller = State(
-            initialValue: EngineController(
-                notificationManager: notifications
-            )
-        )
+        appDelegate.controller = engine
+        appDelegate.activationPolicyController = activationPolicy
+
+        engine.startHeartbeatIfNeeded()
+        clipboard.onLinksDetected = { urls in
+            guard GrabberSettings.clipboardWatchingEnabled else { return }
+            Task { await grabber.ingest(urls: urls) }
+        }
+        if GrabberSettings.clipboardWatchingEnabled { clipboard.start() }
+
     }
-    
+
     var body: some Scene {
+        let _ = {
+            linkNotifications.onSideBarChangeRequest = {
+                if $0 == "linkgrabber" {
+                    sidebarSelection = .linkgrabber
+                    openWindow(id: "main")
+                    NSApp.activate(ignoringOtherApps: true)
+                }
+            }
+        }()
         // `Window`, not `WindowGroup`: a group allows unbounded duplicate
         // windows (each `openWindow(id:)` call — or the group's own default
         // "New Window" command — opens another), which is how "Open SDM"
@@ -140,60 +162,33 @@ struct SDMApp: App {
                 .environment(controller)
                 .environment(grabberController)
                 .environment(themeStore)
-                .task {
-                    appDelegate.controller = controller
-                    appDelegate.activationPolicyController = activationPolicyController
-                    // Kicks off the controller's own heartbeat `Task` and
-                    // returns immediately — deliberately not `await`ed, so
-                    // this view's `.task` (and hence the heartbeat) is not
-                    // tied to the window's lifetime. See
-                    // `EngineController.startHeartbeatIfNeeded()`.
-                    controller.startHeartbeatIfNeeded()
-                }
-                .onAppear {
-                    // Deliberately not tied to this window's lifecycle
-                    // beyond using its first appearance as a convenient
-                    // "app has launched" hook: SDM is designed to keep
-                    // running from the menu bar with the main window closed,
-                    // and clipboard watching — the core of the Linkgrabber
-                    // feature — must keep working the whole time. There is
-                    // no matching `.onDisappear` stop call; the watcher's
-                    // lifecycle is governed solely by
-                    // `GrabberSettings.clipboardWatchingEnabled`, toggled
-                    // live from `SettingsView.commit()`.
-                    clipboardWatcher.onLinksDetected = { urls in
-                        guard GrabberSettings.clipboardWatchingEnabled else { return }
-                        Task { await grabberController.ingest(urls: urls) }
-                    }
-                    if GrabberSettings.clipboardWatchingEnabled { clipboardWatcher.start() }
-                }
-                .onChange(of: grabberController.snapshot) { _, newSnapshot in
-                    let freshIDs = Set(newSnapshot.links.map(\.id)).subtracting(notifiedLinkIDs)
-                    if !freshIDs.isEmpty {
-                        notifiedLinkIDs.formUnion(freshIDs)
-                        linkNotifications.notifyLinksGrabbed(count: freshIDs.count)
-                    }
+        }
+        .onChange(of: grabberController.snapshot) { _, newSnapshot in
+            let freshIDs = Set(newSnapshot.links.map(\.id)).subtracting(notifiedLinkIDs)
+            if !freshIDs.isEmpty {
+                notifiedLinkIDs.formUnion(freshIDs)
+                linkNotifications.notifyLinksGrabbed(count: freshIDs.count)
+            }
 
-                    guard GrabberSettings.autoAddAndStartOnGrab else { return }
-                    for package in newSnapshot.packages {
-                        let ids = Set(package.linkIDs)
-                        guard ids.isDisjoint(with: autoAddedLinkIDs) else { continue }
-                        let links = newSnapshot.links.filter { ids.contains($0.id) }
-                        guard !links.isEmpty, links.allSatisfy({ $0.verdict == .online }) else {
-                            continue
-                        }
-                        autoAddedLinkIDs.formUnion(ids)
-                        let name = package.name
-                        let urlItems = links.map {
-                            PackageUrlItem(url: $0.originalURL, size: $0.contentLength)
-                        }
-
-                        Task {
-                            await controller.addPackage(
-                                name: name, urlItems: urlItems, startImmediately: true)
-                        }
-                    }
+            guard GrabberSettings.autoAddAndStartOnGrab else { return }
+            for package in newSnapshot.packages {
+                let ids = Set(package.linkIDs)
+                guard ids.isDisjoint(with: autoAddedLinkIDs) else { continue }
+                let links = newSnapshot.links.filter { ids.contains($0.id) }
+                guard !links.isEmpty, links.allSatisfy({ $0.verdict == .online }) else {
+                    continue
                 }
+                autoAddedLinkIDs.formUnion(ids)
+                let name = package.name
+                let urlItems = links.map {
+                    PackageUrlItem(url: $0.originalURL, size: $0.contentLength)
+                }
+
+                Task {
+                    await controller.addPackage(
+                        name: name, urlItems: urlItems, startImmediately: true)
+                }
+            }
         }
         .commands {
             CommandGroup(replacing: .appSettings) {

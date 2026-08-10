@@ -796,7 +796,7 @@ private struct DraggableItemRow<Content: View>: View {
         bytesPerSecond: 100000,
         speedHistory: [100000, 90000, 80000])
     let theme = ThemeCatalog.builtInThemes()[5]
-    let controller = EngineController(notificationManager:NotificationManager())
+    let controller = EngineController(notificationManager: NotificationManager())
 
     List(selection: $selectedItemIDs) {
         ItemRow(

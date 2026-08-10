@@ -10,8 +10,9 @@ import os.log
 /// `NSObject` conformance is required by `UNUserNotificationCenterDelegate`.
 @MainActor
 final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
-    private nonisolated static let log = Logger(subsystem: "com.shayanoh.SDM", category: "notifications")
-
+    private nonisolated static let log = Logger(
+        subsystem: "com.shayanoh.SDM", category: "notifications")
+    var onSideBarChangeRequest: ((String) -> Void)?
     override init() {
         super.init()
         UNUserNotificationCenter.current().delegate = self
@@ -25,6 +26,19 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
             Void
     ) {
         completionHandler([.banner, .sound, .list])
+    }
+
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        let userInfo = response.notification.request.content.userInfo
+
+        if let destination = userInfo["open-tab"] as? String {
+            await MainActor.run { [self] in
+                onSideBarChangeRequest?(destination)
+            }
+        }
     }
 
     func requestAuthorization() {
@@ -56,14 +70,21 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func notifyLinksGrabbed(count: Int) {
-        guard NotificationSettings.linksGrabbedEnabled, count > 0 else { return }
-        post(title: "\(count) links grabbed", body: "Waiting for confirmation in the Linkgrabber")
+        guard NotificationSettings.linksGrabbedEnabled, count > 0 else {
+            return
+        }
+        post(
+            title: "\(count) links grabbed",
+            body: "Waiting for confirmation in the Linkgrabber",
+            userInfo: ["open-tab": "linkgrabber"]
+        )
     }
 
-    private func post(title: String, body: String) {
+    private func post(title: String, body: String, userInfo: [AnyHashable: Any] = [:]) {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
+        content.userInfo = userInfo
         let request = UNNotificationRequest(
             identifier: UUID().uuidString, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)

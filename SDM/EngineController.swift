@@ -68,11 +68,11 @@ final class EngineController {
     /// Retains the heartbeat's own `Task`, started once and independent of
     /// any SwiftUI view's `.task` — see `startHeartbeatIfNeeded()`.
     private var heartbeatTask: Task<Void, Never>?
-    private let notifications:NotificationManager
+    private let notifications: NotificationManager
     private var previousSnapshot: EngineSnapshot?
     private let downloadFolder: URL
 
-    init(notificationManager:NotificationManager) {
+    init(notificationManager: NotificationManager) {
         notifications = notificationManager
         let support = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask)[0]
