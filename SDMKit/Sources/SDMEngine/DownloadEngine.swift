@@ -176,7 +176,11 @@ public actor DownloadEngine {
     // MARK: - Mutations
 
     public func add(_ package: DownloadPackage) async {
-        packages.append(package)
+        if let originalPackageIndex = packages.firstIndex(where: { $0.name == package.name }) {
+            packages[originalPackageIndex].items.append(contentsOf: package.items)
+        } else {
+            packages.append(package)
+        }
         renumberAllPositions()
         for item in package.items where samplers[item.id] == nil {
             samplers[item.id] = SpeedSampler()
