@@ -56,17 +56,19 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
 
     func notifyDownloadFinished(filename: String) {
         guard NotificationSettings.downloadFinishedEnabled else { return }
-        post(title: "Download finished", body: filename)
+        post(title: "Download finished", body: filename, userInfo: ["open-tab": "completed"])
     }
 
     func notifyPackageFinished(name: String) {
         guard NotificationSettings.packageFinishedEnabled else { return }
-        post(title: "Package finished", body: name)
+        post(title: "Package finished", body: name, userInfo: ["open-tab": "completed"])
     }
 
     func notifyDownloadFailed(filename: String, reason: String) {
         guard NotificationSettings.downloadFailedEnabled else { return }
-        post(title: "Download failed", body: "\(filename): \(reason)")
+        post(
+            title: "Download failed", body: "\(filename): \(reason)",
+            userInfo: ["open-tab": "downloads"])
     }
 
     func notifyLinksGrabbed(count: Int) {

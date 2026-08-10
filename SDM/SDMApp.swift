@@ -143,11 +143,18 @@ struct SDMApp: App {
     var body: some Scene {
         let _ = {
             linkNotifications.onSideBarChangeRequest = {
-                if $0 == "linkgrabber" {
+                switch $0 {
+                case "linkgrabber":
                     sidebarSelection = .linkgrabber
-                    openWindow(id: "main")
-                    NSApp.activate(ignoringOtherApps: true)
+                case "downloads":
+                    sidebarSelection = .downloads
+                case "completed":
+                    sidebarSelection = .completed
+                default:
+                    break
                 }
+                openWindow(id: "main")
+                NSApp.activate(ignoringOtherApps: true)
             }
         }()
         // `Window`, not `WindowGroup`: a group allows unbounded duplicate
