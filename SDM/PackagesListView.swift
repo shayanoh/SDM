@@ -40,11 +40,81 @@ struct PackagesListView: View {
         VStack(spacing: 0) {
             list
             Divider()
+            if isPanelVisible {
+                ZStack(alignment: .top) {
+                    BottomPanel(
+                        theme: theme,
+                        downloadItem: resolveDownloadItemForBottomPanel(),
+                        package: resolvePackageForBottomPanel()
+                    )
+                    .frame(maxWidth: .infinity)
+                    .frame(
+                        height: min(
+                            max(panelHeight - panelDragOffset, 100),
+                            600
+                        )
+                    )
+                    Capsule()
+                        .frame(width: 40, height: 5)
+                        .contentShape(Rectangle())
+                        .onContinuousHover { phase in
+                            debugPrint(phase)
+                            switch phase {
+                            case .active:
+                                NSCursor.resizeUpDown.set()
+                            case .ended:
+                                NSCursor.arrow.set()
+                            }
+                        }
+                        .gesture(
+                            DragGesture(coordinateSpace: .global)
+                                .updating($panelDragOffset) { value, state, _ in
+                                    state = value.translation.height
+                                }
+                                .onEnded { value in
+                                    panelHeight = min(
+                                        max(
+                                            panelHeight - value.translation.height,
+                                            100
+                                        ),
+                                        600
+                                    )
+                                }
+                        )
+                }
+                .transition(.move(edge: .bottom))
+            }
             PackagesBottomBar(
-                packages: packages, showsPauseResumeButton: showsPauseResumeButton, theme: theme)
+                packages: packages, showsPauseResumeButton: showsPauseResumeButton, theme: theme,
+                isPanelVisible: $isPanelVisible)
         }
         .background(keyboardShortcuts)
     }
+
+    private func resolvePackageForBottomPanel() -> PackageSnapshot? {
+        guard !selectedItemIDs.isEmpty else { return nil }
+        let downloadItems = packages.flatMap(\.items).filter({
+            selectedItemIDs.contains($0.id)
+        }
+        )
+        guard !downloadItems.isEmpty else { return nil }
+        let packages = packages.filter({ $0.items.map(\.id).contains(downloadItems[0].id) })
+        guard !packages.isEmpty else { return nil }
+        return packages[0]
+    }
+    private func resolveDownloadItemForBottomPanel() -> ItemSnapshot? {
+        guard !selectedItemIDs.isEmpty else { return nil }
+        let downloadItems = packages.flatMap(\.items).filter({
+            selectedItemIDs.contains($0.id)
+        }
+        )
+        guard !downloadItems.isEmpty else { return nil }
+        return downloadItems[0]
+    }
+
+    @State var isPanelVisible: Bool = false
+    @State var panelHeight: CGFloat = 150
+    @GestureState private var panelDragOffset: CGFloat = 0
 
     private var list: some View {
         List(selection: $selectedItemIDs) {
@@ -307,7 +377,113 @@ struct PackagesListView: View {
         }
         .keyboardShortcut(.delete, modifiers: .command)
     }
+}
 
+// MARK: - BottomPanel
+
+struct BottomPanel: View {
+    @Environment(EngineController.self) private var controller
+    @Environment(ClipboardWatcher.self) private var clipboardWatcher
+    public var theme: Theme
+    public var downloadItem: ItemSnapshot?
+    public var package: PackageSnapshot?
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading) {
+                if let downloadItem, let package {
+                    let telemetry = controller.itemTelemetry[downloadItem.id]
+                    Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 4) {
+                        GridRow {
+                            HStack {
+                                Sparkline(
+                                    samples: telemetry?.speedHistory
+                                        ?? downloadItem.speedHistory,
+                                    color: theme.graphStrokeColor
+                                )
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 16)
+                                Text(
+                                    formatted(
+                                        telemetry?.bytesPerSecond ?? downloadItem.bytesPerSecond
+                                    )
+                                )
+                                .font(.caption.monospacedDigit())
+                            }
+                            .gridCellColumns(2)
+                        }
+                        GridRow {
+                            ItemProgressBar(
+                                itemID: downloadItem.id, fallback: downloadItem,
+                                controller: controller, theme: theme
+                            )
+                            .frame(height: 6)
+                            .gridCellColumns(2)
+                        }
+                        GridRow {
+                            Text("Filename")
+                            HStack {
+                                Text(downloadItem.filename)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                Button("Open") {
+                                    let downloads = FileManager.default.urls(
+                                        for: .downloadsDirectory, in: .userDomainMask)[0]
+                                    let destination = downloads.appendingPathComponent(package.name)
+                                        .appendingPathComponent(downloadItem.filename)
+                                    NSWorkspace.shared.open(destination)
+                                }
+                                .disabled(
+                                    downloadItem.state != .completed || downloadItem.fileMissing)
+                            }
+                        }
+                        GridRow {
+                            Text("Destination Folder")
+                            let downloads = FileManager.default.urls(
+                                for: .downloadsDirectory, in: .userDomainMask)[0]
+                            let destination = downloads.appendingPathComponent(package.name)
+                            HStack {
+                                Text(destination.path(percentEncoded: false))
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                Button("Show in Finder") {
+                                    NSWorkspace.shared.open(destination)
+                                }
+                            }
+                        }
+                        GridRow {
+                            Text("URL")
+                            HStack {
+                                HStack {
+                                    Text(downloadItem.url.absoluteString)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                    Button("Copy URL") {
+                                        clipboardWatcher
+                                            .ignoreOwnWrite([downloadItem.url])
+                                        NSPasteboard.general.clearContents()
+                                        NSPasteboard.general
+                                            .setString(
+                                                downloadItem.url.absoluteString,
+                                                forType: .string
+                                            )
+                                    }
+                                }
+                            }
+                        }
+                        //                        downloadItem.totalBytes
+                        //                        downloadItem.activeSegments downloadItem.configuredSegments
+                        //                        downloadItem.isResumable
+                        //                        downloadItem.fractionCompleted
+                        //                        downloadItem.state
+                        //                        downloadItem.isEnabled
+                    }
+                } else {
+                    Text("Select an item to view its details here")
+                }
+            }
+            .padding(.top, 7)
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity)
+        }
+        .background(theme.surfaceSecondaryColor)
+    }
 }
 
 // MARK: - PackageHeaderRow
@@ -543,6 +719,7 @@ private struct PackagesBottomBar: View {
     let theme: Theme
 
     @Environment(EngineController.self) private var controller
+    @Binding public var isPanelVisible: Bool
 
     var body: some View {
         HStack {
@@ -569,6 +746,13 @@ private struct PackagesBottomBar: View {
             Spacer()
             Text("\(packages.count) packages")
                 .foregroundStyle(theme.textSecondaryColor)
+            Button() {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isPanelVisible.toggle()
+                }
+            } label: {
+                Label("Info Panel", systemImage: "info.circle.text.page")
+            }
         }
         .padding()
         // Applied before `sdmSurface` so the opaque theme color is what's
