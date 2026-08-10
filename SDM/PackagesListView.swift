@@ -261,7 +261,7 @@ struct PackagesListView: View {
     /// with the same tint `ItemRow.alternatingRowBackground` uses, now that
     /// a package header is itself a selectable, draggable row.
     private func packageHeaderBackground(index: Int, isSelected: Bool) -> Color {
-        guard !isSelected else { return theme.selectionTintColor.opacity(1) }
+        guard !isSelected else { return theme.selectionTintColor.mix(with: Color.black, by: 0.2) }
         return theme.surfaceSecondaryColor.opacity(index.isMultiple(of: 2) ? 0.5 : 0.9)
     }
 
@@ -294,7 +294,23 @@ struct PackagesListView: View {
             }
         }
         .disabled(!items.contains(where: canStart))
-        Button("Stop Download\(suffix)") {
+        Button("Pause Download\(suffix)") {
+            if (items.contains {
+                $0.state == .running && $0.isResumable == false
+            }) {
+                let alert = NSAlert()
+                alert.messageText = "Pause non-resumable download?"
+                alert.informativeText =
+                    "One or more downloads cannot be resumed. Pausing them now will lose their progress permanently."
+                alert.addButton(withTitle: "Pause")
+                alert.addButton(withTitle: "Cancel")
+                alert.alertStyle = .warning
+                let response = alert.runModal()
+                if response == .alertSecondButtonReturn {
+                    return
+                }
+            }
+
             Task {
                 for item in items where canStop(item) {
                     await controller.stopItem(item.id)
@@ -1258,7 +1274,7 @@ private struct ItemRow: View {
     /// two stripes reads as visibly wrong/missing. This alternates between
     /// the theme's own primary and secondary surface roles instead.
     private var alternatingRowBackground: Color {
-        guard !isSelected else { return theme.selectionTintColor.opacity(1) }
+        guard !isSelected else { return theme.selectionTintColor.mix(with: Color.black, by: 0.2) }
         return index.isMultiple(of: 2)
             ? theme.surfacePrimaryColor : theme.surfaceSecondaryColor
     }
