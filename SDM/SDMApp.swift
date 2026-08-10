@@ -101,7 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 struct SDMApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @State private var controller = EngineController()
+    @State private var controller: EngineController
     @State private var grabberController = GrabberController()
     @State private var themeStore = ThemeStore()
     @State private var activationPolicyController = ActivationPolicyController()
@@ -112,10 +112,21 @@ struct SDMApp: App {
     /// has no idempotency of its own.
     @State private var autoAddedLinkIDs: Set<UUID> = []
     @State private var sidebarSelection: MainWindowView.SidebarItem? = .downloads
-    @State private var linkNotifications = NotificationManager()
+    @State private var linkNotifications: NotificationManager
     @State private var notifiedLinkIDs: Set<UUID> = []
     @Environment(\.openWindow) private var openWindow
 
+    init() {
+        let notifications = NotificationManager()
+
+        _linkNotifications = State(initialValue: notifications)
+        _controller = State(
+            initialValue: EngineController(
+                notificationManager: notifications
+            )
+        )
+    }
+    
     var body: some Scene {
         // `Window`, not `WindowGroup`: a group allows unbounded duplicate
         // windows (each `openWindow(id:)` call — or the group's own default

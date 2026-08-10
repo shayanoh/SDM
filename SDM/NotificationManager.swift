@@ -10,14 +10,10 @@ import os.log
 /// `NSObject` conformance is required by `UNUserNotificationCenterDelegate`.
 @MainActor
 final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
-    private static let log = Logger(subsystem: "com.shayanoh.SDM", category: "notifications")
+    private nonisolated static let log = Logger(subsystem: "com.shayanoh.SDM", category: "notifications")
 
     override init() {
         super.init()
-        // Two `NotificationManager` instances exist (`EngineController` and
-        // `SDMApp`), but `UNUserNotificationCenter.current()` is one shared
-        // singleton, so whichever instance is created first sets this for
-        // the whole process — both would set the same behavior anyway.
         UNUserNotificationCenter.current().delegate = self
     }
 
