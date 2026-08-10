@@ -89,6 +89,9 @@ struct PackagesListView: View {
                 isPanelVisible: $isPanelVisible)
         }
         .background(keyboardShortcuts)
+        .onDisappear {
+            selectedItemIDs.removeAll()
+        }
     }
 
     private func resolvePackageForBottomPanel() -> PackageSnapshot? {
@@ -156,7 +159,6 @@ struct PackagesListView: View {
         // icons and watchOS platters. `hidesNativeSelectionHighlight()`
         // turns the native layer off entirely so `alternatingRowBackground`
         // above is the only thing drawn.
-        .tint(Color.red)
     }
 
     /// Every row is both a drag source and a drop target for
@@ -190,7 +192,6 @@ struct PackagesListView: View {
             item: item, index: index, controller: controller,
             isSelected: selectedItemIDs.contains(item.id), theme: theme
         )
-        .id(item.id)
         .contextMenu {
             itemsContextMenu(selectedItemIDs.contains(item.id) ? selectedItemIDs : [item.id])
         }
@@ -282,7 +283,7 @@ struct PackagesListView: View {
     /// with the same tint `ItemRow.alternatingRowBackground` uses, now that
     /// a package header is itself a selectable, draggable row.
     private func packageHeaderBackground(index: Int, isSelected: Bool) -> Color {
-        guard !isSelected else { return theme.selectionTintColor.opacity(0.35) }
+        guard !isSelected else { return theme.selectionTintColor.opacity(1) }
         return theme.surfaceSecondaryColor.opacity(index.isMultiple(of: 2) ? 0.5 : 0.9)
     }
 
@@ -746,7 +747,7 @@ private struct PackagesBottomBar: View {
             Spacer()
             Text("\(packages.count) packages")
                 .foregroundStyle(theme.textSecondaryColor)
-            Button() {
+            Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     isPanelVisible.toggle()
                 }
@@ -919,6 +920,7 @@ private struct DraggableItemRow<Content: View>: View {
 
     var body: some View {
         content()
+        /*
             .draggable(DraggedRowID.item(itemID))
             .dropDestination(
                 for: DraggedRowID.self,
@@ -962,6 +964,7 @@ private struct DraggableItemRow<Content: View>: View {
                         .strokeBorder(theme.accentColor, lineWidth: 2)
                 }
             }
+         */
     }
 }
 
@@ -1076,9 +1079,9 @@ private struct ItemRow: View {
     /// two stripes reads as visibly wrong/missing. This alternates between
     /// the theme's own primary and secondary surface roles instead.
     private var alternatingRowBackground: Color {
-        guard !isSelected else { return theme.selectionTintColor.opacity(0.35) }
+        guard !isSelected else { return theme.selectionTintColor.opacity(1) }
         return index.isMultiple(of: 2)
-            ? theme.surfacePrimaryColor : theme.surfaceSecondaryColor.opacity(0.6)
+            ? theme.surfacePrimaryColor : theme.surfaceSecondaryColor
     }
 
     private var stateIconName: String {
@@ -1095,7 +1098,7 @@ private struct ItemRow: View {
             "pause.circle"
         }
     }
-    
+
     private var stateIconVariableValue: Double? {
         switch item.state {
         case .running, .queued, .stopped:
@@ -1104,8 +1107,8 @@ private struct ItemRow: View {
             nil
         }
     }
-    
-    private var stateIconColor:Color {
+
+    private var stateIconColor: Color {
         switch item.state {
         case .running:
             theme.accentColor
@@ -1117,7 +1120,7 @@ private struct ItemRow: View {
             theme.textSecondaryColor
         }
     }
-    
+
     @ViewBuilder
     private var stateIcon: some View {
         Image(
@@ -1128,6 +1131,8 @@ private struct ItemRow: View {
         .symbolRenderingMode(.palette)
         .foregroundStyle(stateIconColor)
         .contentTransition(.symbolEffect(.replace))
+        .symbolEffect(.wiggle, value: item.state)
+        .symbolEffect(.breathe, options: .repeat(.continuous), isActive: item.state == .running)
         .animation(.default, value: item.state)
     }
 
@@ -1187,9 +1192,9 @@ private struct ItemRow: View {
     }
 }
 
-private extension View {
+extension View {
     @ViewBuilder
-    func applyMacOS26SymbolEffects() -> some View {
+    fileprivate func applyMacOS26SymbolEffects() -> some View {
         if #available(macOS 26, *) {
             self.symbolVariableValueMode(.draw)
                 .symbolColorRenderingMode(.gradient)
