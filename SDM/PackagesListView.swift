@@ -28,6 +28,7 @@ struct PackagesListView: View {
 
     @Environment(EngineController.self) private var controller
     @Environment(ThemeStore.self) private var themeStore
+    @Environment(ClipboardWatcher.self) private var clipboardWatcher
     @Environment(\.colorScheme) private var colorScheme
     @Binding var selectedItemIDs: Set<UUID>
     @Binding var collapsedPackageIDs: Set<UUID>
@@ -241,9 +242,11 @@ struct PackagesListView: View {
             .keyboardShortcut(.return, modifiers: [])
         }
         Button("Copy URL\(suffix) to Clipboard") {
-            let urls = items.map(\.url.absoluteString).joined(separator: "\n")
+            let urls = items.map(\.url)
+            let urlStrings = urls.map(\.absoluteString).joined(separator: "\n")
+            clipboardWatcher.ignoreOwnWrite(urls)
             NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(urls, forType: .string)
+            NSPasteboard.general.setString(urlStrings, forType: .string)
         }
         Divider()
         Button("Start Download\(suffix)") {

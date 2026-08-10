@@ -169,6 +169,7 @@ struct SDMApp: App {
                 .environment(controller)
                 .environment(grabberController)
                 .environment(themeStore)
+                .environment(clipboardWatcher)
         }
         .onChange(of: grabberController.snapshot) { _, newSnapshot in
             let freshIDs = Set(newSnapshot.links.map(\.id)).subtracting(notifiedLinkIDs)
