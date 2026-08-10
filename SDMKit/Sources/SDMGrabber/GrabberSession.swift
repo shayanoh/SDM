@@ -36,8 +36,11 @@ public actor GrabberSession {
     }
 
     public func ingest(urls: [URL]) async {
+        let httpURLs = urls.filter {
+            ["http", "https"].contains($0.scheme?.lowercased())
+        }
         var fresh: [UUID] = []
-        for url in urls where seenURLs.insert(url).inserted {
+        for url in httpURLs where seenURLs.insert(url).inserted {
             let id = UUID()
             links[id] = ProbedLink(
                 id: id, originalURL: url, isDuplicate: knownDownloadURLs.contains(url))
