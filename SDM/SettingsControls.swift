@@ -42,7 +42,6 @@ struct SteppedNumberField: View {
     let range: ClosedRange<Int>
 
     @State private var text: String = ""
-    @FocusState private var isFocused: Bool
 
     var body: some View {
         GridRow {
@@ -53,23 +52,23 @@ struct SteppedNumberField: View {
                     .textFieldStyle(.roundedBorder)
                     .multilineTextAlignment(.trailing)
                     .frame(width: 56)
-                    .focused($isFocused)
                     .onSubmit(commit)
                     .onChange(of: text) { _, newValue in
                         let digitsOnly = newValue.filter(\.isNumber)
                         if digitsOnly != newValue { text = digitsOnly }
-                    }
-                    .onChange(of: isFocused) { wasFocused, nowFocused in
-                        if wasFocused && !nowFocused { commit() }
+                        commit()
                     }
                 Stepper("", value: $value, in: range)
                     .labelsHidden()
+                Text("\(range.lowerBound)..\(range.upperBound)")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
             }
-            .gridColumnAlignment(.trailing)
+            .gridColumnAlignment(.leading)
         }
         .onAppear { text = String(value) }
         .onChange(of: value) { _, newValue in
-            guard !isFocused else { return }
             text = String(newValue)
         }
     }
@@ -77,6 +76,10 @@ struct SteppedNumberField: View {
     /// Invalid or out-of-range text reverts to the last valid value rather
     /// than being accepted.
     private func commit() {
+        guard !text.isEmpty else {
+            value = range.lowerBound
+            return
+        }
         guard let parsed = Int(text), range.contains(parsed) else {
             text = String(value)
             return
