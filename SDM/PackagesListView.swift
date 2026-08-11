@@ -544,7 +544,7 @@ struct BottomPanel: View {
                             .foregroundStyle(theme.textSecondaryColor)
                     }
                     if failed > 0 {
-                        Text("\(failed) ?? 0) Failed")
+                        Text("\(failed) Failed")
                             .foregroundStyle(theme.failedColor)
                     }
                 }
