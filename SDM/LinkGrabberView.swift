@@ -79,7 +79,7 @@ struct LinkGrabberView: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button("Add links") { isShowingAddSheet = true }
+                Button("Add Links", systemImage: "link.badge.plus") { isShowingAddSheet = true }
             }
         }
         .sheet(isPresented: $isShowingAddSheet) {

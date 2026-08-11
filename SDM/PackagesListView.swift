@@ -103,10 +103,18 @@ struct PackagesListView: View {
                 .transition(.move(edge: .bottom))
             }
             PackagesBottomBar(
-                packages: packages, showsPauseResumeButton: showsPauseResumeButton, theme: theme,
-                isPanelVisible: $isPanelVisible)
+                packages: packages, showsPauseResumeButton: showsPauseResumeButton, theme: theme
+            )
         }
         .background(keyboardShortcuts)
+        .toolbar {
+            itemsContextMenu(selectedItemIDs, dividers: false)
+            Button("Info Panel", systemImage: "info.circle.text.page") {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isPanelVisible.toggle()
+                }
+            }
+        }
         .onDisappear {
             // This fixes lingering ItemRow bug when something is selected
             // when view is disappearing. Do not remove.
@@ -266,35 +274,43 @@ struct PackagesListView: View {
     }
 
     @ViewBuilder
-    private func itemsContextMenu(_ ids: Set<UUID>) -> some View {
+    private func itemsContextMenu(_ ids: Set<UUID>, dividers: Bool = true) -> some View {
         let items = resolveUUIDList(Array(ids))
         let isMultiple = items.count > 1
         let suffix = isMultiple ? "s" : ""
-        if (!isMultiple) {
-            let item = items[0]
-            if canOpen(item) {
-                Button("Open File") {
-                        openFile(item)
-                }
-                .keyboardShortcut(.return, modifiers: [])
-            }
-            if let package = package(containing: item) {
-                Button("Show in Finder") {
-                    NSWorkspace.shared
-                        .open(controller.destinationPackageUrl(for: package))
-                }
-                .keyboardShortcut(.return, modifiers: [.command])
-            }
+
+        Button("Open File", systemImage: "eye") {
+            guard items.count > 0 else { return }
+            openFile(items[0])
         }
-        Button("Copy URL\(suffix) to Clipboard") {
+        .disabled(items.count != 1 || !canOpen(items[0]))
+        .keyboardShortcut(.return, modifiers: [])
+
+        Button("Show in Finder", systemImage: "folder") {
+            guard items.count > 0 else { return }
+            let item = items[0]
+            guard let package = package(containing: item) else { return }
+            NSWorkspace.shared
+                .open(controller.destinationPackageUrl(for: package))
+        }
+        .disabled(items.count != 1)
+        .keyboardShortcut(.return, modifiers: [.command])
+
+        Button("Copy URL\(suffix) to Clipboard", systemImage: "square.and.arrow.up.on.square") {
+            guard items.count > 0 else { return }
             let urls = items.map(\.url)
             let urlStrings = urls.map(\.absoluteString).joined(separator: "\n")
             clipboardWatcher.ignoreOwnWrite(urls)
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(urlStrings, forType: .string)
         }
-        Divider()
-        Button("Start Download\(suffix)") {
+        .disabled(items.count == 0)
+
+        if dividers {
+            Divider()
+        }
+
+        Button("Start Download\(suffix)", systemImage: "play") {
             Task {
                 for item in items where canStart(item) {
                     await controller.startItem(item.id)
@@ -302,7 +318,8 @@ struct PackagesListView: View {
             }
         }
         .disabled(!items.contains(where: canStart))
-        Button("Pause Download\(suffix)") {
+
+        Button("Pause Download\(suffix)", systemImage: "pause") {
             if (items.contains {
                 $0.state == .running && $0.isResumable == false
             }) {
@@ -326,46 +343,60 @@ struct PackagesListView: View {
             }
         }
         .disabled(!items.contains(where: canStop))
-        Divider()
-        if items.contains(where: canEnable) {
-            Button(isMultiple ? "Enable All" : "Enable") {
-                Task {
-                    for item in items where canEnable(item) {
-                        await controller.setEnabled(true, for: item.id)
-                    }
+
+        if dividers {
+            Divider()
+        }
+
+        Button(isMultiple ? "Enable All" : "Enable", systemImage: "lightswitch.off") {
+            Task {
+                for item in items where canEnable(item) {
+                    await controller.setEnabled(true, for: item.id)
                 }
             }
         }
-        if items.contains(where: canDisable) {
-            Button(isMultiple ? "Disable All" : "Disable") {
-                Task {
-                    for item in items where canDisable(item) {
-                        await controller.setEnabled(false, for: item.id)
-                    }
+        .disabled(!items.contains(where: canEnable))
+
+        Button(isMultiple ? "Disable All" : "Disable", systemImage: "lightswitch.on") {
+            Task {
+                for item in items where canDisable(item) {
+                    await controller.setEnabled(false, for: item.id)
                 }
             }
         }
-        if items.contains(where: isFailedItem) {
-            Button("Retry Failed Item\(suffix)") {
-                Task {
-                    for item in items where isFailedItem(item) {
-                        await controller.retry(item.id)
-                    }
+        .disabled(!items.contains(where: canDisable))
+
+        Button(
+            "Retry Failed Item\(suffix)",
+            systemImage: "exclamationmark.arrow.trianglehead.2.clockwise.rotate.90"
+        ) {
+            Task {
+                for item in items where isFailedItem(item) {
+                    await controller.retry(item.id)
                 }
             }
         }
-        Button("Reset Download\(suffix)") {
+        .disabled(!items.contains(where: isFailedItem))
+
+        Button("Reset Download\(suffix)", systemImage: "arrow.left.to.line") {
             Task { for item in items { await controller.resetDownload(item.id) } }
         }
         .disabled(!items.contains(where: canReset))
-        Divider()
-        Button("Remove from List") {
+
+        if dividers {
+            Divider()
+        }
+
+        Button("Remove from List", systemImage: "eraser.line.dashed") {
             Task { await controller.removeItems(items.map(\.id), deleteFile: false) }
         }
+        .disabled(items.isEmpty)
         .keyboardShortcut(.delete, modifiers: [])
-        Button("Remove and Delete File\(suffix)", role: .destructive) {
+
+        Button("Remove and Delete File\(suffix)", systemImage: "trash") {
             pendingDeletion = .items(Set(items.map(\.id)))
         }
+        .disabled(items.isEmpty)
         .keyboardShortcut(.delete, modifiers: .command)
     }
 }
@@ -925,7 +956,6 @@ private struct PackagesBottomBar: View {
     let theme: Theme
 
     @Environment(EngineController.self) private var controller
-    @Binding public var isPanelVisible: Bool
 
     var body: some View {
         HStack {
@@ -950,15 +980,8 @@ private struct PackagesBottomBar: View {
             Text(formatted(liveAggregateBytesPerSecond))
                 .font(.title3.monospacedDigit())
             Spacer()
-            Text("\(packages.count) packages")
+            Text("\(packages.count) packages, \(packages.flatMap(\.items).count) items")
                 .foregroundStyle(theme.textSecondaryColor)
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    isPanelVisible.toggle()
-                }
-            } label: {
-                Label("Info Panel", systemImage: "info.circle.text.page")
-            }
         }
         .padding()
         // Applied before `sdmSurface` so the opaque theme color is what's

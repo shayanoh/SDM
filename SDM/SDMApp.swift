@@ -164,7 +164,7 @@ struct SDMApp: App {
         // of surfacing the existing one. `Window` is SwiftUI's single-
         // instance scene — `openWindow(id:)` against an already-open one
         // activates it instead.
-        Window("SDM", id: "main") {
+        Window("Shayan's Download Manager", id: "main") {
             MainWindowView(selection: $sidebarSelection)
                 .environment(controller)
                 .environment(grabberController)
