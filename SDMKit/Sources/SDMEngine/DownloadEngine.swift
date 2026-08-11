@@ -350,34 +350,17 @@ public actor DownloadEngine {
     }
 
     /// Moves an item to a position — possibly within its own package
-    /// (same-package reordering; the one drag-and-drop primitive this type
-    /// exposes, replacing both the old queued-only cross-package `moveItem`
-    /// and `List`'s native `.onMove`, which cannot coexist with a
-    /// `.draggable`/`.dropDestination` drag on the same row without one
-    /// cancelling the other's `NSItemProvider` the moment a drop target
-    /// falls outside `.onMove`'s own section — see `PackagesListView.swift`
-    /// for the UI side of that), possibly into a different one. Crossing
-    /// packages physically relocates whichever of the item's files exist
-    /// (the finished file, the in-progress `.incomplete` sparse file, the
-    /// `.sdmpart` resume sidecar) into the destination folder. Spec §9.3:
-    /// "Dropping onto a package row moves items into it; dropping between
-    /// rows reorders."
-    ///
-    /// Refuses `.running` items: a worker is actively writing to that file
-    /// right now, and moving it out from under an in-flight write is unsafe.
-    /// Stop it first. Every other state (`.queued`, `.stopped`,
-    /// `.completed`, `.failed`) is safe to move — nothing is writing to the
-    /// file, whatever exists of it just needs to move with the item.
-    ///
-    /// `atIndex` positions the item within the destination package's item
-    /// list, indexed against that list *before* the item is removed from
-    /// wherever it currently sits — i.e. "insert before whatever is
-    /// currently at this index," matching what a drop onto a specific row
-    /// means to the person dragging. `nil` (a drop on the package header
-    /// rather than a specific row) appends at the end.
     public func moveItem(_ itemID: UUID, toPackage packageID: UUID, atIndex index: Int? = nil) async
     {
         await moveItems([itemID], toPackage: packageID, atIndex: index)
+    }
+    
+    /// Moves items into a new package
+    public func moveItems(_ itemIDs: [UUID], toNewPackageNamed packageName: String) async {
+        guard !itemIDs.isEmpty else {return}
+        let newPackage = DownloadPackage(name: packageName)
+        packages.append(newPackage)
+        await moveItems(itemIDs, toPackage: newPackage.id, atIndex: 0)
     }
 
     /// `moveItem`'s multi-select counterpart: moves an ordered batch of

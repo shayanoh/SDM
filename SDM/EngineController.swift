@@ -292,12 +292,16 @@ final class EngineController {
     }
 
     func moveItem(_ itemID: UUID, toPackage packageID: UUID, atIndex index: Int? = nil) async {
-        await engine.moveItem(itemID, toPackage: packageID, atIndex: index)
-        publish(await engine.snapshot())
+        await moveItems([itemID], toPackage: packageID, atIndex: index)
     }
 
     func moveItems(_ itemIDs: [UUID], toPackage packageID: UUID, atIndex index: Int? = nil) async {
         await engine.moveItems(itemIDs, toPackage: packageID, atIndex: index)
+        publish(await engine.snapshot())
+    }
+    
+    func moveItems(_ itemIDs: [UUID], toNewPackageNamed packageName: String) async {
+        await engine.moveItems(itemIDs, toNewPackageNamed: packageName)
         publish(await engine.snapshot())
     }
 

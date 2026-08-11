@@ -11,6 +11,8 @@ CONFIGURATION="Release"
 APP_NAME="SDM.app"
 DEST_DIR="/Applications"
 
+agvtool next-version
+
 xcodebuild \
   -project SDM.xcodeproj \
   -scheme "$SCHEME" \

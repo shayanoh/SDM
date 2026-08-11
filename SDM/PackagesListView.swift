@@ -386,6 +386,26 @@ struct PackagesListView: View {
         if dividers {
             Divider()
         }
+        
+        Button("Move to New Package", systemImage:"folder.badge.plus") {
+            let alert = NSAlert()
+            alert.messageText = "Enter new package name:"
+            alert.addButton(withTitle: "Move to New Package")
+            alert.addButton(withTitle: "Cancel")
+
+            let field = NSTextField(string: "")
+            field.frame.size.width = 250
+            alert.accessoryView = field
+
+            alert.window.initialFirstResponder = field
+
+            if alert.runModal() == .alertFirstButtonReturn {
+                let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                if (!name.isEmpty) {
+                    Task { await controller.moveItems(items.map(\.id), toNewPackageNamed: name) }
+                }
+            }
+        }
 
         Button("Remove from List", systemImage: "eraser.line.dashed") {
             Task { await controller.removeItems(items.map(\.id), deleteFile: false) }
