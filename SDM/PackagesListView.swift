@@ -270,13 +270,21 @@ struct PackagesListView: View {
         let items = resolveUUIDList(Array(ids))
         let isMultiple = items.count > 1
         let suffix = isMultiple ? "s" : ""
-        if items.contains(where: canOpen) {
-            Button(isMultiple ? "Open Files" : "Open File") {
-                for item in items where canOpen(item) {
-                    openFile(item)
+        if (!isMultiple) {
+            let item = items[0]
+            if canOpen(item) {
+                Button("Open File") {
+                        openFile(item)
                 }
+                .keyboardShortcut(.return, modifiers: [])
             }
-            .keyboardShortcut(.return, modifiers: [])
+            if let package = package(containing: item) {
+                Button("Show in Finder") {
+                    NSWorkspace.shared
+                        .open(controller.destinationPackageUrl(for: package))
+                }
+                .keyboardShortcut(.return, modifiers: [.command])
+            }
         }
         Button("Copy URL\(suffix) to Clipboard") {
             let urls = items.map(\.url)
