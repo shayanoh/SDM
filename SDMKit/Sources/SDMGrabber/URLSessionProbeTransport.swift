@@ -12,10 +12,25 @@ public struct URLSessionProbeTransport: ProbeTransport {
 
     public func send(_ request: ProbeRequest) async throws -> ProbeResponse {
         do {
-            let (data, response) = try await session.data(for: Self.makeURLRequest(for: request))
+            let (asyncData, response) = try await session.bytes(
+                for: Self.makeURLRequest(for: request))
             guard let http = response as? HTTPURLResponse else {
                 throw ProbeError.malformedResponse
             }
+
+            let maxBytes = request.range.map { Int($0.end - $0.start) } ?? 0
+
+            var data = Data()
+            data.reserveCapacity(maxBytes)
+
+            for try await byte in asyncData {
+                data.append(byte)
+
+                if data.count >= maxBytes {
+                    break
+                }
+            }
+
             return ProbeResponse(
                 statusCode: http.statusCode,
                 finalURL: http.url ?? request.url,

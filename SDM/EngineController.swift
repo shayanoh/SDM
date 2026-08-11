@@ -299,7 +299,7 @@ final class EngineController {
         await engine.moveItems(itemIDs, toPackage: packageID, atIndex: index)
         publish(await engine.snapshot())
     }
-    
+
     func moveItems(_ itemIDs: [UUID], toNewPackageNamed packageName: String) async {
         await engine.moveItems(itemIDs, toNewPackageNamed: packageName)
         publish(await engine.snapshot())

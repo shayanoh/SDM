@@ -354,10 +354,10 @@ public actor DownloadEngine {
     {
         await moveItems([itemID], toPackage: packageID, atIndex: index)
     }
-    
+
     /// Moves items into a new package
     public func moveItems(_ itemIDs: [UUID], toNewPackageNamed packageName: String) async {
-        guard !itemIDs.isEmpty else {return}
+        guard !itemIDs.isEmpty else { return }
         let newPackage = DownloadPackage(name: packageName)
         packages.append(newPackage)
         await moveItems(itemIDs, toPackage: newPackage.id, atIndex: 0)

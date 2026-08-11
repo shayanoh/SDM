@@ -386,8 +386,8 @@ struct PackagesListView: View {
         if dividers {
             Divider()
         }
-        
-        Button("Move to New Package", systemImage:"folder.badge.plus") {
+
+        Button("Move to New Package", systemImage: "folder.badge.plus") {
             let alert = NSAlert()
             alert.messageText = "Enter new package name:"
             alert.addButton(withTitle: "Move to New Package")
@@ -401,7 +401,7 @@ struct PackagesListView: View {
 
             if alert.runModal() == .alertFirstButtonReturn {
                 let name = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                if (!name.isEmpty) {
+                if !name.isEmpty {
                     Task { await controller.moveItems(items.map(\.id), toNewPackageNamed: name) }
                 }
             }
