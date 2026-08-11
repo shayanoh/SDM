@@ -9,10 +9,12 @@ import os.log
 /// actually notice one, was posted successfully and then shown nowhere.
 /// `NSObject` conformance is required by `UNUserNotificationCenterDelegate`.
 @MainActor
+@Observable
 final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
     private nonisolated static let log = Logger(
         subsystem: "com.shayanoh.SDM", category: "notifications")
     var onSideBarChangeRequest: ((String) -> Void)?
+    private var authorized: Bool?
     override init() {
         super.init()
         UNUserNotificationCenter.current().delegate = self
@@ -46,12 +48,21 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
             granted, error in
             if let error {
                 Self.log.error("Notification authorization request failed: \(error)")
+                Task { @MainActor in self.authorized = false }
             } else if !granted {
                 Self.log.notice(
                     "Notification authorization was denied — enable it in System Settings > Notifications > SDM."
                 )
+                Task { @MainActor in self.authorized = false }
+            } else {
+                Self.log.notice("Notification authorization succeeded.")
+                Task { @MainActor in self.authorized = true }
             }
         }
+    }
+
+    func isAuthorized() -> Bool? {
+        return authorized
     }
 
     func notifyDownloadFinished(filename: String) {

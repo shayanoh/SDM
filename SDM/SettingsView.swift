@@ -12,6 +12,7 @@ struct SettingsView: View {
     @Environment(EngineController.self) private var controller
     @Environment(ThemeStore.self) private var themeStore
     @Environment(ActivationPolicyController.self) private var activationPolicyController
+    @Environment(NotificationManager.self) private var notificationManager
     @Environment(ClipboardWatcher.self) private var clipboardWatcher
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
@@ -187,6 +188,14 @@ struct SettingsView: View {
                 Toggle("Package finished", isOn: $packageFinishedEnabled)
                 Toggle("Download failed", isOn: $downloadFailedEnabled)
                 Toggle("Links grabbed", isOn: $linksGrabbedEnabled)
+                if notificationManager.isAuthorized() != true {
+                    Text(
+                        "Notifications have been blocked from system settings.\nTo receive notifications enable them for SDM from Settings -> Notifications."
+                    )
+                    .foregroundStyle(theme.failedColor)
+                    .font(.caption)
+                    .multilineTextAlignment(.center)
+                }
             }
             Spacer(minLength: 0)
         }

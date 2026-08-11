@@ -112,7 +112,7 @@ struct SDMApp: App {
     /// has no idempotency of its own.
     @State private var autoAddedLinkIDs: Set<UUID> = []
     @State private var sidebarSelection: MainWindowView.SidebarItem? = .downloads
-    @State private var linkNotifications: NotificationManager
+    @State private var notificationManager: NotificationManager
     @State private var notifiedLinkIDs: Set<UUID> = []
     @Environment(\.openWindow) private var openWindow
 
@@ -122,7 +122,7 @@ struct SDMApp: App {
         let clipboard = ClipboardWatcher()
         let grabber = GrabberController()
         let activationPolicy = ActivationPolicyController()
-        _linkNotifications = State(initialValue: notification)
+        _notificationManager = State(initialValue: notification)
         _controller = State(initialValue: engine)
         _clipboardWatcher = State(initialValue: clipboard)
         _grabberController = State(initialValue: grabber)
@@ -142,7 +142,7 @@ struct SDMApp: App {
 
     var body: some Scene {
         let _ = {
-            linkNotifications.onSideBarChangeRequest = {
+            notificationManager.onSideBarChangeRequest = {
                 switch $0 {
                 case "linkgrabber":
                     sidebarSelection = .linkgrabber
@@ -175,7 +175,7 @@ struct SDMApp: App {
             let freshIDs = Set(newSnapshot.links.map(\.id)).subtracting(notifiedLinkIDs)
             if !freshIDs.isEmpty {
                 notifiedLinkIDs.formUnion(freshIDs)
-                linkNotifications.notifyLinksGrabbed(count: freshIDs.count)
+                notificationManager.notifyLinksGrabbed(count: freshIDs.count)
             }
 
             guard GrabberSettings.autoAddAndStartOnGrab else { return }
@@ -213,6 +213,7 @@ struct SDMApp: App {
                 .environment(themeStore)
                 .environment(activationPolicyController)
                 .environment(clipboardWatcher)
+                .environment(notificationManager)
         }
         .windowResizability(.contentSize)
 
