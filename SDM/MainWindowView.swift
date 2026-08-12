@@ -127,7 +127,8 @@ struct MainWindowView: View {
                 try? await Task.sleep(for: .seconds(2))
                 if ChromeExtension.isChromeInstalled() {
                     if ChromeExtension.isLatestVersionInstalled() == nil,
-                       let bundleVersion = ChromeExtension.bundledChromeExtensionVersion() {
+                        let bundleVersion = ChromeExtension.bundledChromeExtensionVersion()
+                    {
                         if bundleVersion != EngineSettingsStore.chromeSetupDialogLastVersion {
                             EngineSettingsStore.chromeSetupDialogLastVersion = bundleVersion
                             EngineSettingsStore.chromeSetupDialogShowCount = 0
