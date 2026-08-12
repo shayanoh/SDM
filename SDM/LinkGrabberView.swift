@@ -249,27 +249,31 @@ private struct LinkRow: View {
     let theme: Theme
 
     var body: some View {
-        HStack {
-            Text(link.effectiveFilename).lineLimit(1)
-            if link.isDuplicate {
-                Text("duplicate")
-                    .font(.caption)
-                    .foregroundStyle(theme.faultyColor)
-            }
-            Spacer()
-            verdictBadge
-            Text(fileSize)
-            if link.verdict != nil {
-                Button(role: .destructive) {
-                    let id = link.id
-                    Task { await controller.removeLink(id) }
-                } label: {
-                    Image(systemName: "trash")
+        VStack {
+            HStack {
+                Text(link.effectiveFilename).lineLimit(1)
+                    .help(link.finalURL.absoluteString)
+                if link.isDuplicate {
+                    Text("duplicate")
+                        .font(.caption)
+                        .foregroundStyle(theme.faultyColor)
                 }
-                .buttonStyle(.plain)
+                Spacer()
+                verdictBadge
+                Text(fileSize)
+                if link.verdict != nil {
+                    Button(role: .destructive) {
+                        let id = link.id
+                        Task { await controller.removeLink(id) }
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.plain)
+                }
             }
         }
         .padding(.vertical, 2)
+
     }
 
     @ViewBuilder
