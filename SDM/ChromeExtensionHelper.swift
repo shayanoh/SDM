@@ -110,25 +110,16 @@ enum ChromeExtension {
     }
 
     static func isLatestVersionInstalled() -> String? {
-        let isNew: Bool
-        if let latestVersion = bundledChromeExtensionVersion(),
-            let status = chromeExtensionStatus()
-        {
-            if latestVersion == status.version {
-                isNew = Date().timeIntervalSince(status.lastSeen) < 24 * 60 * 60
-                if isNew {
-                    return status.version
-                }
-            }
-        }
-        return nil
+        guard let latestVersion = bundledChromeExtensionVersion() else { return nil }
+        guard let status = chromeExtensionStatus() else { return nil }
+        guard latestVersion == status.version else { return nil }
+        return status.version
     }
 }
 
 enum ChromeNativeHostInstaller {
     static let hostName = "com.shayanoh.sdm.chrome_extension"
 
-    // Your permanent extension ID.
     static let extensionID = "fnnpcbmjpapeohfmpiefbocloodhlgjf"
 
     static let manifestFileName = "\(hostName).json"
@@ -241,20 +232,18 @@ struct ChromeExtensionSetupView: View {
         // Capture whatever version was known before this setup started.
 
         while !Task.isCancelled && !isComplete {
-            if let status = ChromeExtension.chromeExtensionStatus() {
-                if let version = ChromeExtension.isLatestVersionInstalled() {
-                    installedVersion = status.version
-                    isComplete = true
+            if let version = ChromeExtension.isLatestVersionInstalled() {
+                installedVersion = version
+                isComplete = true
 
-                    try? await Task.sleep(for: .seconds(5))
+                try? await Task.sleep(for: .seconds(5))
 
-                    if !Task.isCancelled {
-                        isComplete = false
-                        dismiss()
-                    }
-
-                    return
+                if !Task.isCancelled {
+                    isComplete = false
+                    dismiss()
                 }
+
+                return
             }
 
             try? await Task.sleep(for: .seconds(1))
@@ -330,7 +319,8 @@ struct ChromeExtensionSetupView: View {
 
                 StepView(
                     number: 1,
-                    title: "Open Chrome's Extensions page"
+                    title: "Open Chrome's Extensions page",
+                    theme: theme
                 ) {
                     Button("Open Chrome Extensions") {
                         ChromeExtension.openChromeExtensions()
@@ -340,7 +330,8 @@ struct ChromeExtensionSetupView: View {
 
                 StepView(
                     number: 2,
-                    title: "Enable Developer mode"
+                    title: "Enable Developer mode",
+                    theme: theme
                 ) {
                     Text(
                         "In the top-right corner of the Extensions page, turn on Developer mode."
@@ -357,7 +348,8 @@ struct ChromeExtensionSetupView: View {
 
                 StepView(
                     number: 3,
-                    title: "Choose Load unpacked"
+                    title: "Choose Load unpacked",
+                    theme: theme
                 ) {
                     Text(
                         "Click Load unpacked. A folder selection dialog will appear."
@@ -374,7 +366,8 @@ struct ChromeExtensionSetupView: View {
 
                 StepView(
                     number: 4,
-                    title: "Drag the SDM extension folder into the dialog"
+                    title: "Drag the SDM extension folder into the dialog",
+                    theme: theme
                 ) {
                     Text(
                         "Drag this folder onto Chrome's folder selection dialog, then click Select."
@@ -407,6 +400,7 @@ struct ChromeExtensionSetupView: View {
     struct StepView<Content: View>: View {
         let number: Int
         let title: String
+        public var theme: Theme
         @ViewBuilder let content: () -> Content
 
         var body: some View {
@@ -416,8 +410,8 @@ struct ChromeExtensionSetupView: View {
                         .font(.caption)
                         .fontWeight(.bold)
                         .frame(width: 22, height: 22)
-                        .background(.tint, in: Circle())
-                        .foregroundStyle(.white)
+                        .background(theme.accentColor, in: Circle())
+                        .foregroundStyle(theme.textPrimaryColor)
 
                     Text(title)
                         .fontWeight(.medium)

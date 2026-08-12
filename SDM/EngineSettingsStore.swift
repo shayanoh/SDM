@@ -16,6 +16,7 @@ enum EngineSettingsStore {
         static let autoStartDownloadsOnLaunch = "sdm.autoStartDownloadsOnLaunch"
         static let minSegmentSizeMB = "sdm.minSegmentSizeMB"
         static let chromeSetupDialogShowCount = "sdm.chromeSetupDialogShowCount"
+        static let chromeSetupDialogLastVersion = "sdm.chromeSetupDialogShowLastVersion"
     }
 
     static var maxConcurrent: Int {
@@ -60,5 +61,10 @@ enum EngineSettingsStore {
     static var chromeSetupDialogShowCount: Int {
         get { defaults.object(forKey: Key.chromeSetupDialogShowCount) as? Int ?? 0 }
         set { defaults.set(newValue, forKey: Key.chromeSetupDialogShowCount) }
+    }
+
+    static var chromeSetupDialogLastVersion: String {
+        get { defaults.object(forKey: Key.chromeSetupDialogLastVersion) as? String ?? "" }
+        set { defaults.set(newValue, forKey: Key.chromeSetupDialogLastVersion) }
     }
 }
