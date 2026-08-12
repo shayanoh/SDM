@@ -13,6 +13,8 @@ DEST_DIR="/Applications"
 
 agvtool next-version
 
+rm -rf build
+
 xcodebuild \
   -project SDM.xcodeproj \
   -scheme "$SCHEME" \
@@ -37,5 +39,7 @@ fi
 
 echo "Installing to $DEST_DIR/$APP_NAME"
 cp -R "$BUILT_APP" "$DEST_DIR/$APP_NAME"
+
+rm -rf build
 
 echo "Done."

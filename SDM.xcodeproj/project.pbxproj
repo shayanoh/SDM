@@ -10,6 +10,8 @@
 		5FAA0004A0B0C0D0E0F00004 /* SDMCore in Frameworks */ = {isa = PBXBuildFile; productRef = 5FAA0002A0B0C0D0E0F00002 /* SDMCore */; };
 		5FAA0005A0B0C0D0E0F00005 /* SDMEngine in Frameworks */ = {isa = PBXBuildFile; productRef = 5FAA0003A0B0C0D0E0F00003 /* SDMEngine */; };
 		5FAA0006A0B0C0D0E0F00006 /* SDMGrabber in Frameworks */ = {isa = PBXBuildFile; productRef = 5FAA0007A0B0C0D0E0F00007 /* SDMGrabber */; };
+		5FD44736302C095D004AD01F /* SDMNativeHost in CopyFiles */ = {isa = PBXBuildFile; fileRef = 5FD4472C302C06F6004AD01F /* SDMNativeHost */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		5FD44779302C0AA4004AD01F /* SDMChromeExtension in CopyFiles */ = {isa = PBXBuildFile; fileRef = 5FD44778302C0AA4004AD01F /* SDMChromeExtension */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -27,12 +29,53 @@
 			remoteGlobalIDString = 5F02DCF03020DAA0009E61DC;
 			remoteInfo = SDM;
 		};
+		5FD44737302C0980004AD01F /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 5F02DCE93020DAA0009E61DC /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5FD4472B302C06F6004AD01F;
+			remoteInfo = SDMNativeHost;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		5FD4472A302C06F6004AD01F /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 8;
+			dstPath = Helpers;
+			dstSubfolderSpec = 6;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+		};
+		5FD44735302C0947004AD01F /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = ../Helpers;
+			dstSubfolderSpec = 6;
+			files = (
+				5FD44736302C095D004AD01F /* SDMNativeHost in CopyFiles */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5FD44777302C0A83004AD01F /* CopyFiles */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 7;
+			files = (
+				5FD44779302C0AA4004AD01F /* SDMChromeExtension in CopyFiles */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		5F02DCF13020DAA0009E61DC /* SDM.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SDM.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		5F02DD003020DAA3009E61DC /* SDMTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SDMTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		5F02DD0A3020DAA3009E61DC /* SDMUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SDMUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		5FD4472C302C06F6004AD01F /* SDMNativeHost */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = SDMNativeHost; sourceTree = BUILT_PRODUCTS_DIR; };
+		5FD44778302C0AA4004AD01F /* SDMChromeExtension */ = {isa = PBXFileReference; lastKnownFileType = folder; path = SDMChromeExtension; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -64,6 +107,11 @@
 			path = SDMUITests;
 			sourceTree = "<group>";
 		};
+		5FD4472D302C06F6004AD01F /* SDMNativeHost */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = SDMNativeHost;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -91,15 +139,24 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		5FD44729302C06F6004AD01F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		5F02DCE83020DAA0009E61DC = {
 			isa = PBXGroup;
 			children = (
+				5FD44778302C0AA4004AD01F /* SDMChromeExtension */,
 				5F02DCF33020DAA0009E61DC /* SDM */,
 				5F02DD033020DAA3009E61DC /* SDMTests */,
 				5F02DD0D3020DAA3009E61DC /* SDMUITests */,
+				5FD4472D302C06F6004AD01F /* SDMNativeHost */,
 				5F02DCF23020DAA0009E61DC /* Products */,
 			);
 			sourceTree = "<group>";
@@ -110,6 +167,7 @@
 				5F02DCF13020DAA0009E61DC /* SDM.app */,
 				5F02DD003020DAA3009E61DC /* SDMTests.xctest */,
 				5F02DD0A3020DAA3009E61DC /* SDMUITests.xctest */,
+				5FD4472C302C06F6004AD01F /* SDMNativeHost */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -124,10 +182,13 @@
 				5F02DCED3020DAA0009E61DC /* Sources */,
 				5F02DCEE3020DAA0009E61DC /* Frameworks */,
 				5F02DCEF3020DAA0009E61DC /* Resources */,
+				5FD44735302C0947004AD01F /* CopyFiles */,
+				5FD44777302C0A83004AD01F /* CopyFiles */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				5FD44738302C0980004AD01F /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				5F02DCF33020DAA0009E61DC /* SDM */,
@@ -188,6 +249,28 @@
 			productReference = 5F02DD0A3020DAA3009E61DC /* SDMUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		5FD4472B302C06F6004AD01F /* SDMNativeHost */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 5FD44732302C06F6004AD01F /* Build configuration list for PBXNativeTarget "SDMNativeHost" */;
+			buildPhases = (
+				5FD44728302C06F6004AD01F /* Sources */,
+				5FD44729302C06F6004AD01F /* Frameworks */,
+				5FD4472A302C06F6004AD01F /* CopyFiles */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				5FD4472D302C06F6004AD01F /* SDMNativeHost */,
+			);
+			name = SDMNativeHost;
+			packageProductDependencies = (
+			);
+			productName = SDMNativeHost;
+			productReference = 5FD4472C302C06F6004AD01F /* SDMNativeHost */;
+			productType = "com.apple.product-type.tool";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -208,6 +291,9 @@
 					5F02DD093020DAA3009E61DC = {
 						CreatedOnToolsVersion = 26.0.1;
 						TestTargetID = 5F02DCF03020DAA0009E61DC;
+					};
+					5FD4472B302C06F6004AD01F = {
+						CreatedOnToolsVersion = 26.0.1;
 					};
 				};
 			};
@@ -231,6 +317,7 @@
 				5F02DCF03020DAA0009E61DC /* SDM */,
 				5F02DCFF3020DAA3009E61DC /* SDMTests */,
 				5F02DD093020DAA3009E61DC /* SDMUITests */,
+				5FD4472B302C06F6004AD01F /* SDMNativeHost */,
 			);
 		};
 /* End PBXProject section */
@@ -281,6 +368,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		5FD44728302C06F6004AD01F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -293,6 +387,11 @@
 			isa = PBXTargetDependency;
 			target = 5F02DCF03020DAA0009E61DC /* SDM */;
 			targetProxy = 5F02DD0B3020DAA3009E61DC /* PBXContainerItemProxy */;
+		};
+		5FD44738302C0980004AD01F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 5FD4472B302C06F6004AD01F /* SDMNativeHost */;
+			targetProxy = 5FD44737302C0980004AD01F /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -424,7 +523,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 8T59X95AG5;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -457,7 +556,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 8T59X95AG5;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -488,7 +587,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 8T59X95AG5;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.7;
@@ -509,7 +608,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 8T59X95AG5;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.7;
@@ -529,7 +628,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 8T59X95AG5;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
@@ -548,7 +647,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 6;
+				CURRENT_PROJECT_VERSION = 7;
 				DEVELOPMENT_TEAM = 8T59X95AG5;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
@@ -560,6 +659,34 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TEST_TARGET_NAME = SDM;
+			};
+			name = Release;
+		};
+		5FD44730302C06F6004AD01F /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 8T59X95AG5;
+				ENABLE_HARDENED_RUNTIME = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.shayanoh.SDM.NativeHost;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		5FD44731302C06F6004AD01F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 8T59X95AG5;
+				ENABLE_HARDENED_RUNTIME = YES;
+				PRODUCT_BUNDLE_IDENTIFIER = com.shayanoh.SDM.NativeHost;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
 		};
@@ -598,6 +725,15 @@
 			buildConfigurations = (
 				5F02DD1B3020DAA3009E61DC /* Debug */,
 				5F02DD1C3020DAA3009E61DC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		5FD44732302C06F6004AD01F /* Build configuration list for PBXNativeTarget "SDMNativeHost" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5FD44730302C06F6004AD01F /* Debug */,
+				5FD44731302C06F6004AD01F /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

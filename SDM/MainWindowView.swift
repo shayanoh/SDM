@@ -20,6 +20,7 @@ struct MainWindowView: View {
     @Environment(GrabberController.self) private var grabberController
     @Environment(ThemeStore.self) private var themeStore
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.openWindow) private var openWindow
     @Binding var selection: SidebarItem?
     private var theme: Theme { themeStore.resolved(for: colorScheme) }
     @State private var selectedItemIDs: Set<UUID> = []
@@ -120,6 +121,19 @@ struct MainWindowView: View {
                     pendingDeletion = nil
                 }
             )
+        }
+        .onAppear {
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                if ChromeExtension.isChromeInstalled() {
+                    if ChromeExtension.isLatestVersionInstalled() == nil {
+                        if EngineSettingsStore.chromeSetupDialogShowCount < 3 {
+                            EngineSettingsStore.chromeSetupDialogShowCount += 1
+                            openWindow(id: "chrome-extension-setup")
+                        }
+                    }
+                }
+            }
         }
     }
 

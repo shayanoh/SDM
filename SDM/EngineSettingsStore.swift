@@ -15,6 +15,7 @@ enum EngineSettingsStore {
         static let maxConnectionsPerHost = "sdm.maxConnectionsPerHost"
         static let autoStartDownloadsOnLaunch = "sdm.autoStartDownloadsOnLaunch"
         static let minSegmentSizeMB = "sdm.minSegmentSizeMB"
+        static let chromeSetupDialogShowCount = "sdm.chromeSetupDialogShowCount"
     }
 
     static var maxConcurrent: Int {
@@ -54,5 +55,10 @@ enum EngineSettingsStore {
     static var autoStartDownloadsOnLaunch: Bool {
         get { defaults.object(forKey: Key.autoStartDownloadsOnLaunch) as? Bool ?? false }
         set { defaults.set(newValue, forKey: Key.autoStartDownloadsOnLaunch) }
+    }
+
+    static var chromeSetupDialogShowCount: Int {
+        get { defaults.object(forKey: Key.chromeSetupDialogShowCount) as? Int ?? 0 }
+        set { defaults.set(newValue, forKey: Key.chromeSetupDialogShowCount) }
     }
 }
