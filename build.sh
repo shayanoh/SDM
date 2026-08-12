@@ -11,7 +11,21 @@ CONFIGURATION="Release"
 APP_NAME="SDM.app"
 DEST_DIR="/Applications"
 
-agvtool next-version
+NO_BUMP=false
+
+if [[ "${1:-}" == "--no-bump" ]]; then
+  NO_BUMP=true
+elif [[ $# -gt 0 ]]; then
+  echo "error: unknown argument: $1" >&2
+  echo "usage: $0 [--no-bump]" >&2
+  exit 1
+fi
+
+if [[ "$NO_BUMP" == false ]]; then
+  agvtool next-version
+else
+  echo "Skipping version bump."
+fi
 
 rm -rf build
 
