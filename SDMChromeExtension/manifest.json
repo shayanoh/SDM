@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+
+  "name": "Shayan's Download Manager",
+  "description": "Capture downloads from Chrome and send them to SDM.",
+  "version": "1.0.0",
+
+  "icons": {
+    "16": "images/icon-16.png",
+    "32": "images/icon-32.png",
+    "48": "images/icon-48.png",
+    "128": "images/icon-128.png"
+  },
+
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqY4dc390sjoLWhUEccIZCH2We1J+yWsk8hZ8FCYPi3iTVwmVmV98xCZnJ1XT3KUpEflIiz3LX+GUyLl1JQB7uiMDvaF9jgteYNRU8lIdAM7ijIzWG04JU0iGufq/35Xrqw2M9bq1ilJPEudELr5WVjSpBIEeIqquVPPQEzG37yp3CjeMeUDB8dsfJ6+eAiVtqPLCMVhzlOFKdNdIzovt2wmOUuAeqqG5DAVcrRqHyFCZhESNx1WAwVsf3mcC0hm9oELLsVQkwjd35yVUcyDqs6UqQQJW/zEFbJgXtRQbM3k0TdDhZq5b0XIJIhxzELFzj7XFdpC5PLGvUn20yO7UcQIDAQAB",
+
+  "permissions": ["downloads", "nativeMessaging", "storage"],
+
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": false
+  }
+}

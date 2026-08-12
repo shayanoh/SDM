@@ -138,6 +138,11 @@ struct SDMApp: App {
         }
         if GrabberSettings.clipboardWatchingEnabled { clipboard.start() }
 
+        do {
+            try ChromeNativeHostInstaller.install()
+        } catch {
+            print("Failed to install Chrome native host: \(error)")
+        }
     }
 
     var body: some Scene {
@@ -170,6 +175,10 @@ struct SDMApp: App {
                 .environment(grabberController)
                 .environment(themeStore)
                 .environment(clipboardWatcher)
+                .onOpenURL(perform: { url in
+                    sidebarSelection = .linkgrabber
+                    Task { await handleOpenUrl(url) }
+                })
         }
         .onChange(of: grabberController.snapshot) { _, newSnapshot in
             let freshIDs = Set(newSnapshot.links.map(\.id)).subtracting(notifiedLinkIDs)
@@ -205,6 +214,11 @@ struct SDMApp: App {
                 }
                 .keyboardShortcut(",", modifiers: .command)
             }
+            CommandGroup(before: .appSettings) {
+                Button("Install Google Chrome Extensions...") {
+                    openWindow(id: "chrome-extension-setup")
+                }
+            }
         }
 
         Window("Settings", id: "settings") {
@@ -217,6 +231,15 @@ struct SDMApp: App {
         }
         .windowResizability(.contentSize)
 
+        Window(
+            "Chrome Extension Setup",
+            id: "chrome-extension-setup"
+        ) {
+            ChromeExtensionSetupView()
+        }
+        .windowResizability(.contentSize)
+        .environment(themeStore)
+
         MenuBarExtra(isInserted: menuBarInsertedBinding) {
             MenuBarPopoverView(selection: $sidebarSelection)
                 .environment(controller)
@@ -228,6 +251,31 @@ struct SDMApp: App {
         .menuBarExtraStyle(.window)
     }
 
+    private func handleOpenUrl(_ url: URL) async {
+        guard url.scheme == "com-shayanoh-sdm" else {
+            return
+        }
+
+        guard url.host == "download" else {
+            return
+        }
+
+        guard
+            let components = URLComponents(
+                url: url,
+                resolvingAgainstBaseURL: false
+            ),
+            let downloadURLString = components.queryItems?
+                .first(where: { $0.name == "url" })?
+                .value,
+            let downloadURL = URL(string: downloadURLString)
+        else {
+            return
+        }
+
+        print("Received download:", downloadURL)
+        await grabberController.ingest(urls: [downloadURL])
+    }
     /// `MenuBarExtra(isInserted:)` needs a `Binding`, but there is nothing to
     /// persist here beyond what `activationPolicyController` already tracks —
     /// this just projects `showsMenuBarIcon` through a no-op setter, since
