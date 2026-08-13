@@ -198,7 +198,9 @@ struct SDMApp: App {
                 autoAddedLinkIDs.formUnion(ids)
                 let name = package.name
                 let urlItems = links.map {
-                    PackageUrlItem(url: $0.originalURL, size: $0.contentLength)
+                    PackageUrlItem(
+                        url: $0.originalURL, size: $0.contentLength,
+                        effectiveFilename: $0.effectiveFilename)
                 }
 
                 Task {

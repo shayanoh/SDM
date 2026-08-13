@@ -219,7 +219,9 @@ struct LinkGrabberView: View {
     private func addToDownloads(_ package: PackageCandidate, startImmediately: Bool) {
         let probedLinks = controller.probedLinks(inPackage: package.id)
         let urlItems = probedLinks.map {
-            PackageUrlItem(url: $0.originalURL, size: $0.contentLength)
+            PackageUrlItem(
+                url: $0.originalURL, size: $0.contentLength, effectiveFilename: $0.effectiveFilename
+            )
         }
         let name = package.name
         let linkIDs = package.linkIDs

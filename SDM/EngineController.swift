@@ -21,6 +21,7 @@ struct ItemTelemetry: Equatable {
 struct PackageUrlItem {
     let url: URL
     let size: Int64?
+    let effectiveFilename: String?
 }
 
 /// Bridges the engine actor to SwiftUI: drives the `AppTiming.ticksPerSecond`
@@ -375,8 +376,9 @@ final class EngineController {
         let items = urlItems.map { urlItem in
             DownloadItem(
                 url: urlItem.url,
-                filename: urlItem.url.lastPathComponent.isEmpty
-                    ? "download" : urlItem.url.lastPathComponent,
+                filename: urlItem.effectiveFilename
+                    ?? (urlItem.url.lastPathComponent.isEmpty
+                        ? "download" : urlItem.url.lastPathComponent),
                 totalBytes: urlItem.size,
                 state: startImmediately ? .queued : .stopped
             )

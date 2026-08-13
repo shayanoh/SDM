@@ -44,9 +44,9 @@ enum ChromeExtension {
 
     static func isChromeInstalled() -> Bool {
         guard
-            let chromeURL = NSWorkspace.shared.urlForApplication(
+            NSWorkspace.shared.urlForApplication(
                 withBundleIdentifier: "com.google.Chrome"
-            )
+            ) != nil
         else {
             return false
         }
