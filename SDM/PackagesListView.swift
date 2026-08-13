@@ -476,10 +476,26 @@ struct BottomPanel: View {
             activeSegments += telemetry?.activeSegments ?? item.activeSegments
             configuredSegments += telemetry?.configuredSegments ?? item.configuredSegments
             let itemSpeedHistory = telemetry?.speedHistory ?? item.speedHistory
-            if speedHistory.isEmpty {
+            if speedHistory.isEmpty && itemSpeedHistory.count > 0 {
                 speedHistory = itemSpeedHistory
             } else {
-                speedHistory = zip(speedHistory, itemSpeedHistory).map(+)
+                if itemSpeedHistory.count > 0 && item.state == .running {
+                    if speedHistory.count < itemSpeedHistory.count {
+                        speedHistory = zip(
+                            Array(repeating: 0, count: itemSpeedHistory.count - speedHistory.count)
+                                + speedHistory, itemSpeedHistory
+                        ).map(+)
+                    } else if itemSpeedHistory.count < speedHistory.count {
+                        speedHistory = zip(
+                            speedHistory,
+                            Array(repeating: 0, count: speedHistory.count - itemSpeedHistory.count)
+                                + itemSpeedHistory
+                        ).map(+)
+                    } else {
+                        speedHistory = zip(speedHistory, itemSpeedHistory).map(+)
+                    }
+
+                }
             }
             if let package = allPackages.filter({ $0.items.map(\.id).contains(item.id) }).first {
                 destinationFolders.insert(
@@ -499,6 +515,7 @@ struct BottomPanel: View {
                     .frame(height: 48)
                     Text(formatted(bytesPerSecond))
                         .font(.caption.monospacedDigit())
+                        .frame(minWidth: 64, alignment: .trailing)
                 }
                 .gridCellColumns(2)
             }
@@ -609,6 +626,7 @@ struct BottomPanel: View {
                         )
                     )
                     .font(.caption.monospacedDigit())
+                    .frame(minWidth: 64, alignment: .trailing)
                 }
                 .gridCellColumns(2)
             }

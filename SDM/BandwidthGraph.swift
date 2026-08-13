@@ -1,3 +1,4 @@
+import SDMCore
 import SwiftUI
 
 /// Hand-rolled in place of Swift Charts. Spec §9.6 originally reserved Charts
@@ -64,11 +65,20 @@ struct BandwidthGraph: View {
 
     private static func runningAverage(of values: [Double]) -> [Double] {
         guard !values.isEmpty else { return [] }
+        let twoSecondsTicks = AppTiming.ticksPerSecond * 2
         var result: [Double] = []
         var sum = 0.0
+        var count = 0
         for (index, value) in values.enumerated() {
             sum += value
-            result.append(sum / Double(index + 1))
+            count += 1
+            if count >= twoSecondsTicks {
+                result.append(sum / Double(count))
+                count -= 1
+                sum -= values[index - twoSecondsTicks + 1]
+            } else {
+                result.append(0)
+            }
         }
         return result
     }

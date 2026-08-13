@@ -24,7 +24,7 @@ public struct SpeedSampler: Sendable {
 
     /// - Parameters:
     ///   - historyLength: sparkline sample count kept, in ticks. Defaults to
-    ///     60 seconds' worth at the current `AppTiming.ticksPerSecond`.
+    ///     10 minutes' worth at the current `AppTiming.ticksPerSecond`.
     ///   - averagingWindowSeconds: how many trailing seconds `bytesPerSecond`
     ///     averages over while active. Spec calls for "the last two
     ///     seconds".
@@ -32,7 +32,7 @@ public struct SpeedSampler: Sendable {
     ///     directly, so a test can exercise a different rate deterministically
     ///     without depending on the shared constant's current value.
     public init(
-        historyLength: Int = AppTiming.ticksPerSecond * 60,
+        historyLength: Int = AppTiming.ticksPerSecond * 60 * 10,
         averagingWindowSeconds: Double = 2,
         ticksPerSecond: Int = AppTiming.ticksPerSecond
     ) {
@@ -112,9 +112,4 @@ public struct SpeedSampler: Sendable {
     }
 
     public var history: [Double] { samples }
-
-    public var runningAverage: Double {
-        guard !samples.isEmpty else { return 0 }
-        return samples.reduce(0, +) / Double(samples.count)
-    }
 }

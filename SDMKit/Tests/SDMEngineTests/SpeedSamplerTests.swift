@@ -113,24 +113,11 @@ import Testing
     #expect(sampler.history == [300, 400, 500])
 }
 
-@Test func runningAverageIgnoresEmptyHistory() {
-    #expect(SpeedSampler().runningAverage == 0)
-}
-
-@Test func runningAverageIsTheMeanOfHistory() {
-    var sampler = SpeedSampler(historyLength: 10, averagingWindowSeconds: 2, ticksPerSecond: 1)
-    sampler.record(bytes: 100)
-    sampler.tick()
-    sampler.record(bytes: 300)
-    sampler.tick()
-    #expect(sampler.runningAverage == 200)
-}
-
 @Test func defaultHistoryLengthScalesWithAppTiming() {
     var sampler = SpeedSampler()
-    for value in 1...(AppTiming.ticksPerSecond * 60 + 5) {
+    for value in 1...(AppTiming.ticksPerSecond * 60 * 10 + 5) {
         sampler.record(bytes: Int64(value))
         sampler.tick()
     }
-    #expect(sampler.history.count == AppTiming.ticksPerSecond * 60)
+    #expect(sampler.history.count == AppTiming.ticksPerSecond * 60 * 10)
 }
