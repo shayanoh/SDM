@@ -48,12 +48,44 @@ struct MainWindowView: View {
         }
     }
 
+    private var overallFraction: Double {
+        let running = controller.snapshot.packages.flatMap(\.items).filter {
+            ($0.state == .running || $0.state == .queued || $0.state == .completed)
+                && ($0.totalBytes ?? 0) > 0
+        }
+        guard !running.isEmpty else { return 0 }
+        return running.reduce(0.0) { $0 + $1.fractionCompleted } / Double(running.count)
+    }
+
     var body: some View {
         NavigationSplitView {
             List(selection: $selection) {
-                Label("Downloads", systemImage: "arrow.down.circle")
-                    .tag(SidebarItem.downloads)
-                    .listRowBackground(sidebarRowBackground(.downloads))
+                let items = controller.snapshot.packages.flatMap(\.items)
+                let countRunning = items.count(where: { i in i.state == .running })
+                let countQueued = items.count(where: { i in i.state == .queued })
+                let isDownloading = countRunning > 0
+                HStack {
+                    Label("Downloads", systemImage: "arrow.down.circle")
+                        .symbolEffect(
+                            .breathe, options: .repeat(.continuous), isActive: isDownloading)
+                    Spacer()
+                    if isDownloading {
+                        Text("\(countRunning)/\(countRunning+countQueued)")
+                            .font(.caption)
+                            .fontWeight(.bold)
+                            .foregroundStyle(theme.textPrimaryColor)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3)
+                            .background(theme.onlineColor)
+                            .clipShape(Capsule())
+                        ProgressView(value: overallFraction)
+                            .progressViewStyle(.circular)
+                            .tint(theme.accentColor)
+                            .controlSize(.mini)
+                    }
+                }
+                .tag(SidebarItem.downloads)
+                .listRowBackground(sidebarRowBackground(.downloads))
                 Label("Completed", systemImage: "checkmark.circle")
                     .tag(SidebarItem.completed)
                     .listRowBackground(sidebarRowBackground(.completed))
