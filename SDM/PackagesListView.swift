@@ -145,6 +145,22 @@ struct PackagesListView: View {
         }
         .scrollContentBackground(.hidden)
         .background(theme.surfacePrimaryColor)
+        // Container-level and selection-aware, unlike the per-row
+        // `.contextMenu(menuItems:)` this replaced: the framework only
+        // calls this closure — and only then does `resolveUUIDList` run —
+        // when someone actually right-clicks, instead of building every
+        // row's menu (and resolving its item list) on every render. Right-
+        // clicking an unselected row is handled by the framework the same
+        // way the old per-row `selectedItemIDs.contains(item.id) ?
+        // selectedItemIDs : [item.id]` ternary did by hand. A package
+        // header row keeps its own `.contextMenu` in `PackageHeaderRow`,
+        // which — being the more specific, inner modifier — wins over this
+        // one when right-clicking directly on a header.
+        .contextMenu(forSelectionType: UUID.self) { ids in
+            if !ids.isEmpty {
+                itemsContextMenu(ids)
+            }
+        }
     }
 
     /// Every row is both a drag source and a drop target for
@@ -178,9 +194,6 @@ struct PackagesListView: View {
             item: item, index: index, controller: controller,
             isSelected: selectedItemIDs.contains(item.id), theme: theme
         )
-        .contextMenu {
-            itemsContextMenu(selectedItemIDs.contains(item.id) ? selectedItemIDs : [item.id])
-        }
         .tag(item.id)
     }
 

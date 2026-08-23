@@ -21,6 +21,7 @@ struct MainWindowView: View {
     @Environment(ThemeStore.self) private var themeStore
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.scenePhase) private var scenePhase
     @Binding var selection: SidebarItem?
     private var theme: Theme { themeStore.resolved(for: colorScheme) }
     @State private var selectedItemIDs: Set<UUID> = []
@@ -58,6 +59,24 @@ struct MainWindowView: View {
     }
 
     var body: some View {
+        // A `Window(id:)` scene keeps this view's state alive across
+        // close/reopen so `openWindow(id:)` restores it instantly — but
+        // that also means SwiftUI keeps evaluating and redrawing the
+        // closed window's content (list rows, their context menus, drag
+        // payloads, and the per-row `Canvas` graphs with the display
+        // links backing them) even with no window left to show it.
+        // `scenePhase` goes `.background` for this window once it's no
+        // longer visible; swapping in an empty view then lets SwiftUI
+        // tear the real content down instead of continuing to drive it,
+        // and rebuilds it fresh the moment the window reopens.
+        if scenePhase == .background {
+            Color.clear
+        } else {
+            realBody
+        }
+    }
+
+    private var realBody: some View {
         NavigationSplitView {
             List(selection: $selection) {
                 let items = controller.snapshot.packages.flatMap(\.items)
