@@ -114,6 +114,7 @@ struct SDMApp: App {
     @State private var sidebarSelection: MainWindowView.SidebarItem? = .downloads
     @State private var notificationManager: NotificationManager
     @State private var notifiedLinkIDs: Set<UUID> = []
+    @State private var menuBarIconController = MenuBarIconController()
     @Environment(\.openWindow) private var openWindow
 
     init() {
@@ -248,9 +249,16 @@ struct SDMApp: App {
                 .environment(grabberController)
                 .environment(themeStore)
         } label: {
-            Image(nsImage: statusItemImage)
+            Image(nsImage: menuBarIconController.image)
         }
         .menuBarExtraStyle(.window)
+        // `controller.snapshot` changes every heartbeat tick regardless —
+        // this closure runs at that same rate, but `update(fraction:
+        // drawCircle:)` only re-rasterizes the icon when the ring would
+        // actually look different, instead of every tick.
+        .onChange(of: controller.snapshot) { _, _ in
+            menuBarIconController.update(fraction: overallFraction, drawCircle: downloadsRunning)
+        }
     }
 
     private func handleOpenUrl(_ url: URL) async {
@@ -299,29 +307,5 @@ struct SDMApp: App {
     private var downloadsRunning: Bool {
         return controller.snapshot.packages.flatMap(\.items).filter { $0.state == .running }.count
             > 0
-    }
-
-    /// `MenuBarExtra`'s custom label view ignores `.frame`/sizing modifiers
-    /// on live SwiftUI content — the status item falls back to the image's
-    /// native pixel size, rendering oversized and cropped. Rasterizing to a
-    /// fixed-size `NSImage` via `ImageRenderer` sidesteps that: the label
-    /// only ever sees a plain bitmap at the exact size we ask for.
-    private var statusItemImage: NSImage {
-        let renderer = ImageRenderer(
-            content: MenuBarRingIcon(
-                fraction: overallFraction,
-                drawCircle: downloadsRunning,
-            )
-        )
-
-        renderer.scale = 2
-
-        guard let image = renderer.nsImage else {
-            return NSImage()
-        }
-
-        image.isTemplate = true
-
-        return image
     }
 }

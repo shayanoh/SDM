@@ -13,7 +13,7 @@ import SwiftUI
 /// progress." Built as plain SwiftUI rather than a rasterized `NSImage`,
 /// which `.menuBarExtraStyle(.window)`'s custom label view supports
 /// directly. Takes `theme` explicitly — it is rendered via `ImageRenderer`
-/// outside the live view tree (see `SDMApp.statusItemImage`), where
+/// outside the live view tree (see `MenuBarIconController`), where
 /// `@Environment` is unavailable.
 struct MenuBarRingIcon: View {
     let fraction: Double
