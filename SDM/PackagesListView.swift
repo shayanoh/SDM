@@ -918,10 +918,19 @@ private struct PackageHeaderBytesText: View {
     let theme: Theme
 
     var body: some View {
-        Text("\(formattedBytes(liveCompletedBytes)) / \(formattedBytes(liveTotalBytes))")
-            .font(.caption)
-            .foregroundStyle(theme.textSecondaryColor)
-            .monospacedDigit()
+        HStack {
+            Text("\(formattedBytes(liveCompletedBytes)) / \(formattedBytes(liveTotalBytes))")
+                .font(.caption)
+                .foregroundStyle(theme.textSecondaryColor)
+                .monospacedDigit()
+            if hasRunningItems {
+                let eta = etaForRunningItems + etaForQueuedItems
+                if eta > 0 {
+                    let etaText = formatTimeIntervalForEta(eta)
+                    Text("ETA: \(etaText)")
+                }
+            }
+        }
     }
 
     /// Live per-item telemetry summed the same way `PackageSnapshot`'s own
@@ -940,6 +949,39 @@ private struct PackageHeaderBytesText: View {
         package.items.reduce(0) {
             $0 + (controller.itemTelemetry[$1.id]?.totalBytes ?? $1.totalBytes ?? 0)
         }
+    }
+
+    private var hasRunningItems: Bool {
+        package.items.contains(where: { $0.state == .running })
+    }
+    private var etaForRunningItems: TimeInterval {
+        package.items.filter({ $0.state == .running }).map({ item in
+            getEtaForItem(controller: controller, itemID: item.id, fallback: item)
+        }).max() ?? 0
+    }
+
+    private var etaForQueuedItems: TimeInterval {
+        let remainingBytes = package.items.filter({ $0.state == .queued }).map({ item in
+            let telemetry = controller.itemTelemetry[item.id]
+            let totalBytes = telemetry?.totalBytes ?? item.totalBytes ?? 0
+            if totalBytes == 0 {
+                return 0
+            }
+            let completedBytes = telemetry?.completed.totalBytes ?? item.completed.totalBytes
+            let remainingBytes = totalBytes - completedBytes
+            return remainingBytes
+        }).reduce(0, +)
+        let globalHistory = controller.snapshot.globalHistory.suffix(
+            min(10 * AppTiming.ticksPerSecond, controller.snapshot.globalHistory.count)
+        )
+        let globalSpeed =
+            globalHistory.count > 0
+            ? (globalHistory.reduce(0, +) / Double(globalHistory.count))
+            : controller.snapshot.globalBytesPerSecond
+        if globalSpeed <= 0 {
+            return 0
+        }
+        return calculateTimeRemaningForBytes(remainingBytes, atSpeedBPS: globalSpeed)
     }
 }
 
@@ -1324,6 +1366,10 @@ private struct ItemRow: View {
                 .frame(height: 6)
                 HStack {
                     statusLine
+                    if item.state == .running {
+                        ItemETAText(
+                            itemID: item.id, fallback: item, controller: controller, theme: theme)
+                    }
                     Spacer()
                     ItemBytesText(
                         itemID: item.id, fallback: item, controller: controller, theme: theme)
@@ -1334,6 +1380,10 @@ private struct ItemRow: View {
         .padding(.horizontal, 4)
         .opacity(item.isEnabled ? 1.0 : 0.55)
         .listRowBackground(alternatingRowBackground)
+    }
+
+    private var activeDownloadCount: Int {
+        controller.snapshot.packages.flatMap(\.items).filter { $0.state == .running }.count
     }
 
     /// Theme-driven zebra striping. `NSColor.alternatingContentBackgroundColors`
@@ -1532,6 +1582,51 @@ private struct ItemBytesText: View {
         Text("\(formattedBytes(completed.totalBytes)) / \(formattedBytes(totalBytes ?? 0))")
             .font(.caption.monospacedDigit())
             .foregroundStyle(theme.textSecondaryColor)
+    }
+}
+
+private func getEtaForItem(controller: EngineController, itemID: UUID, fallback: ItemSnapshot)
+    -> TimeInterval
+{
+    let telemetry = controller.itemTelemetry[itemID]
+
+    let history: [Double] = telemetry?.speedHistory ?? []
+    var speedAverage: Double = 0
+    if history.count > 0 {
+        let tickCount = min(history.count, AppTiming.ticksPerSecond * 10)
+        speedAverage = history.suffix(tickCount).reduce(0, +) / Double(tickCount)
+    } else {
+        speedAverage = telemetry?.bytesPerSecond ?? 0
+    }
+
+    if speedAverage == 0 {
+        return 0
+    }
+
+    let totalBytes = telemetry?.totalBytes ?? fallback.totalBytes ?? 0
+    if totalBytes == 0 {
+        return 0
+    }
+    let completedBytes = telemetry?.completed.totalBytes ?? fallback.completed.totalBytes
+    let remainingBytes = totalBytes - completedBytes
+
+    return calculateTimeRemaningForBytes(remainingBytes, atSpeedBPS: speedAverage)
+}
+
+private struct ItemETAText: View {
+    let itemID: UUID
+    let fallback: ItemSnapshot
+    let controller: EngineController
+    let theme: Theme
+
+    var body: some View {
+        let eta = getEtaForItem(controller: controller, itemID: itemID, fallback: fallback)
+        if eta > 0 {
+            let etaText = formatTimeIntervalForEta(eta)
+            Text("ETA: \(etaText)")
+                .font(.caption)
+                .foregroundStyle(theme.textSecondaryColor)
+        }
     }
 }
 
