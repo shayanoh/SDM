@@ -1394,17 +1394,82 @@ public actor DownloadEngine {
     }
 
     /// Runs one component's task to completion. Returns the thrown error, or
-    /// `nil` on success. `urlExpired` is handled in Task 6; for now it
-    /// propagates like any other error.
+    /// `nil` on success. A `403`/`410` on a `.resolved` component is
+    /// refreshed via the injected resolver and the task is restarted in
+    /// place against its existing bytes; anything else propagates. Parent
+    /// spec §7.3.
     private func runComponent(
         itemID: UUID, runID: UUID, componentRun: ComponentRun
     ) async -> (any Error)? {
-        do {
-            _ = try await componentRun.task.start()
-            return nil
-        } catch {
-            return error
+        var task = componentRun.task
+        let index = componentRun.componentIndex
+        while true {
+            do {
+                _ = try await task.start()
+                return nil
+            } catch let DownloadError.urlExpired(formatID) {
+                guard let resolver,
+                    let component = itemComponent(itemID: itemID, index: index),
+                    case .resolved(let extractor, let videoID, _) = component.origin
+                else { return DownloadError.serverError(status: 403) }
+
+                // A refresh consumes one attempt against the existing cap, so
+                // a genuinely broken video still terminates.
+                let attempt = (failedAttempts[itemID] ?? 0) + 1
+                failedAttempts[itemID] = attempt
+                guard attempt < retryPolicy.maxAttempts else {
+                    failedAttempts[itemID] = nil
+                    return DownloadError.refreshFailed(
+                        reason: "Gave up refreshing the download URL after \(attempt) attempts")
+                }
+
+                let refreshed: RefreshedFormat
+                do {
+                    refreshed = try await resolver.refresh(
+                        extractor: extractor, videoID: videoID, formatID: formatID)
+                } catch {
+                    return DownloadError.refreshFailed(
+                        reason: "Could not refresh the URL: \(error)")
+                }
+                guard refreshed.formatID == formatID else {
+                    return DownloadError.refreshFailed(reason: "The video's format changed")
+                }
+                if let known = component.totalBytes, let fresh = refreshed.filesize, fresh != known
+                {
+                    return DownloadError.refreshFailed(reason: "The video's size changed")
+                }
+
+                mutateItem(itemID) { item in
+                    if index < item.components.count { item.components[index].url = refreshed.url }
+                }
+                let perComponent = Swift.max(
+                    1, segmentCount(for: itemID) / (runners[itemID]?.components.count ?? 1))
+                let newTask = DownloadTask(
+                    id: itemID, sourceURL: refreshed.url,
+                    destinationURL: componentRun.destinationURL, transport: transport,
+                    configuration: DownloadTask.Configuration(
+                        workerCount: perComponent, minChunk: settings.minSegmentSizeBytes,
+                        checkpointInterval: settings.checkpointIntervalBytes,
+                        cachedCompleted: component.completed, refreshableFormatID: formatID))
+                if let slot = runners[itemID]?.components.firstIndex(where: {
+                    $0.componentIndex == index
+                }) {
+                    runners[itemID]?.components[slot].task = newTask
+                }
+                task = newTask
+                continue
+            } catch {
+                return error
+            }
         }
+    }
+
+    private func itemComponent(itemID: UUID, index: Int) -> FileComponent? {
+        for package in packages {
+            guard let item = package.items.first(where: { $0.id == itemID }) else { continue }
+            return index < item.components.count ? item.components[index] : nil
+        }
+        return nil
     }
 
     /// Assembly step after every component completed. `.none` → each task

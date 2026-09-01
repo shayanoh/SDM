@@ -8,6 +8,10 @@ public enum DownloadError: Error, Equatable {
     /// `LinkResolver` (a signed `googlevideo` URL that has expired). Carries
     /// the yt-dlp `format_id` the engine needs to request a fresh URL.
     case urlExpired(formatID: String)
+    /// The resolver could not hand back a usable fresh URL for an expired
+    /// component — the format is gone, its size changed, or the resolve
+    /// itself failed. Terminal.
+    case refreshFailed(reason: String)
     case incompleteAfterWorkersFinished
     /// The origin's response body ended before the claimed range was fully
     /// delivered, without the transport throwing — a clean short read. Bytes
