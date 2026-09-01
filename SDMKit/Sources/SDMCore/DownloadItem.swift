@@ -1,32 +1,66 @@
 import Foundation
 
-public struct DownloadItem: Identifiable, Equatable, Codable, Sendable {
+public struct DownloadItem: Identifiable, Equatable, Sendable {
     public let id: UUID
-    public var url: URL
-    public var filename: String
-    public var totalBytes: Int64?
-    public var completed: RangeSet
+    /// Invariant: at least one. A generic HTTP download has exactly one;
+    /// a muxed YouTube download has two (video + audio). Parent spec §5.
+    public var components: [FileComponent]
+    /// The final file once assembly (if any) completes.
+    public var outputFilename: String
+    public var assembly: Assembly
     public var state: ItemState
     /// Purely user-managed: "never start this, no matter what." Independent
-    /// of `state` — see `ItemState`'s doc comment. Only an explicit
-    /// Disable/Enable action may change this; scheduling actions (Start,
-    /// Stop, Pause All, Resume All, preemption) never touch it.
+    /// of `state` — see `ItemState`. Only Disable/Enable changes it.
     public var isEnabled: Bool
-    /// Whether the origin honors `Range` requests, or `nil` when it has not
-    /// been probed yet.
-    ///
-    /// Three-state on purpose. Only the engine can answer this, and only after
-    /// a probe, so a freshly grabbed item genuinely does not know. Collapsing
-    /// "unknown" into `false` would make every new item look non-resumable,
-    /// and spec §6.3 gives running non-resumable items an unconditional claim
-    /// on their slot — which would make nothing in the list preemptible.
-    public var isResumable: Bool?
     public var priority: Priority?
     /// Position within the owning package. Lower sorts earlier.
     public var position: Int
-    /// Server validator captured at download start, used to detect a changed remote file.
-    public var validator: String?
 
+    public init(
+        id: UUID = UUID(),
+        components: [FileComponent],
+        outputFilename: String,
+        assembly: Assembly = .none,
+        state: ItemState = .queued,
+        isEnabled: Bool = true,
+        priority: Priority? = nil,
+        position: Int = 0
+    ) {
+        precondition(!components.isEmpty, "a DownloadItem needs at least one component")
+        precondition(!outputFilename.isEmpty, "outputFilename must not be empty")
+        self.init(
+            unchecked: id, components: components, outputFilename: outputFilename,
+            assembly: assembly, state: state, isEnabled: isEnabled, priority: priority,
+            position: position)
+    }
+
+    /// Non-validating path used only by `init(from:)`. Matches
+    /// `DownloadPackage`/pre-Part-5 `DownloadItem`, whose synthesized
+    /// `Codable` never routed through their preconditioned initializers —
+    /// `PersistedState.isValid` is what rejects a corrupt snapshot after
+    /// decode, and it can only do that if decoding a bad value does not trap.
+    private init(
+        unchecked id: UUID,
+        components: [FileComponent],
+        outputFilename: String,
+        assembly: Assembly,
+        state: ItemState,
+        isEnabled: Bool,
+        priority: Priority?,
+        position: Int
+    ) {
+        self.id = id
+        self.components = components
+        self.outputFilename = outputFilename
+        self.assembly = assembly
+        self.state = state
+        self.isEnabled = isEnabled
+        self.priority = priority
+        self.position = position
+    }
+
+    /// The pre-Part-5 signature. Wraps a single URL into a one-component
+    /// HTTP item so every existing call site keeps compiling unchanged.
     public init(
         id: UUID = UUID(),
         url: URL,
@@ -40,27 +74,153 @@ public struct DownloadItem: Identifiable, Equatable, Codable, Sendable {
         position: Int = 0,
         validator: String? = nil
     ) {
-        precondition(!filename.isEmpty, "filename must not be empty")
-        self.id = id
-        self.url = url
-        self.filename = filename
-        self.totalBytes = totalBytes
-        self.completed = completed
-        self.state = state
-        self.isEnabled = isEnabled
-        self.isResumable = isResumable
-        self.priority = priority
-        self.position = position
-        self.validator = validator
+        self.init(
+            id: id,
+            components: [
+                FileComponent(
+                    url: url, partFilename: filename, totalBytes: totalBytes,
+                    completed: completed, validator: validator, origin: .http,
+                    isResumable: isResumable)
+            ],
+            outputFilename: filename,
+            assembly: .none,
+            state: state,
+            isEnabled: isEnabled,
+            priority: priority,
+            position: position)
+    }
+
+    // MARK: - Concatenated accessors (one-component: identical to before)
+
+    public var url: URL { components[0].url }
+    public var filename: String { outputFilename }
+
+    public var validator: String? {
+        get { components[0].validator }
+        set { for index in components.indices { components[index].validator = newValue } }
+    }
+
+    public var isResumable: Bool? {
+        get {
+            if components.contains(where: { $0.isResumable == false }) { return false }
+            if components.contains(where: { $0.isResumable == nil }) { return nil }
+            return true
+        }
+        set { for index in components.indices { components[index].isResumable = newValue } }
+    }
+
+    public var totalBytes: Int64? {
+        get {
+            guard components.allSatisfy({ $0.totalBytes != nil }) else { return nil }
+            return components.reduce(0) { $0 + ($1.totalBytes ?? 0) }
+        }
+        set {
+            precondition(components.count == 1, "set totalBytes only on a one-component item")
+            components[0].totalBytes = newValue
+        }
+    }
+
+    /// Item-space completed ranges: each component's ranges shifted by the
+    /// sum of the sizes before it. Falls back to component 0 alone while any
+    /// size is still unknown.
+    public var completed: RangeSet {
+        get {
+            let bases = componentBaseOffsets
+            guard bases.count == components.count else { return components[0].completed }
+            var union = RangeSet()
+            for (index, component) in components.enumerated() {
+                for range in component.completed.ranges {
+                    union.insert(
+                        ByteRange(start: range.start + bases[index], end: range.end + bases[index]))
+                }
+            }
+            return union
+        }
+        set {
+            precondition(components.count == 1, "set completed only on a one-component item")
+            components[0].completed = newValue
+        }
+    }
+
+    /// Running prefix sums of component sizes, or `[]` when any size is
+    /// unknown (so callers fall back rather than misplace ranges).
+    public var componentBaseOffsets: [Int64] {
+        guard components.allSatisfy({ $0.totalBytes != nil }) else { return [] }
+        var bases: [Int64] = []
+        var running: Int64 = 0
+        for component in components {
+            bases.append(running)
+            running += component.totalBytes ?? 0
+        }
+        return bases
     }
 
     public var fractionCompleted: Double {
         guard let total = totalBytes, total > 0 else { return 0 }
-        return Double(completed.totalBytes) / Double(total)
+        let done = components.reduce(Int64(0)) { $0 + $1.completed.totalBytes }
+        return Double(done) / Double(total)
     }
 
     public var isComplete: Bool {
-        guard let total = totalBytes else { return false }
-        return completed.isComplete(total: total)
+        components.allSatisfy(\.isComplete)
+    }
+}
+
+// MARK: - Codable (accepts the legacy flat shape and the new nested one)
+
+extension DownloadItem: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case id, components, outputFilename, assembly, state, isEnabled, priority, position
+        // legacy-only keys
+        case url, filename, totalBytes, completed, isResumable, validator
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let id = try container.decode(UUID.self, forKey: .id)
+        let state = try container.decodeIfPresent(ItemState.self, forKey: .state) ?? .queued
+        let isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
+        let priority = try container.decodeIfPresent(Priority.self, forKey: .priority)
+        let position = try container.decodeIfPresent(Int.self, forKey: .position) ?? 0
+
+        let components: [FileComponent]
+        let outputFilename: String
+        let assembly: Assembly
+        if container.contains(.components) {
+            components = try container.decode([FileComponent].self, forKey: .components)
+            outputFilename = try container.decode(String.self, forKey: .outputFilename)
+            assembly = try container.decodeIfPresent(Assembly.self, forKey: .assembly) ?? .none
+        } else {
+            let filename = try container.decode(String.self, forKey: .filename)
+            components = [
+                FileComponent(
+                    url: try container.decode(URL.self, forKey: .url),
+                    partFilename: filename,
+                    totalBytes: try container.decodeIfPresent(Int64.self, forKey: .totalBytes),
+                    completed: try container.decodeIfPresent(RangeSet.self, forKey: .completed)
+                        ?? RangeSet(),
+                    validator: try container.decodeIfPresent(String.self, forKey: .validator),
+                    origin: .http,
+                    isResumable: try container.decodeIfPresent(Bool.self, forKey: .isResumable))
+            ]
+            outputFilename = filename
+            assembly = .none
+        }
+        self.init(
+            unchecked: id, components: components, outputFilename: outputFilename,
+            assembly: assembly, state: state, isEnabled: isEnabled, priority: priority,
+            position: position)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(components, forKey: .components)
+        try container.encode(outputFilename, forKey: .outputFilename)
+        try container.encode(assembly, forKey: .assembly)
+        try container.encode(state, forKey: .state)
+        try container.encode(isEnabled, forKey: .isEnabled)
+        try container.encodeIfPresent(priority, forKey: .priority)
+        try container.encode(position, forKey: .position)
     }
 }

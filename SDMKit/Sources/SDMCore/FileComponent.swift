@@ -45,7 +45,6 @@ public struct FileComponent: Identifiable, Equatable, Codable, Sendable {
         isResumable: Bool? = nil,
         lastError: ComponentError? = nil
     ) {
-        precondition(!partFilename.isEmpty, "partFilename must not be empty")
         self.id = id
         self.url = url
         self.partFilename = partFilename

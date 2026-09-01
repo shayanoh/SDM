@@ -26,7 +26,11 @@ public struct PersistedState: Codable, Equatable, Sendable {
     /// gap instead of trusting the synthesized decoder.
     fileprivate var isValid: Bool {
         packages.allSatisfy { package in
-            !package.name.isEmpty && package.items.allSatisfy { !$0.filename.isEmpty }
+            !package.name.isEmpty
+                && package.items.allSatisfy {
+                    !$0.outputFilename.isEmpty && !$0.components.isEmpty
+                        && $0.components.allSatisfy { !$0.partFilename.isEmpty }
+                }
         }
     }
 }
