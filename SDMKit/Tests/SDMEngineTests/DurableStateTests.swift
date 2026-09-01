@@ -207,3 +207,52 @@ private func stoppedPackage(_ name: String = "a.bin") -> DownloadPackage {
         #expect(request.start >= prefix)
     }
 }
+
+@Test func loadsAndMigratesAV1SnapshotToMultiComponentItems() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let fileURL = dir.appendingPathComponent("state.json")
+    let v1 = """
+        {
+          "formatVersion": 1,
+          "packages": [
+            {
+              "id": "1B4E28BA-2FA1-11D2-883F-0016D3CCA427",
+              "name": "Old Package",
+              "priority": 2,
+              "position": 0,
+              "items": [
+                {
+                  "id": "2B4E28BA-2FA1-11D2-883F-0016D3CCA427",
+                  "url": "https://example.com/big.iso",
+                  "filename": "big.iso",
+                  "totalBytes": 5000,
+                  "completed": { "ranges": [ { "start": 0, "end": 2000 } ] },
+                  "state": { "stopped": {} },
+                  "isEnabled": true,
+                  "isResumable": true,
+                  "position": 0
+                }
+              ]
+            }
+          ]
+        }
+        """
+    try Data(v1.utf8).write(to: fileURL)
+
+    let store = JSONStateStore(fileURL: fileURL)
+    let loaded = await store.load()
+    #expect(loaded.formatVersion == 2)
+    #expect(loaded.packages.count == 1)
+    let item = try #require(loaded.packages.first?.items.first)
+    #expect(item.components.count == 1)
+    #expect(item.components[0].origin == .http)
+    #expect(item.url == URL(string: "https://example.com/big.iso")!)
+    #expect(item.completed.totalBytes == 2000)
+
+    await store.save(loaded)
+    await store.flush()
+    let reread = try JSONDecoder().decode(PersistedState.self, from: Data(contentsOf: fileURL))
+    #expect(reread.formatVersion == 2)
+    #expect(reread.packages.first?.items.first?.components.count == 1)
+}

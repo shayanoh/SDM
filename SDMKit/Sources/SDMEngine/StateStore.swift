@@ -2,7 +2,7 @@ import Foundation
 import SDMCore
 
 public struct PersistedState: Codable, Equatable, Sendable {
-    public static let currentFormatVersion = 1
+    public static let currentFormatVersion = 2
 
     public var formatVersion: Int
     public var packages: [DownloadPackage]
@@ -76,10 +76,13 @@ public actor JSONStateStore: StateStore {
     public func load() -> PersistedState {
         if let pending { return pending }
         guard let data = try? Data(contentsOf: fileURL),
-            let state = try? JSONDecoder().decode(PersistedState.self, from: data),
-            state.formatVersion == PersistedState.currentFormatVersion,
+            var state = try? JSONDecoder().decode(PersistedState.self, from: data),
+            (1...PersistedState.currentFormatVersion).contains(state.formatVersion),
             state.isValid
         else { return PersistedState() }
+        // A v1 file's items decode through `DownloadItem`'s legacy branch;
+        // normalize the version now so a later save/flush writes it back as v2.
+        state.formatVersion = PersistedState.currentFormatVersion
         return state
     }
 
