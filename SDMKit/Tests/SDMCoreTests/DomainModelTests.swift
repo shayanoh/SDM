@@ -60,3 +60,20 @@ import Testing
     let data = try JSONEncoder().encode(package)
     #expect(try JSONDecoder().decode(DownloadPackage.self, from: data) == package)
 }
+
+@Test func downloadPackageNoteDefaultsToNilAndRoundTrips() throws {
+    let plain = DownloadPackage(name: "P", items: [])
+    #expect(plain.note == nil)
+
+    let annotated = DownloadPackage(name: "Playlist", items: [], note: "50 of 320 videos")
+    #expect(annotated.note == "50 of 320 videos")
+    let data = try JSONEncoder().encode(annotated)
+    #expect(try JSONDecoder().decode(DownloadPackage.self, from: data) == annotated)
+
+    // Old snapshot without the key still decodes.
+    let legacy = Data(
+        #"{"id":"1B4E28BA-2FA1-11D2-883F-0016D3CCA427","name":"P","items":[],"priority":2,"position":0}"#
+            .utf8)
+    let decoded = try JSONDecoder().decode(DownloadPackage.self, from: legacy)
+    #expect(decoded.note == nil)
+}
