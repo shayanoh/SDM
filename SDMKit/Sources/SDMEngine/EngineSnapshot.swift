@@ -33,6 +33,10 @@ public struct ItemSnapshot: Sendable, Equatable, Identifiable {
     /// on disk — moved or deleted outside SDM. Always `false` for any other
     /// state.
     public let fileMissing: Bool
+    /// True while the engine is running `ffmpeg` to assemble a muxed item's
+    /// downloaded parts. The item's `state` is still `.running`. Parent
+    /// spec §7.2 (a distinct `ItemState.assembling` and its UI are Part 4).
+    public let isAssembling: Bool
 
     public init(
         id: UUID,
@@ -49,11 +53,13 @@ public struct ItemSnapshot: Sendable, Equatable, Identifiable {
         speedHistory: [Double],
         checkpointFailure: String? = nil,
         remainingAttempts: Int? = nil,
-        fileMissing: Bool = false
+        fileMissing: Bool = false,
+        isAssembling: Bool = false
     ) {
         self.checkpointFailure = checkpointFailure
         self.remainingAttempts = remainingAttempts
         self.fileMissing = fileMissing
+        self.isAssembling = isAssembling
         self.id = id
         self.url = url
         self.filename = filename

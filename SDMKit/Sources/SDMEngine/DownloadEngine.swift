@@ -132,7 +132,12 @@ public actor DownloadEngine {
 
     private let transport: any HTTPTransport
     private let stateStore: any StateStore
+    private let resolver: (any LinkResolver)?
+    private let muxer: (any Muxer)?
     private var settings: EngineSettings
+    /// Items currently in the `ffmpeg` assembly step. Their `state` stays
+    /// `.running`; the snapshot exposes this as `isAssembling`.
+    private var assembling: Set<UUID> = []
 
     private var packages: [DownloadPackage] = []
     private var runners: [UUID: Runner] = [:]
@@ -182,12 +187,16 @@ public actor DownloadEngine {
         transport: any HTTPTransport,
         stateStore: any StateStore,
         settings: EngineSettings,
-        retryPolicy: RetryPolicy = RetryPolicy()
+        retryPolicy: RetryPolicy = RetryPolicy(),
+        resolver: (any LinkResolver)? = nil,
+        muxer: (any Muxer)? = nil
     ) {
         self.transport = transport
         self.stateStore = stateStore
         self.settings = settings
         self.retryPolicy = retryPolicy
+        self.resolver = resolver
+        self.muxer = muxer
     }
 
     // MARK: - Mutations
@@ -1001,7 +1010,8 @@ public actor DownloadEngine {
                         remainingAttempts: failedAttempts[item.id].map {
                             retryPolicy.maxAttempts - $0
                         },
-                        fileMissing: fileMissing
+                        fileMissing: fileMissing,
+                        isAssembling: assembling.contains(item.id)
                     )
                 )
             }
@@ -1398,9 +1408,68 @@ public actor DownloadEngine {
     }
 
     /// Assembly step after every component completed. `.none` → each task
-    /// already finalized its own file. `.mux` → Task 5.
+    /// already finalized its own file, nothing to do. `.mux` → run `ffmpeg
+    /// -c copy` over the finalized parts into the output container, then
+    /// delete the parts. Parent spec §7.2.
     private func assemble(itemID: UUID) async -> ItemState {
-        .completed
+        guard let loc = location(of: itemID) else { return .completed }
+        let package = packages[loc.packageIndex]
+        let item = package.items[loc.itemIndex]
+        guard item.assembly == .mux else { return .completed }
+        return await runMux(item: item, packageName: package.name)
+    }
+
+    /// Runs the mux for a `.mux` item whose components are all downloaded.
+    /// Shared by `assemble()` and `retryMux()`.
+    private func runMux(item: DownloadItem, packageName: String) async -> ItemState {
+        guard let muxer else {
+            return .failed(reason: "ffmpeg is not configured")
+        }
+        guard item.components.count == 2 else {
+            return .failed(reason: "a muxed item needs exactly two components")
+        }
+        let folder = settings.downloadFolder.appendingPathComponent(packageName)
+        let videoPart = folder.appendingPathComponent(item.components[0].partFilename)
+        let audioPart = folder.appendingPathComponent(item.components[1].partFilename)
+        let output = folder.appendingPathComponent(item.outputFilename)
+        let container = MediaContainer.fromFileExtension(
+            (item.outputFilename as NSString).pathExtension)
+
+        assembling.insert(item.id)
+        defer { assembling.remove(item.id) }
+        do {
+            try await muxer.mux(
+                videoPart: videoPart, audioPart: audioPart, into: output, container: container)
+        } catch {
+            let tail: String
+            if case MuxError.ffmpegFailed(let stderrTail) = error {
+                tail = stderrTail
+            } else {
+                tail = "\(error)"
+            }
+            return .failed(reason: "mux failed: \(tail)")
+        }
+        try? FileManager.default.removeItem(at: videoPart)
+        try? FileManager.default.removeItem(at: audioPart)
+        for component in item.components {
+            ResumeSidecar.remove(
+                at: ResumeSidecar.url(for: folder.appendingPathComponent(component.partFilename)))
+        }
+        return .completed
+    }
+
+    /// Re-runs only the mux step for a `.failed` item whose components are
+    /// all downloaded — the "Retry mux" action. Parent spec §7.2 / §9.3.
+    public func retryMux(_ itemID: UUID) async {
+        guard let loc = location(of: itemID) else { return }
+        let package = packages[loc.packageIndex]
+        let item = package.items[loc.itemIndex]
+        guard item.assembly == .mux, case .failed = item.state,
+            item.components.allSatisfy(\.isComplete)
+        else { return }
+        let state = await runMux(item: item, packageName: package.name)
+        mutateItem(itemID) { $0.state = state }
+        await persist()
     }
 
     /// Retires a finished runner, writing each component's final bytes back
