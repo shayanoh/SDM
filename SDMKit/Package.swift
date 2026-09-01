@@ -8,6 +8,7 @@ let package = Package(
         .library(name: "SDMCore", targets: ["SDMCore"]),
         .library(name: "SDMEngine", targets: ["SDMEngine"]),
         .library(name: "SDMGrabber", targets: ["SDMGrabber"]),
+        .library(name: "SDMResolve", targets: ["SDMResolve"]),
     ],
     targets: [
         .target(name: "SDMCore", resources: [.process("Resources")]),
@@ -19,8 +20,10 @@ let package = Package(
             // swiftSettings: [.define("SDM_ENGINE_LOGGING")]
         ),
         .target(name: "SDMGrabber", dependencies: ["SDMCore"]),
+        .target(name: "SDMResolve", dependencies: ["SDMCore"]),
         .testTarget(name: "SDMCoreTests", dependencies: ["SDMCore"]),
         .testTarget(name: "SDMEngineTests", dependencies: ["SDMEngine"]),
         .testTarget(name: "SDMGrabberTests", dependencies: ["SDMGrabber"]),
+        .testTarget(name: "SDMResolveTests", dependencies: ["SDMResolve"]),
     ]
 )
