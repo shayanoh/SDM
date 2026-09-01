@@ -4,6 +4,10 @@ import SDMCore
 public enum DownloadError: Error, Equatable {
     case unknownSize
     case serverError(status: Int)
+    /// A `403`/`410` on a component whose URL can be refreshed by a
+    /// `LinkResolver` (a signed `googlevideo` URL that has expired). Carries
+    /// the yt-dlp `format_id` the engine needs to request a fresh URL.
+    case urlExpired(formatID: String)
     case incompleteAfterWorkersFinished
     /// The origin's response body ended before the claimed range was fully
     /// delivered, without the transport throwing — a clean short read. Bytes
@@ -28,13 +32,18 @@ public actor DownloadTask {
         /// Receive previously stored completed so UI can display its status.
         /// It will be automatically updated from sidecar when fetch starts.
         public var cachedCompleted: RangeSet?
+        /// When non-nil, a `403`/`410` becomes `DownloadError.urlExpired` (a
+        /// signed URL the engine can refresh) rather than a plain
+        /// `serverError`. It carries the yt-dlp `format_id`.
+        public var refreshableFormatID: String?
 
         public init(
             workerCount: Int,
             minChunk: Int64,
             checkpointInterval: Int64,
             checkpointStalenessTicks: Int = AppTiming.ticksPerSecond * 5,
-            cachedCompleted: RangeSet?
+            cachedCompleted: RangeSet?,
+            refreshableFormatID: String? = nil
         ) {
             precondition(workerCount >= 1, "workerCount must be at least 1")
             precondition(minChunk > 0, "minChunk must be positive")
@@ -45,6 +54,7 @@ public actor DownloadTask {
             self.checkpointInterval = checkpointInterval
             self.checkpointStalenessTicks = checkpointStalenessTicks
             self.cachedCompleted = cachedCompleted
+            self.refreshableFormatID = refreshableFormatID
         }
     }
 
@@ -149,6 +159,15 @@ public actor DownloadTask {
 
     private var sidecarURL: URL { ResumeSidecar.url(for: destinationURL) }
 
+    /// A `403`/`410` is a signed-URL expiry the engine can refresh when this
+    /// component came from a resolver; otherwise it is a plain server error.
+    private func statusError(_ status: Int) -> DownloadError {
+        if status == 403 || status == 410, let formatID = configuration.refreshableFormatID {
+            return .urlExpired(formatID: formatID)
+        }
+        return .serverError(status: status)
+    }
+
     /// Probes the origin, then runs the worker pool until the file is complete.
     public func start() async throws -> URL {
         try await prepare()
@@ -208,7 +227,7 @@ public actor DownloadTask {
             RangeRequest(url: sourceURL, range: ByteRange(start: 0, end: 1))
         )
         guard (200..<300).contains(probe.statusCode) else {
-            throw DownloadError.serverError(status: probe.statusCode)
+            throw statusError(probe.statusCode)
         }
         guard let size = probe.totalSize, size > 0 else { throw DownloadError.unknownSize }
 
@@ -531,7 +550,7 @@ public actor DownloadTask {
         #endif
         let response = try await transport.fetch(RangeRequest(url: sourceURL, range: claim))
         guard (200..<300).contains(response.statusCode) else {
-            throw DownloadError.serverError(status: response.statusCode)
+            throw statusError(response.statusCode)
         }
         #if SDM_ENGINE_LOGGING
             engineLog.debug(

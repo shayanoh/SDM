@@ -52,3 +52,9 @@ import Testing
             == .transient
     )
 }
+
+@Test func urlExpiredIsTransient() {
+    if case .permanent = RetryPolicy().classify(DownloadError.urlExpired(formatID: "137")) {
+        Issue.record("urlExpired must classify transient")
+    }
+}
