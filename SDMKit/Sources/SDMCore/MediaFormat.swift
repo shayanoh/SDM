@@ -1,0 +1,82 @@
+import Foundation
+
+public enum MediaKind: String, Sendable, Codable, Equatable {
+    case progressive, videoOnly, audioOnly
+}
+
+public enum VideoCodec: Sendable, Codable, Equatable, Hashable {
+    case av1, vp9, h264
+    case other(String)
+
+    public static let priority: [VideoCodec] = [.av1, .vp9, .h264]
+
+    public var rank: Int {
+        VideoCodec.priority.firstIndex(of: self) ?? Int.max
+    }
+}
+
+public enum AudioCodec: Sendable, Codable, Equatable, Hashable {
+    case opus, aac
+    case other(String)
+
+    public static let priority: [AudioCodec] = [.opus, .aac]
+
+    public var rank: Int {
+        AudioCodec.priority.firstIndex(of: self) ?? Int.max
+    }
+}
+
+public enum MediaContainer: Sendable, Codable, Equatable, Hashable {
+    case mp4, webm, m4a
+    case other(String)
+
+    public static let priority: [MediaContainer] = [.mp4, .webm]
+
+    public var rank: Int {
+        MediaContainer.priority.firstIndex(of: self) ?? Int.max
+    }
+
+    public var fileExtension: String {
+        switch self {
+        case .mp4: return "mp4"
+        case .webm: return "webm"
+        case .m4a: return "m4a"
+        case .other(let ext): return ext
+        }
+    }
+}
+
+public struct MediaFormat: Sendable, Codable, Equatable, Identifiable {
+    public let id: String
+    public var kind: MediaKind
+    public var height: Int?
+    public var width: Int?
+    public var vcodec: VideoCodec?
+    public var acodec: AudioCodec?
+    public var container: MediaContainer
+    public var filesize: Int64?
+    public var filesizeApprox: Int64?
+    public var tbr: Double?
+    public var url: URL
+
+    public init(
+        id: String, kind: MediaKind, height: Int?, width: Int?,
+        vcodec: VideoCodec?, acodec: AudioCodec?, container: MediaContainer,
+        filesize: Int64?, filesizeApprox: Int64?, tbr: Double?, url: URL
+    ) {
+        self.id = id
+        self.kind = kind
+        self.height = height
+        self.width = width
+        self.vcodec = vcodec
+        self.acodec = acodec
+        self.container = container
+        self.filesize = filesize
+        self.filesizeApprox = filesizeApprox
+        self.tbr = tbr
+        self.url = url
+    }
+
+    public var filesizeEffective: Int64? { filesize ?? filesizeApprox }
+    public var isApproximateSize: Bool { filesize == nil }
+}
