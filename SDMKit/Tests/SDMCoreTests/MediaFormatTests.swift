@@ -44,3 +44,29 @@ import Testing
     #expect(MediaContainer.mp4.fileExtension == "mp4")
     #expect(MediaContainer.other("mkv").fileExtension == "mkv")
 }
+
+@Test func defaultQualityPreferencesAcceptEverythingUpTo1080() {
+    let prefs = QualityPreferences.default
+    #expect(prefs.maxHeight == 1080)
+    #expect(prefs.videoCodecs == [.av1, .vp9, .h264])
+    #expect(prefs.containers == [.mp4, .webm])
+    #expect(prefs.audioCodecs == [.opus, .aac])
+}
+
+@Test func formatChoiceRequiresMuxOnlyWhenBothStreamsPresent() {
+    let v = MediaFormat(
+        id: "137", kind: .videoOnly, height: 1080, width: 1920, vcodec: .h264,
+        acodec: nil, container: .mp4, filesize: 100, filesizeApprox: nil, tbr: nil,
+        url: URL(string: "https://x/v")!)
+    let a = MediaFormat(
+        id: "140", kind: .audioOnly, height: nil, width: nil, vcodec: nil,
+        acodec: .aac, container: .m4a, filesize: 10, filesizeApprox: nil, tbr: nil,
+        url: URL(string: "https://x/a")!)
+    let muxed = FormatChoice(video: v, audio: a, outputContainer: .mp4, estimatedBytes: 110)
+    #expect(muxed.requiresMux)
+    #expect(muxed.formatIDs == ["137", "140"])
+
+    let progressive = FormatChoice(video: v, audio: nil, outputContainer: .mp4, estimatedBytes: 100)
+    #expect(progressive.requiresMux == false)
+    #expect(progressive.formatIDs == ["137"])
+}
