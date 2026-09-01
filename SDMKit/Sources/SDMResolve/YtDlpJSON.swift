@@ -12,21 +12,22 @@ struct YtDlpDump: Decodable {
 }
 
 struct YtDlpFormat: Decodable {
-    var format_id: String?
+    var formatID: String?
     var ext: String?
     var vcodec: String?
     var acodec: String?
     var height: Int?
     var width: Int?
     var filesize: Int64?
-    var filesize_approx: Int64?
+    var filesizeApprox: Int64?
     var tbr: Double?
     var url: String?
     var proto: String?
 
     enum CodingKeys: String, CodingKey {
-        case format_id, ext, vcodec, acodec, height, width, filesize
-        case filesize_approx
+        case formatID = "format_id"
+        case ext, vcodec, acodec, height, width, filesize
+        case filesizeApprox = "filesize_approx"
         case tbr, url
         case proto = "protocol"
     }
@@ -36,7 +37,12 @@ struct YtDlpEntry: Decodable {
     var id: String?
     var title: String?
     var url: String?
-    var ie_key: String?
+    var ieKey: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, url
+        case ieKey = "ie_key"
+    }
 }
 
 enum YtDlpParser {
@@ -76,7 +82,7 @@ enum YtDlpParser {
     }
 
     static func mediaFormat(from f: YtDlpFormat) -> MediaFormat? {
-        guard let id = f.format_id, hasDirectURL(f),
+        guard let id = f.formatID, hasDirectURL(f),
             let urlString = f.url, let url = URL(string: urlString),
             (f.ext ?? "") != "mhtml"
         else { return nil }
@@ -94,7 +100,7 @@ enum YtDlpParser {
         return MediaFormat(
             id: id, kind: kind, height: f.height, width: f.width,
             vcodec: vcodec, acodec: acodec, container: container(ext: f.ext),
-            filesize: f.filesize, filesizeApprox: f.filesize_approx, tbr: f.tbr, url: url)
+            filesize: f.filesize, filesizeApprox: f.filesizeApprox, tbr: f.tbr, url: url)
     }
 
     static func resolvedMedia(from dump: YtDlpDump) throws -> ResolvedMedia {

@@ -54,7 +54,7 @@ public struct YtDlpResolver: LinkResolver {
             + cookieSource().ytDlpArguments + [canonical]
         let out = try await runYtDlp(ytdlp, args, timeout: resolveTimeout)
         let dump = try decodeDump(out.stdout, context: "-J")
-        guard let raw = (dump.formats ?? []).first(where: { $0.format_id == formatID }),
+        guard let raw = (dump.formats ?? []).first(where: { $0.formatID == formatID }),
             let mapped = YtDlpParser.mediaFormat(from: raw)
         else { throw ResolveError.formatGone }
         return RefreshedFormat(
