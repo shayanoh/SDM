@@ -256,3 +256,36 @@ private func stoppedPackage(_ name: String = "a.bin") -> DownloadPackage {
     #expect(reread.formatVersion == 2)
     #expect(reread.packages.first?.items.first?.components.count == 1)
 }
+
+@Test func engineRestoresAV2ModelItemAndReportsItComplete() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let stateURL = dir.appendingPathComponent("state.json")
+    let payload = testPayload(4096)
+    let settings = EngineSettings(
+        maxConcurrent: 2, segmentsPerItem: 4, globalMaxConnections: 16, downloadFolder: dir)
+    let source = URL(string: "https://example.com/out.bin")!
+
+    do {
+        let engine = DownloadEngine(
+            transport: FakeOrigin(payload: payload),
+            stateStore: JSONStateStore(fileURL: stateURL), settings: settings)
+        await engine.add(
+            DownloadPackage(
+                name: "Pkg",
+                items: [DownloadItem(url: source, filename: "out.bin", state: .queued)]))
+        try await engine.runUntilIdle()
+        await engine.shutdown()
+    }
+
+    let engine2 = DownloadEngine(
+        transport: FakeOrigin(payload: payload),
+        stateStore: JSONStateStore(fileURL: stateURL), settings: settings)
+    await engine2.restore()
+    let item = try #require(await engine2.snapshot().packages.first?.items.first)
+    #expect(item.state == .completed)
+
+    let reread = try JSONDecoder().decode(PersistedState.self, from: Data(contentsOf: stateURL))
+    #expect(reread.formatVersion == 2)
+    #expect(reread.packages.first?.items.first?.components.count == 1)
+}
