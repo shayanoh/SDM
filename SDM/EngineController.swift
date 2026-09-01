@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import SDMCore
 import SDMEngine
+import SDMResolve
 
 /// The "hot" per-item fields that change every heartbeat tick while a
 /// download is active — split out from `ItemSnapshot` so a row can read live
@@ -81,6 +82,11 @@ final class EngineController {
         let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
         downloadFolder = downloads
 
+        // yt-dlp / ffmpeg are located once and shared by the resolver and the
+        // muxer. Cookie source and playlist cap are Part 4 Settings — literals
+        // for now.
+        let processRunner = SystemProcessRunner()
+        let binaryLocator = BinaryLocator()
         engine = DownloadEngine(
             transport: URLSessionTransport(),
             stateStore: JSONStateStore(fileURL: support.appendingPathComponent("state.json")),
@@ -91,7 +97,13 @@ final class EngineController {
                 maxConnectionsPerHost: EngineSettingsStore.maxConnectionsPerHost,
                 downloadFolder: downloads,
                 minSegmentSizeBytes: Int64(EngineSettingsStore.minSegmentSizeMB) * 1024 * 1024
-            )
+            ),
+            resolver: YtDlpResolver(
+                runner: processRunner, locator: binaryLocator,
+                cookieSource: { .none },  // Part 4: read from Settings
+                maxPlaylistVideos: { 50 }  // Part 4: read from Settings
+            ),
+            muxer: FFmpegMuxer(runner: processRunner, locator: binaryLocator)
         )
     }
 
