@@ -1,0 +1,9 @@
+{
+  "id": "dQw4w9WgXcQ",
+  "title": "Rick Astley - Never Gonna Give You Up",
+  "extractor": "youtube",
+  "duration": 213.0,
+  "formats": [
+    { "format_id": "248", "ext": "webm", "vcodec": "vp9", "acodec": "none", "height": 1080, "tbr": 2800.4, "filesize": 74000000, "protocol": "https", "url": "https://rr5---sn-FRESH.googlevideo.com/video248" }
+  ]
+}

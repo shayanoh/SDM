@@ -1,0 +1,10 @@
+{
+  "id": "hlsOnly456",
+  "title": "Live Stream VOD",
+  "extractor": "youtube",
+  "duration": 3600.0,
+  "formats": [
+    { "format_id": "233", "ext": "mp4", "vcodec": "none", "acodec": "none", "protocol": "m3u8_native", "url": "https://manifest.googlevideo.com/a.m3u8" },
+    { "format_id": "270", "ext": "mp4", "vcodec": "avc1.640028", "acodec": "none", "height": 1080, "protocol": "m3u8_native", "url": "https://manifest.googlevideo.com/v.m3u8" }
+  ]
+}
