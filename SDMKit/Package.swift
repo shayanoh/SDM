@@ -24,6 +24,8 @@ let package = Package(
         .testTarget(name: "SDMCoreTests", dependencies: ["SDMCore"]),
         .testTarget(name: "SDMEngineTests", dependencies: ["SDMEngine"]),
         .testTarget(name: "SDMGrabberTests", dependencies: ["SDMGrabber"]),
-        .testTarget(name: "SDMResolveTests", dependencies: ["SDMResolve"]),
+        .testTarget(
+            name: "SDMResolveTests", dependencies: ["SDMResolve"],
+            resources: [.copy("Fixtures")]),
     ]
 )
