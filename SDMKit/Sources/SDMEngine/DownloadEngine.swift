@@ -160,6 +160,10 @@ public actor DownloadEngine {
     /// is the same idiom `checkpointTick()` uses and keeps the engine
     /// deterministic under test.
     private var retryHoldTicks: [UUID: Int] = [:]
+    /// The most recent transient failure's message per item, surfaced in the
+    /// snapshot only while `failedAttempts` still holds the item (i.e. it is
+    /// retrying, not yet terminal and not recovered).
+    private var lastFailure: [UUID: String] = [:]
     /// Bytes an attempt started from, so a failure that nevertheless moved
     /// bytes can clear the attempt counter.
     private var attemptStartBytes: [UUID: Int64] = [:]
@@ -690,6 +694,7 @@ public actor DownloadEngine {
 
         failedAttempts[itemID] = nil
         retryHoldTicks[itemID] = nil
+        lastFailure[itemID] = nil
         sampledBytes[itemID] = nil
         checkpointFailures[itemID] = nil
         attemptStartBytes[itemID] = nil
@@ -802,6 +807,7 @@ public actor DownloadEngine {
     private func clearItemBookkeeping(_ itemID: UUID) {
         failedAttempts[itemID] = nil
         retryHoldTicks[itemID] = nil
+        lastFailure[itemID] = nil
         samplers[itemID] = nil
         sampledBytes[itemID] = nil
         checkpointFailures[itemID] = nil
@@ -1037,6 +1043,17 @@ public actor DownloadEngine {
                         checkpointFailure: checkpointFailure,
                         remainingAttempts: failedAttempts[item.id].map {
                             retryPolicy.maxAttempts - $0
+                        },
+                        failedAttemptCount: failedAttempts[item.id],
+                        // Only meaningful while the item is still retrying —
+                        // `failedAttempts` is the gate, and it is cleared on
+                        // success, progress, and terminal failure alike.
+                        lastFailureReason: failedAttempts[item.id] != nil
+                            ? lastFailure[item.id] : nil,
+                        retryHoldSeconds: retryHoldTicks[item.id].map {
+                            Int(
+                                ($0 + AppTiming.ticksPerSecond - 1)
+                                    / AppTiming.ticksPerSecond)
                         },
                         fileMissing: fileMissing,
                         isAssembling: assembling.contains(item.id),
@@ -1675,16 +1692,19 @@ public actor DownloadEngine {
         if case .permanent(let reason) = retryPolicy.classify(error) {
             failedAttempts[itemID] = nil
             retryHoldTicks[itemID] = nil
+            lastFailure[itemID] = nil
             return .failed(reason: reason)
         }
 
         if madeProgress { failedAttempts[itemID] = nil }
         let attempt = (failedAttempts[itemID] ?? 0) + 1
         failedAttempts[itemID] = attempt
+        lastFailure[itemID] = Self.describe(error)
 
         guard attempt < retryPolicy.maxAttempts else {
             failedAttempts[itemID] = nil
             retryHoldTicks[itemID] = nil
+            lastFailure[itemID] = nil
             return .failed(
                 reason:
                     "Gave up after \(attempt) attempts: \(Self.describe(error))"

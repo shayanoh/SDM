@@ -127,6 +127,52 @@ private func stateOf(_ id: UUID, in engine: DownloadEngine) async -> ItemState? 
     #expect(try Data(contentsOf: destination) == payload)
 }
 
+private func itemSnapshot(_ id: UUID, in engine: DownloadEngine) async -> ItemSnapshot? {
+    await engine.snapshot().packages.flatMap(\.items).first { $0.id == id }
+}
+
+/// A transient failure that returns the item to `.queued` must not look
+/// identical to a fresh queue: the snapshot carries the last error, the
+/// consecutive-attempt count, and how long the backoff hold has left — and
+/// all three clear once the origin recovers and the item completes.
+@Test func aTransientFailureSurfacesTheLastErrorAndRetryHoldInTheSnapshot() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let payload = testPayload(2000)
+
+    var behavior = FakeOrigin.Behavior()
+    behavior.truncateAfterBytes = 500
+    behavior.chunkSize = 100
+    let origin = FakeOrigin(payload: payload, behavior: behavior)
+    let engine = makeEngine(
+        transport: origin,
+        folder: dir,
+        retryPolicy: RetryPolicy(maxAttempts: 5, baseDelay: .seconds(2))
+    )
+
+    let package = onePackage()
+    let itemID = package.items[0].id
+    await engine.add(package)
+    try await engine.runUntilIdle()
+
+    let held = try #require(await itemSnapshot(itemID, in: engine))
+    #expect(held.state == .queued)
+    #expect(held.isRetrying)
+    #expect(held.failedAttemptCount == 1)
+    #expect(held.lastFailureReason != nil)
+    #expect((held.retryHoldSeconds ?? 0) > 0)
+
+    await origin.setBehavior(FakeOrigin.Behavior())
+    try await pump(engine, ticks: 10 * AppTiming.ticksPerSecond)
+
+    let done = try #require(await itemSnapshot(itemID, in: engine))
+    #expect(done.state == .completed)
+    #expect(!done.isRetrying)
+    #expect(done.lastFailureReason == nil)
+    #expect(done.retryHoldSeconds == nil)
+    #expect(done.failedAttemptCount == nil)
+}
+
 // MARK: - Permanent local failures
 
 /// `DownloadTask.finalize()` refuses to overwrite an existing destination, and

@@ -563,7 +563,8 @@ struct BottomPanel: View {
                 HStack {
                     let completed = states[.completed] ?? 0
                     let running = states[.running] ?? 0
-                    let queued = states[.queued] ?? 0
+                    let retrying = downloadItems.filter(\.isRetrying).count
+                    let queued = (states[.queued] ?? 0) - retrying
                     let stopped = states[.stopped] ?? 0
                     let failed = states[.failed(reason: "")] ?? 0
                     if completed > 0 {
@@ -573,6 +574,10 @@ struct BottomPanel: View {
                     if running > 0 {
                         Text("\(running) Running")
                             .foregroundStyle(theme.accentColor)
+                    }
+                    if retrying > 0 {
+                        Text("\(retrying) Retrying")
+                            .foregroundStyle(theme.faultyColor)
                     }
                     if queued > 0 {
                         Text("\(queued) Queued")
@@ -627,6 +632,40 @@ struct BottomPanel: View {
         .frame(maxWidth: .infinity)
     }
 
+    /// The panel spells the state out in full — including the whole retry /
+    /// failure reason, which the list row can only show the first line of.
+    private func statusDescription(_ item: ItemSnapshot) -> String {
+        if item.isAssembling { return item.isEnabled ? "Assembling…" : "Assembling… (disabled)" }
+        let base: String
+        if item.isRetrying {
+            let when = item.retryHoldSeconds.map { "retrying in \($0)s" } ?? "retrying soon"
+            let attempt =
+                item.failedAttemptCount.map { done in
+                    let total = done + (item.remainingAttempts ?? 0)
+                    return "attempt \(done) of \(total), "
+                } ?? ""
+            let why = item.lastFailureReason.map { "\nLast failure: \($0)" } ?? ""
+            base = "Retrying — \(attempt)\(when)\(why)"
+        } else {
+            switch item.state {
+            case .queued: base = "Queued"
+            case .stopped: base = "Stopped"
+            case .running: base = "Running"
+            case .completed:
+                base = item.fileMissing ? "Completed — file missing on disk" : "Completed"
+            case .failed(let reason): base = "Failed — \(reason)"
+            }
+        }
+        return item.isEnabled ? base : "\(base) (disabled)"
+    }
+
+    private func statusColor(_ item: ItemSnapshot) -> Color {
+        if case .failed = item.state { return theme.failedColor }
+        if item.isRetrying { return theme.faultyColor }
+        if item.state == .completed && item.fileMissing { return theme.faultyColor }
+        return theme.textPrimaryColor
+    }
+
     @ViewBuilder
     private func singleItemData(downloadItem: ItemSnapshot, inPackage package: PackageSnapshot)
         -> some View
@@ -659,6 +698,14 @@ struct BottomPanel: View {
                 )
                 .frame(height: 6)
                 .gridCellColumns(2)
+            }
+            GridRow {
+                Text("Status")
+                Text(statusDescription(downloadItem))
+                    .font(.body)
+                    .foregroundStyle(statusColor(downloadItem))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             GridRow {
                 Text("Filename")
@@ -1446,6 +1493,9 @@ private struct ItemRow: View {
 
     private var stateIconName: String {
         if item.isAssembling { return "wand.and.stars" }
+        if item.isRetrying {
+            return "exclamationmark.arrow.trianglehead.counterclockwise.rotate.90"
+        }
         switch item.state {
         case .running:
             return "arrow.down.circle"
@@ -1461,24 +1511,26 @@ private struct ItemRow: View {
     }
 
     private var stateIconVariableValue: Double? {
+        if item.isRetrying { return nil }
         switch item.state {
         case .running, .queued, .stopped:
-            item.fractionCompleted
+            return item.fractionCompleted
         case .completed, .failed:
-            nil
+            return nil
         }
     }
 
     private var stateIconColor: Color {
+        if item.isRetrying { return theme.faultyColor }
         switch item.state {
         case .running:
-            theme.accentColor
+            return theme.accentColor
         case .completed:
-            theme.onlineColor
+            return theme.onlineColor
         case .failed:
-            theme.failedColor
+            return theme.failedColor
         case .queued, .stopped:
-            theme.textSecondaryColor
+            return theme.textSecondaryColor
         }
     }
 
@@ -1505,10 +1557,8 @@ private struct ItemRow: View {
         HStack(spacing: 6) {
             Text(Self.describe(item))
                 .font(.caption)
-                .foregroundStyle(
-                    isFailed
-                        ? AnyShapeStyle(theme.failedColor) : AnyShapeStyle(theme.textSecondaryColor)
-                )
+                .lineLimit(2)
+                .foregroundStyle(statusColor)
             if let checkpointFailure = item.checkpointFailure {
                 // Not a failure of the download, but it means a crash would
                 // lose everything transferred so far.
@@ -1525,15 +1575,36 @@ private struct ItemRow: View {
         return false
     }
 
-    private static func describe(_ item: ItemSnapshot) -> String {
+    private var statusColor: AnyShapeStyle {
+        if isFailed { return AnyShapeStyle(theme.failedColor) }
+        if item.isRetrying { return AnyShapeStyle(theme.faultyColor) }
+        return AnyShapeStyle(theme.textSecondaryColor)
+    }
+
+    /// The first line of a possibly multi-line error (yt-dlp and transport
+    /// errors can be several lines); the row has room for one.
+    static func firstLine(_ text: String) -> String {
+        text.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? text
+    }
+
+    static func describe(_ item: ItemSnapshot) -> String {
         if item.isAssembling { return "Assembling…" }
         let base: String
-        switch item.state {
-        case .queued: base = "Queued"
-        case .stopped: base = "Stopped"
-        case .running: base = "Running"
-        case .completed: base = "Completed"
-        case .failed(let reason): base = "Failed — \(reason)"
+        if item.isRetrying {
+            let when = item.retryHoldSeconds.map { "Retrying in \($0)s" } ?? "Retrying soon"
+            let left =
+                (item.remainingAttempts).map { " · \($0) attempt\($0 == 1 ? "" : "s") left" }
+                ?? ""
+            let why = item.lastFailureReason.map { " — \(firstLine($0))" } ?? ""
+            base = "\(when)\(left)\(why)"
+        } else {
+            switch item.state {
+            case .queued: base = "Queued"
+            case .stopped: base = "Stopped"
+            case .running: base = "Running"
+            case .completed: base = "Completed"
+            case .failed(let reason): base = "Failed — \(reason)"
+            }
         }
         return item.isEnabled ? base : "\(base) (disabled)"
     }

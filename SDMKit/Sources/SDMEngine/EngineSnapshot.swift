@@ -29,6 +29,17 @@ public struct ItemSnapshot: Sendable, Equatable, Identifiable {
     /// if it has never failed. Spec §6.4's "manual retry action" needs this
     /// to show the operator how much budget is left before giving up.
     public let remainingAttempts: Int?
+    /// Consecutive failed attempts so far, or `nil` once an attempt succeeds
+    /// or makes real progress (the engine resets its counter then). Non-`nil`
+    /// on a `.queued` item means it is mid-retry, not freshly enqueued.
+    public let failedAttemptCount: Int?
+    /// The most recent transient failure's message while the item is retrying,
+    /// or `nil` when it is not. A terminal `.failed` already carries its
+    /// reason in `state`; this is for the retrying-but-not-yet-terminal gap.
+    public let lastFailureReason: String?
+    /// Seconds left on the backoff hold before the next attempt, or `nil` when
+    /// the item is not being held. Lets the UI say "retrying in Ns".
+    public let retryHoldSeconds: Int?
     /// True only for a `.completed` item whose destination file is no longer
     /// on disk — moved or deleted outside SDM. Always `false` for any other
     /// state.
@@ -62,6 +73,9 @@ public struct ItemSnapshot: Sendable, Equatable, Identifiable {
         speedHistory: [Double],
         checkpointFailure: String? = nil,
         remainingAttempts: Int? = nil,
+        failedAttemptCount: Int? = nil,
+        lastFailureReason: String? = nil,
+        retryHoldSeconds: Int? = nil,
         fileMissing: Bool = false,
         isAssembling: Bool = false,
         assembly: Assembly = .none,
@@ -69,6 +83,9 @@ public struct ItemSnapshot: Sendable, Equatable, Identifiable {
     ) {
         self.checkpointFailure = checkpointFailure
         self.remainingAttempts = remainingAttempts
+        self.failedAttemptCount = failedAttemptCount
+        self.lastFailureReason = lastFailureReason
+        self.retryHoldSeconds = retryHoldSeconds
         self.fileMissing = fileMissing
         self.isAssembling = isAssembling
         self.assembly = assembly
@@ -90,6 +107,12 @@ public struct ItemSnapshot: Sendable, Equatable, Identifiable {
     public var fractionCompleted: Double {
         guard let total = totalBytes, total > 0 else { return 0 }
         return Double(completed.totalBytes) / Double(total)
+    }
+
+    /// A `.queued` item that has already failed at least once — waiting on a
+    /// backoff hold before its next attempt, not freshly enqueued.
+    public var isRetrying: Bool {
+        state == .queued && failedAttemptCount != nil
     }
 }
 
