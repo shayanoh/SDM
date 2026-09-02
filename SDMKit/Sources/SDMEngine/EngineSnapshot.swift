@@ -35,8 +35,12 @@ public struct ItemSnapshot: Sendable, Equatable, Identifiable {
     public let fileMissing: Bool
     /// True while the engine is running `ffmpeg` to assemble a muxed item's
     /// downloaded parts. The item's `state` is still `.running`. Parent
-    /// spec §7.2 (a distinct `ItemState.assembling` and its UI are Part 4).
+    /// spec §7.2.
     public let isAssembling: Bool
+    /// What happens once every component completes — `.none` for a plain
+    /// download, `.mux` for a video+audio YouTube item. Lets the UI show
+    /// "Assembling…" and offer "Retry Mux" on a failed mux.
+    public let assembly: Assembly
 
     public init(
         id: UUID,
@@ -54,12 +58,14 @@ public struct ItemSnapshot: Sendable, Equatable, Identifiable {
         checkpointFailure: String? = nil,
         remainingAttempts: Int? = nil,
         fileMissing: Bool = false,
-        isAssembling: Bool = false
+        isAssembling: Bool = false,
+        assembly: Assembly = .none
     ) {
         self.checkpointFailure = checkpointFailure
         self.remainingAttempts = remainingAttempts
         self.fileMissing = fileMissing
         self.isAssembling = isAssembling
+        self.assembly = assembly
         self.id = id
         self.url = url
         self.filename = filename
