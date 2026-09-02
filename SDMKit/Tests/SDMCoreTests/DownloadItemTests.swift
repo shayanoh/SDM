@@ -98,3 +98,31 @@ private func u(_ s: String) -> URL { URL(string: s)! }
     #expect(item.state == .stopped)
     #expect(item.position == 3)
 }
+
+@Test func sourceUrlDefaultsToComponentZeroButCanBeOverridden() {
+    let http = DownloadItem(url: u("https://x/f.bin"), filename: "f.bin")
+    #expect(http.url == u("https://x/f.bin"))
+    #expect(http.sourceURL == http.components[0].url)
+
+    let media = DownloadItem(
+        components: [
+            FileComponent(url: u("https://gv/v"), partFilename: "t.f137.mp4"),
+            FileComponent(url: u("https://gv/a"), partFilename: "t.f251.webm"),
+        ], outputFilename: "t.mp4", sourceURL: u("https://youtu.be/abc"), assembly: .mux)
+    #expect(media.url == u("https://youtu.be/abc"))
+    #expect(media.components[0].url == u("https://gv/v"))
+
+    let data = try! JSONEncoder().encode(media)
+    #expect(
+        try! JSONDecoder().decode(DownloadItem.self, from: data).url == u("https://youtu.be/abc"))
+}
+
+@Test func legacyItemWithoutSourceUrlFallsBackToTheFlatUrl() throws {
+    let legacy = """
+        {"id":"1B4E28BA-2FA1-11D2-883F-0016D3CCA427","url":"https://x/f.bin","filename":"f.bin",
+         "state":{"stopped":{}},"isEnabled":true,"position":0}
+        """
+    let item = try JSONDecoder().decode(DownloadItem.self, from: Data(legacy.utf8))
+    #expect(item.url == u("https://x/f.bin"))
+    #expect(item.sourceURL == u("https://x/f.bin"))
+}

@@ -1252,7 +1252,11 @@ public actor DownloadEngine {
                 demands.append(
                     ConnectionDemand(
                         id: item.id,
-                        host: item.url.host ?? "",
+                        // The host actually connected to — the first
+                        // component's stream URL, not the grabbed source URL
+                        // (which for a YouTube item is `youtube.com`, where
+                        // nothing is downloaded from).
+                        host: item.components.first?.url.host ?? "",
                         desiredSegments: segmentCount(for: item.id)
                     )
                 )

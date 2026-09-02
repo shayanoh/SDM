@@ -5,6 +5,11 @@ public struct DownloadItem: Identifiable, Equatable, Sendable {
     /// Invariant: at least one. A generic HTTP download has exactly one;
     /// a muxed YouTube download has two (video + audio). Parent spec §5.
     public var components: [FileComponent]
+    /// The user-facing origin of the download: the URL that was grabbed.
+    /// For a generic HTTP download this equals the (single) component's URL;
+    /// for a YouTube item it is the `watch?v=` / `youtu.be` URL, while each
+    /// component's own `url` is the direct `googlevideo` stream.
+    public var sourceURL: URL
     /// The final file once assembly (if any) completes.
     public var outputFilename: String
     public var assembly: Assembly
@@ -20,6 +25,7 @@ public struct DownloadItem: Identifiable, Equatable, Sendable {
         id: UUID = UUID(),
         components: [FileComponent],
         outputFilename: String,
+        sourceURL: URL? = nil,
         assembly: Assembly = .none,
         state: ItemState = .queued,
         isEnabled: Bool = true,
@@ -30,6 +36,7 @@ public struct DownloadItem: Identifiable, Equatable, Sendable {
         precondition(!outputFilename.isEmpty, "outputFilename must not be empty")
         self.init(
             unchecked: id, components: components, outputFilename: outputFilename,
+            sourceURL: sourceURL ?? components[0].url,
             assembly: assembly, state: state, isEnabled: isEnabled, priority: priority,
             position: position)
     }
@@ -43,6 +50,7 @@ public struct DownloadItem: Identifiable, Equatable, Sendable {
         unchecked id: UUID,
         components: [FileComponent],
         outputFilename: String,
+        sourceURL: URL,
         assembly: Assembly,
         state: ItemState,
         isEnabled: Bool,
@@ -52,6 +60,7 @@ public struct DownloadItem: Identifiable, Equatable, Sendable {
         self.id = id
         self.components = components
         self.outputFilename = outputFilename
+        self.sourceURL = sourceURL
         self.assembly = assembly
         self.state = state
         self.isEnabled = isEnabled
@@ -92,7 +101,9 @@ public struct DownloadItem: Identifiable, Equatable, Sendable {
 
     // MARK: - Concatenated accessors (one-component: identical to before)
 
-    public var url: URL { components[0].url }
+    /// The grabbed origin URL (`sourceURL`). For HTTP this is the file URL;
+    /// for YouTube it is the watch URL, not the `googlevideo` stream.
+    public var url: URL { sourceURL }
     public var filename: String { outputFilename }
 
     public var validator: String? {
@@ -170,7 +181,8 @@ public struct DownloadItem: Identifiable, Equatable, Sendable {
 
 extension DownloadItem: Codable {
     private enum CodingKeys: String, CodingKey {
-        case id, components, outputFilename, assembly, state, isEnabled, priority, position
+        case id, components, outputFilename, sourceURL, assembly, state, isEnabled, priority,
+            position
         // legacy-only keys
         case url, filename, totalBytes, completed, isResumable, validator
     }
@@ -186,15 +198,21 @@ extension DownloadItem: Codable {
         let components: [FileComponent]
         let outputFilename: String
         let assembly: Assembly
+        let sourceURL: URL?
         if container.contains(.components) {
             components = try container.decode([FileComponent].self, forKey: .components)
             outputFilename = try container.decode(String.self, forKey: .outputFilename)
             assembly = try container.decodeIfPresent(Assembly.self, forKey: .assembly) ?? .none
+            // Absent in state.json written before `sourceURL` existed —
+            // fall back to the first component's URL, the old behaviour.
+            sourceURL = try container.decodeIfPresent(URL.self, forKey: .sourceURL)
         } else {
             let filename = try container.decode(String.self, forKey: .filename)
+            let legacyURL = try container.decode(URL.self, forKey: .url)
+            sourceURL = legacyURL
             components = [
                 FileComponent(
-                    url: try container.decode(URL.self, forKey: .url),
+                    url: legacyURL,
                     partFilename: filename,
                     totalBytes: try container.decodeIfPresent(Int64.self, forKey: .totalBytes),
                     completed: try container.decodeIfPresent(RangeSet.self, forKey: .completed)
@@ -208,6 +226,7 @@ extension DownloadItem: Codable {
         }
         self.init(
             unchecked: id, components: components, outputFilename: outputFilename,
+            sourceURL: sourceURL ?? components[0].url,
             assembly: assembly, state: state, isEnabled: isEnabled, priority: priority,
             position: position)
     }
@@ -217,6 +236,7 @@ extension DownloadItem: Codable {
         try container.encode(id, forKey: .id)
         try container.encode(components, forKey: .components)
         try container.encode(outputFilename, forKey: .outputFilename)
+        try container.encode(sourceURL, forKey: .sourceURL)
         try container.encode(assembly, forKey: .assembly)
         try container.encode(state, forKey: .state)
         try container.encode(isEnabled, forKey: .isEnabled)

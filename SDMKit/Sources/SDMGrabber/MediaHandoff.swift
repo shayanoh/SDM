@@ -63,6 +63,9 @@ public enum MediaHandoff {
             items.append(
                 DownloadItem(
                     components: components, outputFilename: output,
+                    // The grabbed YouTube URL, not the googlevideo stream —
+                    // this is what the details panel shows.
+                    sourceURL: row.sourceURL,
                     assembly: components.count == 2 ? .mux : .none, state: .queued))
         }
 
