@@ -359,7 +359,15 @@ private struct MediaLinkRow: View {
         case .needsFfmpeg:
             Text("requires ffmpeg").font(.caption).foregroundStyle(theme.faultyColor)
         case .failed(let reason):
-            Text(reason).font(.caption).foregroundStyle(theme.offlineColor)
+            // The reason can be a multi-line yt-dlp error; show the first
+            // line inline and the whole thing on hover.
+            Text(reason.split(separator: "\n").first.map(String.init) ?? reason)
+                .font(.caption)
+                .foregroundStyle(theme.offlineColor)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .textSelection(.enabled)
+                .help(reason)
         }
     }
 

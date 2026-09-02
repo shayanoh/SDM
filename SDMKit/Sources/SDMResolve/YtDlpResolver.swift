@@ -1,5 +1,10 @@
 import Foundation
+import OSLog
 import SDMCore
+
+/// Logs every yt-dlp invocation and its full stderr. `log stream
+/// --predicate 'subsystem == "com.sdm.SDMResolve"'` in Console/Terminal.
+let resolveLog = Logger(subsystem: "com.sdm.SDMResolve", category: "yt-dlp")
 
 /// yt-dlp as a metadata extractor only — never as a downloader. Parent
 /// spec §4.4. All subprocess access goes through the injected `ProcessRunner`.
@@ -120,16 +125,26 @@ public struct YtDlpResolver: LinkResolver {
     private func runYtDlp(
         _ executable: URL, _ arguments: [String], timeout: Duration
     ) async throws -> ProcessOutput {
+        resolveLog.debug(
+            "run \(executable.path, privacy: .public) \(arguments.joined(separator: " "), privacy: .public)"
+        )
         let out: ProcessOutput
         do {
             out = try await runner.run(
                 executable: executable, arguments: arguments, timeout: timeout)
         } catch ProcessRunError.timedOut {
+            resolveLog.error(
+                "yt-dlp timed out: \(arguments.joined(separator: " "), privacy: .public)")
             throw ResolveError.timeout
         }
         guard out.exitCode == 0 else {
-            throw Classifier.error(
-                fromStderr: String(decoding: out.stderr, as: UTF8.self), exitCode: out.exitCode)
+            let stderr = String(decoding: out.stderr, as: UTF8.self)
+            // Always log the real, full stderr — this is the only place it
+            // exists verbatim before it is classified/truncated.
+            resolveLog.error(
+                "yt-dlp exit \(out.exitCode, privacy: .public) for [\(arguments.joined(separator: " "), privacy: .public)]\nstderr:\n\(stderr, privacy: .public)"
+            )
+            throw Classifier.error(fromStderr: stderr, exitCode: out.exitCode)
         }
         return out
     }
@@ -144,10 +159,17 @@ public struct YtDlpResolver: LinkResolver {
 
     enum Classifier {
         static func error(fromStderr stderr: String, exitCode: Int32) -> ResolveError {
+            // Normalize typographic apostrophes (yt-dlp uses U+2019) so the
+            // "you're not a bot" match actually fires.
             let lower = stderr.lowercased()
-            if lower.contains("sign in to confirm your age")
-                || lower.contains("confirm you're not a bot")
+                .replacingOccurrences(of: "\u{2019}", with: "'")
+
+            // YouTube served an anti-bot / consent wall with no session at
+            // all — the fix is to provide cookies.
+            if lower.contains("confirm you're not a bot")
                 || lower.contains("sign in to confirm you're not a bot")
+                || lower.contains("sign in to confirm your age")
+                || (lower.contains("sign in") && lower.contains("cookies"))
             {
                 return .authRequired
             }
@@ -158,7 +180,11 @@ public struct YtDlpResolver: LinkResolver {
             {
                 return .unavailable
             }
-            return .ytDlpFailed(stderrTail: String(stderr.suffix(500)))
+            // Everything else: keep a generous slice of the *real* stderr so
+            // it can reach the row's tooltip.
+            return .ytDlpFailed(
+                stderrTail: String(
+                    stderr.trimmingCharacters(in: .whitespacesAndNewlines).suffix(2000)))
         }
     }
 }

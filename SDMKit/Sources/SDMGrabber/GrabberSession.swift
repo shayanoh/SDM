@@ -120,11 +120,29 @@ public actor GrabberSession {
         switch error {
         case ResolveError.binaryMissing: return .needsYtDlp
         case ResolveError.unsupported: return .unsupported
-        case ResolveError.authRequired: return .failed("sign-in required")
-        case ResolveError.privateVideo: return .failed("private video")
-        case ResolveError.unavailable: return .failed("video unavailable")
-        case ResolveError.timeout: return .failed("timed out")
-        default: return .failed("could not resolve")
+        case ResolveError.authRequired:
+            return .failed(
+                "YouTube blocked the request (anti-bot / sign-in). Set \"Cookies from browser\" "
+                    + "in Settings → YouTube, or update yt-dlp.")
+        case ResolveError.privateVideo: return .failed("Private video.")
+        case ResolveError.unavailable: return .failed("Video unavailable.")
+        case ResolveError.timeout: return .failed("yt-dlp timed out.")
+        case ResolveError.formatGone: return .failed("The requested format is no longer available.")
+        case ResolveError.ytDlpFailed(let stderrTail):
+            // Surface the real yt-dlp error verbatim — the UI puts the full
+            // text in the row's tooltip. A couple of known-cryptic YouTube
+            // messages get a short hint prepended.
+            let cleaned = stderrTail.trimmingCharacters(in: .whitespacesAndNewlines)
+            if cleaned.isEmpty { return .failed("yt-dlp could not resolve this video.") }
+            if cleaned.lowercased().contains("the page needs to be reloaded") {
+                return .failed(
+                    "YouTube rejected the session — your browser cookies are likely stale or "
+                        + "locked. Quit the browser and retry, try a different browser, or update "
+                        + "yt-dlp. (macOS: Chrome needs App-Bound decryption; Safari needs Full "
+                        + "Disk Access for SDM.)\n\n" + cleaned)
+            }
+            return .failed(cleaned)
+        default: return .failed("Could not resolve: \(error)")
         }
     }
 

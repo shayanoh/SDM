@@ -122,3 +122,31 @@ private func makeSession(_ resolver: FakeLinkResolver) -> GrabberSession {
             estimatedBytes: 1000), for: id)
     #expect(await session.snapshot().mediaRows[0].state == .resolved)
 }
+
+@Test func aYtDlpFailureSurfacesTheRealStderrOnTheRow() async {
+    let session = makeSession(
+        FakeLinkResolver { _ in
+            throw ResolveError.ytDlpFailed(
+                stderrTail: "ERROR: [youtube] abc: The page needs to be reloaded.")
+        })
+    await session.ingest(urls: [URL(string: "https://youtu.be/abc")!])
+    guard case .failed(let reason) = await session.snapshot().mediaRows[0].state else {
+        Issue.record("expected .failed")
+        return
+    }
+    #expect(reason.contains("The page needs to be reloaded"))
+    #expect(reason.lowercased().contains("cookies"))  // the prepended hint
+}
+
+@Test func aGenericYtDlpFailureShowsTheStderrVerbatim() async {
+    let session = makeSession(
+        FakeLinkResolver { _ in
+            throw ResolveError.ytDlpFailed(stderrTail: "ERROR: HTTP Error 429: Too Many Requests")
+        })
+    await session.ingest(urls: [URL(string: "https://youtu.be/xyz")!])
+    guard case .failed(let reason) = await session.snapshot().mediaRows[0].state else {
+        Issue.record("expected .failed")
+        return
+    }
+    #expect(reason == "ERROR: HTTP Error 429: Too Many Requests")
+}

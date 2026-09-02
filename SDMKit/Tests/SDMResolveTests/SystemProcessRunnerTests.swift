@@ -49,3 +49,14 @@ import Testing
     task.cancel()
     await #expect(throws: (any Error).self) { try await task.value }
 }
+
+@Test func childEnvironmentPrependsToolDirsAndGuaranteesHome() {
+    let env = SystemProcessRunner.childEnvironment(
+        for: URL(fileURLWithPath: "/opt/custom/bin/yt-dlp"))
+    let path = env["PATH"] ?? ""
+    #expect(path.hasPrefix("/opt/custom/bin:"))
+    #expect(path.contains("/opt/homebrew/bin"))
+    #expect(path.contains("/usr/local/bin"))
+    #expect(path.contains("/usr/bin"))
+    #expect(!(env["HOME"] ?? "").isEmpty)
+}

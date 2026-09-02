@@ -192,3 +192,34 @@ private let privateStderr =
         try await r.refresh(extractor: "vimeo", videoID: "x", formatID: "1")
     }
 }
+
+// MARK: - Classifier
+
+@Test func classifierRecognizesCurlyApostropheBotWall() {
+    let stderr =
+        "ERROR: [youtube] abc: Sign in to confirm you\u{2019}re not a bot. Use --cookies-from-browser"
+    #expect(YtDlpResolver.Classifier.error(fromStderr: stderr, exitCode: 1) == .authRequired)
+}
+
+@Test func classifierKeepsPageNeedsReloadingAsRawFailure() {
+    let stderr = "ERROR: [youtube] pBLlM8ZvEQo: The page needs to be reloaded.\n"
+    let result = YtDlpResolver.Classifier.error(fromStderr: stderr, exitCode: 1)
+    guard case .ytDlpFailed(let tail) = result else {
+        Issue.record("expected .ytDlpFailed, got \(result)")
+        return
+    }
+    #expect(tail.contains("The page needs to be reloaded"))
+}
+
+@Test func classifierUnknownErrorKeepsAGenerousStderrTail() {
+    let stderr = String(repeating: "x", count: 5000) + "ERROR: something specific happened"
+    guard
+        case .ytDlpFailed(let tail) = YtDlpResolver.Classifier.error(
+            fromStderr: stderr, exitCode: 1)
+    else {
+        Issue.record("expected .ytDlpFailed")
+        return
+    }
+    #expect(tail.contains("ERROR: something specific happened"))
+    #expect(tail.count <= 2000)
+}

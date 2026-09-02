@@ -5,12 +5,41 @@ import Foundation
 public struct SystemProcessRunner: ProcessRunner {
     public init() {}
 
+    /// A `.app` launched from Finder inherits a near-empty `PATH` and may be
+    /// missing `HOME`. yt-dlp needs `HOME` for its cache/config and shells
+    /// out to `ffmpeg` and a JS runtime (`deno`/`node`) for YouTube's nsig
+    /// challenge — without those on `PATH` its extraction degrades and
+    /// YouTube starts returning anti-bot walls. So we hand the child a real
+    /// environment: whatever we inherited, plus the standard tool
+    /// directories (and the executable's own directory) prepended to `PATH`,
+    /// and `HOME` guaranteed.
+    static func childEnvironment(for executable: URL) -> [String: String] {
+        var env = ProcessInfo.processInfo.environment
+
+        let toolDirs = [
+            executable.deletingLastPathComponent().path,
+            "/opt/homebrew/bin", "/opt/homebrew/sbin",
+            "/usr/local/bin", "/usr/local/sbin",
+            "/opt/local/bin", "/opt/local/sbin",
+            "/usr/bin", "/bin", "/usr/sbin", "/sbin",
+            (NSHomeDirectory() as NSString).appendingPathComponent(".local/bin"),
+        ]
+        let existing = (env["PATH"] ?? "").split(separator: ":").map(String.init)
+        var seen = Set<String>()
+        let merged = (toolDirs + existing).filter { seen.insert($0).inserted && !$0.isEmpty }
+        env["PATH"] = merged.joined(separator: ":")
+
+        if (env["HOME"] ?? "").isEmpty { env["HOME"] = NSHomeDirectory() }
+        return env
+    }
+
     public func run(
         executable: URL, arguments: [String], timeout: Duration
     ) async throws -> ProcessOutput {
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments
+        process.environment = Self.childEnvironment(for: executable)
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
         process.standardOutput = stdoutPipe
