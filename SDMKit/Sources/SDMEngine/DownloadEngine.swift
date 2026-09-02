@@ -529,15 +529,11 @@ public actor DownloadEngine {
     private func relocateItemFiles(
         _ item: DownloadItem, from sourceFolder: URL, to destinationFolder: URL
     ) {
-        let source = sourceFolder.appendingPathComponent(item.filename)
-        let destination = destinationFolder.appendingPathComponent(item.filename)
         try? FileManager.default.createDirectory(
             at: destinationFolder, withIntermediateDirectories: true)
-        for (from, to) in [
-            (source, destination),
-            (SparseFile.incompleteURL(for: source), SparseFile.incompleteURL(for: destination)),
-            (ResumeSidecar.url(for: source), ResumeSidecar.url(for: destination)),
-        ] {
+        let sources = itemArtefactURLs(item, in: sourceFolder)
+        let destinations = itemArtefactURLs(item, in: destinationFolder)
+        for (from, to) in zip(sources, destinations) {
             guard FileManager.default.fileExists(atPath: from.path) else { continue }
             try? FileManager.default.moveItem(at: from, to: to)
         }
@@ -601,14 +597,17 @@ public actor DownloadEngine {
         let package = packages[loc.packageIndex]
         let item = package.items[loc.itemIndex]
         let folder = settings.downloadFolder.appendingPathComponent(package.name)
-        let destination = folder.appendingPathComponent(item.filename)
 
         await stopRunnerIfRunning(itemID)
 
-        ResumeSidecar.remove(at: ResumeSidecar.url(for: destination))
-        if deleteFile {
-            trashIfExists(destination)
-            trashIfExists(SparseFile.incompleteURL(for: destination))
+        // Sidecars go regardless of `deleteFile` (an orphan sidecar is
+        // useless); bytes only when asked.
+        for url in itemArtefactURLs(item, in: folder) {
+            if url.pathExtension == "sdmpart" {
+                ResumeSidecar.remove(at: url)
+            } else if deleteFile {
+                trashIfExists(url)
+            }
         }
 
         guard let currentLoc = location(of: itemID) else { return }
@@ -640,8 +639,9 @@ public actor DownloadEngine {
         let folder = settings.downloadFolder.appendingPathComponent(package.name)
         if deleteFiles {
             for item in package.items {
-                ResumeSidecar.remove(
-                    at: ResumeSidecar.url(for: folder.appendingPathComponent(item.filename)))
+                for url in itemArtefactURLs(item, in: folder) where url.pathExtension == "sdmpart" {
+                    ResumeSidecar.remove(at: url)
+                }
             }
             trashIfExists(folder)
         }
@@ -672,14 +672,21 @@ public actor DownloadEngine {
         let package = packages[loc.packageIndex]
         let item = package.items[loc.itemIndex]
         let folder = settings.downloadFolder.appendingPathComponent(package.name)
-        let destination = folder.appendingPathComponent(item.filename)
         let priorState = item.state
 
         await stopRunnerIfRunning(itemID)
 
-        ResumeSidecar.remove(at: ResumeSidecar.url(for: destination))
-        trashIfExists(destination)
-        trashIfExists(SparseFile.incompleteURL(for: destination))
+        // A reset discards *all* progress: every component's part file,
+        // `.incomplete`, and `.sdmpart`, plus any finalized output. Missing
+        // one (the old code only touched the output filename) left stale
+        // parts that made the next resume fail with "file already exists".
+        for url in itemArtefactURLs(item, in: folder) {
+            if url.pathExtension == "sdmpart" {
+                ResumeSidecar.remove(at: url)
+            } else {
+                trashIfExists(url)
+            }
+        }
 
         failedAttempts[itemID] = nil
         retryHoldTicks[itemID] = nil
@@ -757,6 +764,26 @@ public actor DownloadEngine {
         runner.job.cancel()
         let tasks = runner.allTasks
         Task { for task in tasks { await task.pause() } }
+    }
+
+    /// Every on-disk artefact an item can leave in its package folder: the
+    /// final output file, and — for a multi-component item — each component's
+    /// part file. For each, the base URL plus its `.incomplete` sparse file
+    /// and its `.sdmpart` resume sidecar. A one-component HTTP item's part
+    /// filename equals its output filename, so this collapses to the old
+    /// single-file set for it.
+    private func itemArtefactURLs(_ item: DownloadItem, in folder: URL) -> [URL] {
+        var bases = [folder.appendingPathComponent(item.outputFilename)]
+        for component in item.components {
+            bases.append(folder.appendingPathComponent(component.partFilename))
+        }
+        var urls: [URL] = []
+        for base in bases {
+            urls.append(base)
+            urls.append(SparseFile.incompleteURL(for: base))
+            urls.append(ResumeSidecar.url(for: base))
+        }
+        return urls
     }
 
     private func trashIfExists(_ url: URL) {
@@ -1013,7 +1040,8 @@ public actor DownloadEngine {
                         },
                         fileMissing: fileMissing,
                         isAssembling: assembling.contains(item.id),
-                        assembly: item.assembly
+                        assembly: item.assembly,
+                        partFilenames: item.components.map(\.partFilename)
                     )
                 )
             }

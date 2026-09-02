@@ -41,6 +41,11 @@ public struct ItemSnapshot: Sendable, Equatable, Identifiable {
     /// download, `.mux` for a video+audio YouTube item. Lets the UI show
     /// "Assembling…" and offer "Retry Mux" on a failed mux.
     public let assembly: Assembly
+    /// Each component's part-file name (`clip.f137.mp4`, `clip.f251.webm`).
+    /// For a one-component item this is `[filename]`. The delete dialog and
+    /// "reveal in Finder" need the real on-disk names, not just the output
+    /// filename.
+    public let partFilenames: [String]
 
     public init(
         id: UUID,
@@ -59,13 +64,15 @@ public struct ItemSnapshot: Sendable, Equatable, Identifiable {
         remainingAttempts: Int? = nil,
         fileMissing: Bool = false,
         isAssembling: Bool = false,
-        assembly: Assembly = .none
+        assembly: Assembly = .none,
+        partFilenames: [String] = []
     ) {
         self.checkpointFailure = checkpointFailure
         self.remainingAttempts = remainingAttempts
         self.fileMissing = fileMissing
         self.isAssembling = isAssembling
         self.assembly = assembly
+        self.partFilenames = partFilenames.isEmpty ? [filename] : partFilenames
         self.id = id
         self.url = url
         self.filename = filename

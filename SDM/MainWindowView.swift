@@ -236,38 +236,40 @@ struct MainWindowView: View {
             }
             baseItems = package.items
         }
-        let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
-        let finalItems = baseItems.filter { item in
+        // Walk every artefact each item can leave on disk — the output file
+        // and, for a multi-component (muxed) item, each component's part
+        // file — plus their `.incomplete` sparse files. Sum the *actual*
+        // on-disk sizes and list the *actual* filenames; `item.totalBytes`
+        // is only an estimate and `item.filename` is just the output name.
+        var totalBytes: Int64 = 0
+        var names: [String] = []
+        for item in baseItems {
             guard
                 let package = controller.snapshot.packages.first(where: {
-                    $0.items.map(\.id).contains(item.id)
+                    $0.items.contains { $0.id == item.id }
                 })
-            else {
-                return true
+            else { continue }
+            let folder = controller.destinationPackageUrl(for: package)
+            var bases = Set([item.filename])
+            bases.formUnion(item.partFilenames)
+            for base in bases {
+                let final = folder.appendingPathComponent(base)
+                for url in [final, final.appendingPathExtension("incomplete")] {
+                    guard
+                        let attributes = try? FileManager.default.attributesOfItem(
+                            atPath: url.path),
+                        let size = attributes[.size] as? Int64
+                    else { continue }
+                    totalBytes += size
+                    names.append(url.lastPathComponent)
+                }
             }
-            let destination =
-                downloads
-                .appendingPathComponent(package.name)
-                .appendingPathComponent(item.filename)
-            let destinationIncomplete = destination.appendingPathExtension("incomplete")
-            return FileManager.default.fileExists(atPath: destination.path)
-                || FileManager.default.fileExists(atPath: destinationIncomplete.path)
-        }
-        let finalBytes = finalItems.reduce(Int64(0)) {
-            $0 + max($1.totalBytes ?? 0, $1.completed.totalBytes)
-        }
-
-        let title: String!
-        if finalItems.count == 0 {
-            title = "Remove From List?"
-        } else {
-            title = "Remove From List And Delete Files?"
         }
 
         return DeletionInfo(
-            title: title,
-            totalBytes: finalBytes,
-            names: finalItems.map(\.filename)
+            title: names.isEmpty ? "Remove From List?" : "Remove From List And Delete Files?",
+            totalBytes: totalBytes,
+            names: names.sorted()
         )
     }
 

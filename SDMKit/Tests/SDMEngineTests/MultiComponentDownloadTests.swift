@@ -170,3 +170,76 @@ private struct GatedVideoRouter: HTTPTransport {
     #expect(done.completed.totalBytes == 12_000)
     #expect(done.fractionCompleted == 1.0)
 }
+
+@Test func resettingAnIncompleteMuxDownloadClearsEveryComponentPartAndSidecar() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let gate = WorkerGate()
+    let router = GatedVideoRouter(
+        video: WorkerGatedOrigin(payload: testPayload(20_000), gate: gate),
+        audio: FakeOrigin(payload: testPayload(3_000)))
+    let engine = DownloadEngine(
+        transport: router, stateStore: InMemoryStateStore(),
+        settings: EngineSettings(
+            maxConcurrent: 1, segmentsPerItem: 2, globalMaxConnections: 8, downloadFolder: dir,
+            checkpointIntervalBytes: 200),
+        muxer: FakeMuxer())
+    let item = DownloadItem(
+        components: [
+            FileComponent(url: URL(string: "https://v.example/v")!, partFilename: "clip.f137.mp4"),
+            FileComponent(url: URL(string: "https://a.example/a")!, partFilename: "clip.f251.webm"),
+        ], outputFilename: "clip.mp4", assembly: .mux, state: .queued)
+    await engine.add(DownloadPackage(name: "P", items: [item]))
+
+    // Wait for the audio component to finish (its part file finalizes) and
+    // video to have a sidecar, then tick so checkpoints land.
+    var spins = 0
+    let audioFinal = dir.appendingPathComponent("P/clip.f251.webm")
+    while !FileManager.default.fileExists(atPath: audioFinal.path), spins < 200_000 {
+        await Task.yield()
+        spins += 1
+    }
+    for _ in 0..<3 { await engine.tick() }
+    let videoIncomplete = SparseFile.incompleteURL(
+        for: dir.appendingPathComponent("P/clip.f137.mp4"))
+    #expect(FileManager.default.fileExists(atPath: videoIncomplete.path))
+
+    await engine.resetDownload(item.id)
+
+    // Everything the item wrote is gone.
+    for name in ["clip.mp4", "clip.f137.mp4", "clip.f251.webm"] {
+        let base = dir.appendingPathComponent("P/\(name)")
+        #expect(!FileManager.default.fileExists(atPath: base.path))
+        #expect(!FileManager.default.fileExists(atPath: SparseFile.incompleteURL(for: base).path))
+        #expect(!FileManager.default.fileExists(atPath: ResumeSidecar.url(for: base).path))
+    }
+
+    // And it resumes cleanly to a hash-matching pair of parts.
+    await gate.open()
+    try await engine.runUntilIdle()
+    let snap = try #require(await engine.snapshot().packages.first?.items.first)
+    #expect(snap.state == .completed)
+}
+
+@Test func snapshotExposesEveryComponentPartFilename() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let router = TwoHostRouter(
+        videoHost: "v.example", videoPayload: testPayload(1000),
+        audioHost: "a.example", audioPayload: testPayload(300))
+    let engine = DownloadEngine(
+        transport: router, stateStore: InMemoryStateStore(),
+        settings: EngineSettings(
+            maxConcurrent: 1, segmentsPerItem: 2, globalMaxConnections: 8, downloadFolder: dir))
+    await engine.add(
+        DownloadPackage(
+            name: "P",
+            items: [
+                twoComponentItem(
+                    URL(string: "https://v.example/v")!, URL(string: "https://a.example/a")!),
+                DownloadItem(url: URL(string: "https://x/f.bin")!, filename: "f.bin"),
+            ]))
+    let items = await engine.snapshot().packages.first!.items
+    #expect(items[0].partFilenames == ["clip.f137.mp4", "clip.f251.webm"])
+    #expect(items[1].partFilenames == ["f.bin"])
+}
