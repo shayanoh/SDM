@@ -122,6 +122,63 @@ private final class ConcurrencyTrackingResolver: LinkResolver, @unchecked Sendab
     #expect(await session.snapshot().mediaRows.count == 4)
 }
 
+/// Resolver whose per-entry `resolve` blocks until released, so a playlist
+/// expansion can be caught mid-flight.
+private final class GatedPlaylistResolver: LinkResolver, @unchecked Sendable {
+    let entries: [ResolvedMedia]
+    private let lock = NSLock()
+    private var started = 0
+    private var released = false
+
+    init(count: Int) {
+        entries = (1...count).map {
+            ResolvedMedia(
+                extractor: "youtube", videoID: "vid\($0)", title: "E\($0)", durationSeconds: nil,
+                formats: [])
+        }
+    }
+
+    func canHandle(_ url: URL) -> Bool { url.host?.contains("youtube") ?? false }
+    func refresh(sourceURL: URL, formatID: String) async throws -> RefreshedFormat {
+        RefreshedFormat(url: URL(string: "https://gv/x")!, filesize: nil, formatID: formatID)
+    }
+    var startedCount: Int { lock.withLock { started } }
+    func releaseAll() { lock.withLock { released = true } }
+
+    func resolve(_ url: URL) async throws -> ResolvedTarget {
+        if url.absoluteString.contains("list=") {
+            return .playlist(title: "P", entries: entries, totalAvailable: entries.count)
+        }
+        lock.withLock { started += 1 }
+        while !lock.withLock({ released }) { try await Task.sleep(for: .milliseconds(5)) }
+        return singleMedia(
+            videoID: "v", title: "E", formats: [vf("137", 720, .h264, .mp4), af("140", .aac, .m4a)])
+    }
+}
+
+@Test func cancelChecksStopsPlaylistEntriesStillResolving() async {
+    let resolver = GatedPlaylistResolver(count: 12)
+    let session = GrabberSession(
+        prober: LinkProber(transport: FakeProbeOrigin(), deepSniffEnabled: false),
+        budget: GrabberSession.Budget(maxConcurrentResolves: 2),
+        resolver: resolver)
+
+    let ingestTask = Task {
+        await session.ingest(urls: [URL(string: "https://www.youtube.com/playlist?list=PLx")!])
+    }
+    while resolver.startedCount == 0 { await Task.yield() }
+
+    await session.cancelChecks()
+    resolver.releaseAll()
+    await ingestTask.value
+
+    let snap = await session.snapshot()
+    #expect(snap.mediaRows.count == 12)
+    #expect(snap.mediaRows.contains { $0.state == .failed("Check cancelled") })
+    #expect(snap.isChecking == false)
+    #expect(snap.recheckableCount >= 1)
+}
+
 @Test func recheckReResolvesFailedMediaRows() async {
     final class Counter: @unchecked Sendable { var n = 0 }
     let counter = Counter()

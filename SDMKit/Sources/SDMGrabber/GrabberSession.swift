@@ -220,6 +220,15 @@ public actor GrabberSession {
             var pending = entryIDs
             var active = 0
             func launch() {
+                // `cancelChecks()` stops the expansion from launching any more
+                // yt-dlp extractions; entries that never started are settled as
+                // check failures so "Recheck All" / per-item Recheck picks them
+                // back up. Mirrors `resolveMediaBounded`.
+                if cancelRequested {
+                    for id in pending { mediaRows[id]?.state = .failed("Check cancelled") }
+                    pending.removeAll()
+                    return
+                }
                 while active < budget.maxConcurrentResolves, !pending.isEmpty {
                     let entryID = pending.removeFirst()
                     guard let url = mediaRows[entryID]?.sourceURL, let resolver else { continue }
