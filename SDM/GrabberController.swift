@@ -2,6 +2,7 @@ import Foundation
 import Observation
 import SDMCore
 import SDMGrabber
+import SDMResolve
 
 /// Bridges `GrabberSession` to SwiftUI, mirroring `EngineController`'s role
 /// for `DownloadEngine`.
@@ -14,6 +15,8 @@ final class GrabberController {
     private let session: GrabberSession
 
     init() {
+        let processRunner = SystemProcessRunner()
+        let binaryLocator = BinaryLocator()
         session = GrabberSession(
             prober: LinkProber(
                 transport: URLSessionProbeTransport(),
@@ -22,8 +25,22 @@ final class GrabberController {
             budget: GrabberSession.Budget(
                 globalMaxConcurrentProbes: EngineSettingsStore.globalMaxConnections,
                 maxConcurrentPerHost: EngineSettingsStore.maxConnectionsPerHost
-            )
+            ),
+            resolver: YtDlpResolver(
+                runner: processRunner, locator: binaryLocator,
+                cookieSource: { .none },  // Part 5: read from Settings
+                maxPlaylistVideos: { 50 }  // Part 5: read from Settings
+            ),
+            qualityPreferences: { .default },  // Part 5: read from Settings
+            ffmpegAvailable: { GrabberController.ffmpegOnDisk }
         )
+    }
+
+    /// A cheap synchronous check of the common Homebrew install paths — the
+    /// Settings path override is Part 5.
+    nonisolated static var ffmpegOnDisk: Bool {
+        FileManager.default.isExecutableFile(atPath: "/opt/homebrew/bin/ffmpeg")
+            || FileManager.default.isExecutableFile(atPath: "/usr/local/bin/ffmpeg")
     }
 
     func updateSnapshot() async {
