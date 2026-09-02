@@ -26,12 +26,20 @@ public struct PackageCandidate: Equatable, Sendable, Identifiable {
     public var name: String
     public var linkIDs: [UUID]
     public var isArchive: Bool
+    /// An optional line shown under the package name — a truncated playlist's
+    /// "50 of 320 videos". Carried through to `DownloadPackage.note` on
+    /// handoff. Parent spec §5.4.
+    public var note: String?
 
-    public init(id: UUID = UUID(), name: String, linkIDs: [UUID], isArchive: Bool = false) {
+    public init(
+        id: UUID = UUID(), name: String, linkIDs: [UUID], isArchive: Bool = false,
+        note: String? = nil
+    ) {
         self.id = id
         self.name = name
         self.linkIDs = linkIDs
         self.isArchive = isArchive
+        self.note = note
     }
 }
 
