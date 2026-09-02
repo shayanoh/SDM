@@ -77,33 +77,31 @@ final class ManagedBinariesController {
         }
     }
 
+    /// The bundle flattens `SDM/Resources/vendor/` into `Contents/Resources/`
+    /// (Xcode synchronized groups don't preserve subfolders), so each file is
+    /// looked up by name at the resource root.
     nonisolated private static func bundledVendorAssets() -> [VendorAsset] {
-        guard let dir = Bundle.main.url(forResource: "vendor", withExtension: nil) else {
-            return []
-        }
-        let manifestURL = dir.appendingPathComponent("vendor-manifest.json")
-        guard let data = try? Data(contentsOf: manifestURL),
+        guard let manifestURL = Bundle.main.url(forResource: "vendor-manifest", withExtension: "json"),
+            let data = try? Data(contentsOf: manifestURL),
             let versions = try? JSONDecoder().decode([String: String].self, from: data)
         else { return [] }
 
         #if arch(arm64)
-            let ffmpegBlob = "ffmpeg-arm64.lzfse"
+            let ffmpegBlob = "ffmpeg-arm64"
         #else
-            let ffmpegBlob = "ffmpeg-x86_64.lzfse"
+            let ffmpegBlob = "ffmpeg-x86_64"
         #endif
 
         var assets: [VendorAsset] = []
-        if let v = versions["ffmpegVersion"], v != "0" {
-            assets.append(
-                VendorAsset(
-                    name: "ffmpeg", compressedURL: dir.appendingPathComponent(ffmpegBlob),
-                    version: v))
+        if let v = versions["ffmpegVersion"], v != "0",
+            let url = Bundle.main.url(forResource: ffmpegBlob, withExtension: "lzfse")
+        {
+            assets.append(VendorAsset(name: "ffmpeg", compressedURL: url, version: v))
         }
-        if let v = versions["qjsVersion"], v != "0" {
-            assets.append(
-                VendorAsset(
-                    name: "qjs", compressedURL: dir.appendingPathComponent("qjs.lzfse"),
-                    version: v))
+        if let v = versions["qjsVersion"], v != "0",
+            let url = Bundle.main.url(forResource: "qjs", withExtension: "lzfse")
+        {
+            assets.append(VendorAsset(name: "qjs", compressedURL: url, version: v))
         }
         return assets
     }
