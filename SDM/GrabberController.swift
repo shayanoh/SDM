@@ -28,10 +28,10 @@ final class GrabberController {
             ),
             resolver: YtDlpResolver(
                 runner: processRunner, locator: binaryLocator,
-                cookieSource: { .none },  // Part 5: read from Settings
-                maxPlaylistVideos: { 50 }  // Part 5: read from Settings
+                cookieSource: { YouTubeSettingsStore.cookieSource },
+                maxPlaylistVideos: { YouTubeSettingsStore.maxPlaylistVideos }
             ),
-            qualityPreferences: { .default },  // Part 5: read from Settings
+            qualityPreferences: { YouTubeSettingsStore.qualityPreferences },
             ffmpegAvailable: { GrabberController.ffmpegOnDisk }
         )
     }
