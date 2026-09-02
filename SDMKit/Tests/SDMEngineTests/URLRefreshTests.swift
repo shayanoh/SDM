@@ -54,7 +54,7 @@ private func resolvedItem(_ url: URL, totalBytes: Int64?) -> DownloadItem {
 
     let snap = try #require(await engine.snapshot().packages.first?.items.first)
     #expect(snap.state == .completed)
-    #expect(try Data(contentsOf: dir.appendingPathComponent("P/clip.f137.mp4")) == payload)
+    #expect(try Data(contentsOf: dir.appendingPathComponent("P/clip.mp4")) == payload)
 }
 
 @Test func refreshReturningAChangedSizeFailsTheItem() async throws {
