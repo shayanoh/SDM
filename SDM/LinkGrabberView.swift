@@ -34,6 +34,9 @@ struct LinkGrabberView: View {
                 ForEach(linksInNoPackage()) {
                     LinkRow(link: $0, controller: controller, theme: theme)
                 }
+                ForEach(mediaRowsInNoPackage()) {
+                    MediaLinkRow(row: $0, theme: theme)
+                }
                 ForEach(controller.snapshot.packages) { package in
                     // Deliberately not a `Section` with a `header:` — macOS
                     // renders a `Section` header as an AppKit "group row"
@@ -49,6 +52,10 @@ struct LinkGrabberView: View {
                     ForEach(links(in: package)) { link in
                         LinkRow(link: link, controller: controller, theme: theme)
                             .draggable(DraggedLinkID(linkID: link.id))
+                    }
+                    ForEach(mediaRows(in: package)) { row in
+                        MediaLinkRow(row: row, theme: theme)
+                            .draggable(DraggedLinkID(linkID: row.id))
                     }
                 }
             }
@@ -241,6 +248,78 @@ struct LinkGrabberView: View {
     private func linksInNoPackage() -> [ProbedLink] {
         let packagedLinkIDs = Set(controller.snapshot.packages.flatMap(\.linkIDs))
         return controller.snapshot.links.filter { !packagedLinkIDs.contains($0.id) }
+    }
+
+    private func mediaRows(in package: PackageCandidate) -> [MediaRow] {
+        let ids = Set(package.linkIDs)
+        return controller.snapshot.mediaRows.filter { ids.contains($0.id) }
+    }
+
+    private func mediaRowsInNoPackage() -> [MediaRow] {
+        let packaged = Set(controller.snapshot.packages.flatMap(\.linkIDs))
+        return controller.snapshot.mediaRows.filter { !packaged.contains($0.id) }
+    }
+}
+
+/// Minimal media-row rendering — the full treatment (format picker, spinner,
+/// per-state affordances) is Phase 5 Part 5.
+private struct MediaLinkRow: View {
+    let row: MediaRow
+    let theme: Theme
+
+    var body: some View {
+        HStack {
+            Image(systemName: "play.rectangle")
+                .foregroundStyle(theme.textSecondaryColor)
+            Text(row.title).lineLimit(1)
+                .help(row.sourceURL.absoluteString)
+            if row.isDuplicate {
+                Text("duplicate").font(.caption).foregroundStyle(theme.faultyColor)
+            }
+            Spacer()
+            badge
+            Text(sizeText).font(.caption).foregroundStyle(theme.textSecondaryColor)
+        }
+        .padding(.vertical, 2)
+    }
+
+    @ViewBuilder
+    private var badge: some View {
+        switch row.state {
+        case .resolving:
+            HStack(spacing: 4) {
+                ProgressView().controlSize(.small)
+                Text("resolving").font(.caption).foregroundStyle(theme.textSecondaryColor)
+            }
+        case .resolved:
+            Text(formatSummary).font(.caption).foregroundStyle(theme.onlineColor)
+        case .unselected:
+            Text("choose a format").font(.caption).foregroundStyle(theme.faultyColor)
+        case .unsupported:
+            Text("not supported yet").font(.caption).foregroundStyle(theme.faultyColor)
+        case .needsYtDlp:
+            Text("requires yt-dlp").font(.caption).foregroundStyle(theme.faultyColor)
+        case .needsFfmpeg:
+            Text("requires ffmpeg").font(.caption).foregroundStyle(theme.faultyColor)
+        case .failed(let reason):
+            Text(reason).font(.caption).foregroundStyle(theme.offlineColor)
+        }
+    }
+
+    private var formatSummary: String {
+        guard let choice = row.choice else { return "resolved" }
+        var parts: [String] = []
+        if let h = choice.video?.height { parts.append("\(h)p") }
+        if let v = choice.video?.vcodec { parts.append("\(v)") }
+        parts.append(choice.outputContainer.fileExtension)
+        return parts.joined(separator: " · ")
+    }
+
+    private var sizeText: String {
+        guard let bytes = row.combinedBytes, bytes > 0 else { return "" }
+        let f = ByteCountFormatter()
+        f.countStyle = .binary
+        return f.string(fromByteCount: bytes)
     }
 }
 
