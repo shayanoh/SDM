@@ -114,3 +114,59 @@ func concatenatedProgressStaysWellFormedUnderChurn(seed: Int) async throws {
     #expect(snap.state == .completed)
     #expect(snap.completed.totalBytes == 24_000)
 }
+
+/// Routes the video host to a gated origin (body withheld until the gate
+/// opens) and the audio host to a normal one, so we can freeze the snapshot
+/// with audio complete and video at zero.
+private struct GatedVideoRouter: HTTPTransport {
+    let video: WorkerGatedOrigin
+    let audio: FakeOrigin
+    func fetch(_ request: RangeRequest) async throws -> RangeResponse {
+        request.url.host == "v.example"
+            ? try await video.fetch(request) : try await audio.fetch(request)
+    }
+}
+
+@Test func concatenatedSnapshotAccountsForBothComponentsNotJustTheLarger() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let videoPayload = testPayload(10_000)
+    let audioPayload = testPayload(2_000)
+    let gate = WorkerGate()
+    let router = GatedVideoRouter(
+        video: WorkerGatedOrigin(payload: videoPayload, gate: gate),
+        audio: FakeOrigin(payload: audioPayload))
+    let engine = DownloadEngine(
+        transport: router, stateStore: InMemoryStateStore(),
+        settings: EngineSettings(
+            maxConcurrent: 1, segmentsPerItem: 2, globalMaxConnections: 8, downloadFolder: dir))
+    await engine.add(
+        DownloadPackage(
+            name: "P",
+            items: [
+                twoComponentItem(
+                    URL(string: "https://v.example/v")!, URL(string: "https://a.example/a")!)
+            ]))
+
+    // Audio (ungated) finishes; video is stuck at zero behind the gate.
+    var spins = 0
+    while await engine.snapshot().packages.first?.items.first?.completed.totalBytes ?? 0 < 2_000,
+        spins < 100_000
+    {
+        await Task.yield()
+        spins += 1
+    }
+    let mid = try #require(await engine.snapshot().packages.first?.items.first)
+    // Total is the sum; progress reflects the finished audio (2000), not
+    // capped at some single component's size or lost to a base-0 overlap.
+    #expect(mid.totalBytes == 12_000)
+    #expect(mid.completed.totalBytes == 2_000)
+    // Audio's bytes are placed after the video span, not at offset 0.
+    #expect(mid.completed.ranges == [ByteRange(start: 10_000, end: 12_000)])
+
+    await gate.open()
+    try await engine.runUntilIdle()
+    let done = try #require(await engine.snapshot().packages.first?.items.first)
+    #expect(done.completed.totalBytes == 12_000)
+    #expect(done.fractionCompleted == 1.0)
+}

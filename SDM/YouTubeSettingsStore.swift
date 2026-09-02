@@ -26,8 +26,18 @@ enum YouTubeSettingsStore {
     private static func bool(_ key: String) -> Bool { d.object(forKey: key) as? Bool ?? true }
     private static func setBool(_ value: Bool, _ key: String) { d.set(value, forKey: key) }
 
+    /// The resolution ladder shown in Settings, highest first. `FormatSelector`
+    /// treats the choice as a ceiling (`height <= maxHeight`).
+    static let resolutionChoices = [1920, 1440, 1080, 720, 540, 480]
+
     static var maxHeight: Int {
-        get { d.object(forKey: Key.maxHeight) as? Int ?? 1080 }
+        get {
+            let raw = d.object(forKey: Key.maxHeight) as? Int ?? 1080
+            // Snap a stored value onto the ladder so the picker always has a
+            // selection (older builds stored arbitrary stepper values).
+            return resolutionChoices.contains(raw)
+                ? raw : (resolutionChoices.first { $0 <= raw } ?? 480)
+        }
         set { d.set(newValue, forKey: Key.maxHeight) }
     }
 

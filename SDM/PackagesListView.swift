@@ -727,13 +727,20 @@ struct BottomPanel: View {
                 }
             }
             GridRow {
-                let downloadedBytes = formattedBytes(
+                // All three read from the same live telemetry (or its
+                // fallback) — using `downloadItem.fractionCompleted` for the
+                // percent while the bytes came from telemetry left the
+                // percent frozen on a multi-component item, since the
+                // `ItemSnapshot` handed to this panel is a structural one
+                // that does not update every tick.
+                let completedBytesValue =
                     telemetry?.completed.totalBytes ?? downloadItem.completed.totalBytes
-                )
-                let totalBytes = formattedBytes(
-                    telemetry?.totalBytes ?? downloadItem.totalBytes ?? 0
-                )
-                let progress = downloadItem.fractionCompleted
+                let totalBytesValue = telemetry?.totalBytes ?? downloadItem.totalBytes ?? 0
+                let downloadedBytes = formattedBytes(completedBytesValue)
+                let totalBytes = formattedBytes(totalBytesValue)
+                let progress =
+                    totalBytesValue > 0
+                    ? Double(completedBytesValue) / Double(totalBytesValue) : 0
                 Text("Progress")
                 Text(
                     "\(downloadedBytes)/\(totalBytes) - \(progress * 100, specifier: "%.1f")%"
@@ -1405,7 +1412,7 @@ private struct ItemRow: View {
                 .frame(height: 6)
                 HStack {
                     statusLine
-                    if item.state == .running {
+                    if item.state == .running || item.state == .queued {
                         ItemETAText(
                             itemID: item.id, fallback: item, controller: controller, theme: theme)
                     }
@@ -1638,6 +1645,17 @@ private func getEtaForItem(controller: EngineController, itemID: UUID, fallback:
         speedAverage = history.suffix(tickCount).reduce(0, +) / Double(tickCount)
     } else {
         speedAverage = telemetry?.bytesPerSecond ?? 0
+    }
+
+    // A queued item has no speed of its own yet — estimate from the current
+    // global download rate, matching the package header's queued-ETA logic.
+    if speedAverage == 0, fallback.state == .queued {
+        let g = controller.snapshot.globalHistory
+        let window = g.suffix(min(10 * AppTiming.ticksPerSecond, g.count))
+        speedAverage =
+            window.isEmpty
+            ? controller.snapshot.globalBytesPerSecond
+            : window.reduce(0, +) / Double(window.count)
     }
 
     if speedAverage == 0 {

@@ -203,9 +203,18 @@ struct SettingsView: View {
         let audioCount = [ytAllowOpus, ytAllowAAC].filter { $0 }.count
         return VStack(alignment: .leading, spacing: 16) {
             SettingsSection(title: "Quality", theme: theme) {
+                HStack {
+                    Text("Maximum resolution")
+                    Spacer()
+                    Picker("", selection: $ytMaxHeight) {
+                        ForEach(YouTubeSettingsStore.resolutionChoices, id: \.self) { h in
+                            Text("\(h)p").tag(h)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 120)
+                }
                 Grid(alignment: .leading, verticalSpacing: 10) {
-                    SteppedNumberField(
-                        label: "Maximum resolution (p)", value: $ytMaxHeight, range: 144...4320)
                     SteppedNumberField(
                         label: "Maximum playlist videos", value: $ytMaxPlaylistVideos,
                         range: 10...200)

@@ -927,57 +927,58 @@ public actor DownloadEngine {
                 var active = 0
                 var checkpointFailure = checkpointFailures[item.id]
                 if let runner = runners[item.id] {
-                    // Live total: prefer each component task's probed size,
-                    // summed, once every component has one; otherwise keep the
-                    // stored aggregate (which is nil until finish writes it).
-                    var liveSizes: [Int64] = []
+                    // Per-component sizes: a running component's live probed
+                    // size when it has one, the stored size otherwise. Bases
+                    // and the item total are both derived from this one array
+                    // so the concatenated progress and the total can't drift
+                    // apart.
+                    var sizes: [Int64?] = item.components.map(\.totalBytes)
+                    var liveRanges: [Int: RangeSet] = [:]
                     for componentRun in runner.components {
-                        if let size = await componentRun.task.expectedTotalBytes {
-                            liveSizes.append(size)
+                        let index = componentRun.componentIndex
+                        guard index < sizes.count else { continue }
+                        if let live = await componentRun.task.expectedTotalBytes {
+                            sizes[index] = live
                         }
-                    }
-                    if item.components.count == runner.components.count,
-                        liveSizes.count == item.components.count
-                    {
-                        totalBytes = liveSizes.reduce(0, +)
-                    }
-                    // Item-space progress: each component task's ranges shifted
-                    // by the sum of the component sizes before it. Falls back
-                    // to the stored per-component `completed` (already
-                    // shifted by `DownloadItem.completed`) when a size is
-                    // still unknown.
-                    let bases = item.componentBaseOffsets
-                    var union = RangeSet()
-                    for componentRun in runner.components {
-                        let base =
-                            componentRun.componentIndex < bases.count
-                            ? bases[componentRun.componentIndex] : 0
-                        let ranges = await componentRun.task.completedRanges
-                        for range in ranges.ranges {
-                            union.insert(
-                                ByteRange(start: range.start + base, end: range.end + base))
-                        }
+                        liveRanges[index] = await componentRun.task.completedRanges
                         active += await componentRun.task.activeWorkerCount
                         if let failure = await componentRun.task.lastCheckpointFailure {
                             checkpointFailure = failure
                         }
                     }
-                    // Only the running components contribute live ranges; a
-                    // component that finished before this snapshot keeps its
-                    // stored (shifted) set.
-                    if bases.count == item.components.count {
-                        let runningIndices = Set(runner.components.map(\.componentIndex))
-                        for (index, component) in item.components.enumerated()
-                        where !runningIndices.contains(index) {
-                            for range in component.completed.ranges {
+
+                    if sizes.allSatisfy({ $0 != nil }) {
+                        let known = sizes.map { $0! }
+                        totalBytes = known.reduce(0, +)
+                        var bases: [Int64] = []
+                        var running: Int64 = 0
+                        for size in known {
+                            bases.append(running)
+                            running += size
+                        }
+                        var union = RangeSet()
+                        for index in item.components.indices {
+                            let component = liveRanges[index] ?? item.components[index].completed
+                            for range in component.ranges {
                                 union.insert(
                                     ByteRange(
                                         start: range.start + bases[index],
                                         end: range.end + bases[index]))
                             }
                         }
+                        completed = union
+                    } else {
+                        // At least one size still unknown — best-effort: sum
+                        // the live per-component progress without shifting
+                        // (correct for a one-component item, an approximation
+                        // otherwise until the probes land).
+                        var union = RangeSet()
+                        for index in item.components.indices {
+                            let component = liveRanges[index] ?? item.components[index].completed
+                            for range in component.ranges { union.insert(range) }
+                        }
+                        completed = union
                     }
-                    completed = union
                 }
                 let sampler = samplers[item.id] ?? SpeedSampler()
                 // Spec-adjacent UI need: a `.completed` item whose file has
