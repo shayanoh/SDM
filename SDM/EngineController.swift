@@ -382,9 +382,6 @@ final class EngineController {
     /// to downloads" / "Add and start".
     func addPackage(name: String, urlItems: [PackageUrlItem], startImmediately: Bool) async {
         guard !urlItems.isEmpty else { return }
-        // `startImmediately` is a scheduling choice (queued vs. stopped), not
-        // a disable — a freshly grabbed item is always enabled; see
-        // `ItemState`'s doc comment for why the two axes stay independent.
         let items = urlItems.map { urlItem in
             DownloadItem(
                 url: urlItem.url,
@@ -395,7 +392,24 @@ final class EngineController {
                 state: startImmediately ? .queued : .stopped
             )
         }
-        await engine.add(DownloadPackage(name: name, items: items))
+        await addItems(name: name, note: nil, items: items, startImmediately: startImmediately)
+    }
+
+    /// Hands pre-built `DownloadItem`s (possibly multi-component, from the
+    /// media handoff) to the engine under a named, optionally-annotated
+    /// package. `startImmediately` is a scheduling choice (queued vs.
+    /// stopped) — a freshly grabbed item is always enabled.
+    func addItems(
+        name: String, note: String?, items: [DownloadItem], startImmediately: Bool
+    ) async {
+        guard !items.isEmpty else { return }
+        let staged = items.map { item -> DownloadItem in
+            var copy = item
+            copy.state = startImmediately ? .queued : .stopped
+            copy.isEnabled = true
+            return copy
+        }
+        await engine.add(DownloadPackage(name: name, items: staged, note: note))
         publish(await engine.snapshot())
     }
 
