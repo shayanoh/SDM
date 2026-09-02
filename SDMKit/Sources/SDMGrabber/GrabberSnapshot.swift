@@ -32,6 +32,13 @@ public struct GrabberSnapshot: Sendable, Equatable {
     }
     public var failedCount: Int { links.filter { $0.verdict == .checkFailed }.count }
 
+    /// True while any link is still queued/probing/sniffing or any media row
+    /// is resolving — drives the header's "Recheck All" ⇄ "Cancel Checks"
+    /// toggle.
+    public var isChecking: Bool {
+        links.contains { $0.stage != .done } || mediaRows.contains { $0.state == .resolving }
+    }
+
     /// Rows a "Recheck All" would actually retry: failed HTTP probes plus
     /// media rows that failed to resolve or need a binary.
     public var recheckableCount: Int {

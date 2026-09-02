@@ -48,6 +48,9 @@ public actor GrabberSession {
     /// When each row entered the session, for the "auto-clear after N
     /// minutes" setting.
     private var addedAt: [UUID: Date] = [:]
+    /// Set by `cancelChecks()`; the probe and resolve loops stop launching
+    /// new work while it's true. Cleared at the start of every ingest/recheck.
+    private var cancelRequested = false
 
     public init(
         prober: LinkProber,
@@ -70,6 +73,7 @@ public actor GrabberSession {
     }
 
     public func ingest(urls: [URL]) async {
+        cancelRequested = false
         // Same gate as text extraction — a dropped bare-host URL is not a
         // download.
         let httpURLs = urls.filter(URLExtractor.isGrabbable)
@@ -400,6 +404,7 @@ public actor GrabberSession {
     /// are waiting on a now-maybe-installed binary. Faulty/offline links and
     /// `.unsupported` media rows are genuine verdicts and are left alone.
     public func recheckFailed() async {
+        cancelRequested = false
         let failedProbes = order.filter { links[$0]?.verdict == .checkFailed }
         let failedMedia = order.filter { id in
             guard let state = mediaRows[id]?.state else { return false }
@@ -420,6 +425,7 @@ public actor GrabberSession {
     /// `recheckFailed()`, an already-online link or resolved media row is
     /// retried too, because the operator asked for it explicitly.
     public func recheck(ids: Set<UUID>) async {
+        cancelRequested = false
         let probes = order.filter { ids.contains($0) && links[$0] != nil }
         let media = order.filter { ids.contains($0) && mediaRows[$0] != nil }
         guard !probes.isEmpty || !media.isEmpty else { return }
@@ -427,6 +433,14 @@ public actor GrabberSession {
         if !probes.isEmpty { await probeBounded(probes) }
         await resolveMediaBounded(media)
         recluster()
+    }
+
+    /// Stops the in-flight probe and resolve loops from launching any further
+    /// work. Rows already handed to a probe or a yt-dlp process finish and
+    /// are recorded; rows still waiting are settled as check failures so they
+    /// stay recheckable. The header's "Cancel Checks" button.
+    public func cancelChecks() {
+        cancelRequested = true
     }
 
     /// Re-resolves the given media rows under the small resolve concurrency
@@ -438,6 +452,11 @@ public actor GrabberSession {
         await withTaskGroup(of: Void.self) { group in
             var active = 0
             func launch() {
+                if cancelRequested {
+                    for id in pending { mediaRows[id]?.state = .failed("Check cancelled") }
+                    pending.removeAll()
+                    return
+                }
                 while active < budget.maxConcurrentResolves, !pending.isEmpty {
                     let id = pending.removeFirst()
                     guard mediaRows[id] != nil else { continue }
@@ -476,6 +495,7 @@ public actor GrabberSession {
             var active = 0
 
             func launchNext() {
+                guard !cancelRequested else { return }
                 while active < budget.globalMaxConcurrentProbes {
                     guard
                         let index = pending.firstIndex(where: { entry in
@@ -503,6 +523,16 @@ public actor GrabberSession {
                 finished.verdict = VerdictRules.evaluate(finished)
                 links[id] = finished
                 launchNext()
+            }
+        }
+
+        // Anything `cancelChecks()` kept from ever launching is left with no
+        // verdict and a spinning row — settle it as a check failure so
+        // "Recheck All" / the per-item Recheck picks it back up.
+        if cancelRequested {
+            for id in ids where links[id]?.verdict == nil {
+                links[id]?.stage = .done
+                links[id]?.verdict = .checkFailed
             }
         }
     }

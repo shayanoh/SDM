@@ -234,11 +234,18 @@ struct LinkGrabberView: View {
                 statPill(label: "Offline", count: snapshot.offlineCount, color: theme.offlineColor)
                 statPill(
                     label: "Check failed", count: snapshot.failedCount, color: theme.failedColor)
-                Button("Recheck All") {
-                    Task { await controller.recheckFailed() }
+                if snapshot.isChecking {
+                    Button("Cancel Checks", role: .destructive) {
+                        Task { await controller.cancelChecks() }
+                    }
+                    .controlSize(.small)
+                } else {
+                    Button("Recheck All") {
+                        Task { await controller.recheckFailed() }
+                    }
+                    .controlSize(.small)
+                    .disabled(snapshot.recheckableCount == 0)
                 }
-                .controlSize(.small)
-                .disabled(snapshot.recheckableCount == 0)
                 Button("Clear", role: .destructive) {
                     Task { await controller.clear() }
                 }

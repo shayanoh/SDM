@@ -131,6 +131,12 @@ final class GrabberController {
         snapshot = await session.snapshot()
     }
 
+    /// Stops in-flight probes/resolves — the header's "Cancel Checks" button.
+    func cancelChecks() async {
+        await session.cancelChecks()
+        snapshot = await session.snapshot()
+    }
+
     func removeLinks(_ ids: Set<UUID>) async {
         for id in ids { await session.removeLink(id) }
         snapshot = await session.snapshot()

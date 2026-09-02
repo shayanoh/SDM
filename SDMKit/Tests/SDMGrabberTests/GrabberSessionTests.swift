@@ -128,6 +128,36 @@ import Testing
     #expect(links.first { $0.originalURL == urlB }?.verdict == .offline)
 }
 
+@Test func cancelChecksStopsPendingProbesAndLeavesThemRecheckable() async throws {
+    let origin = FakeProbeOrigin()
+    let urlA = URL(string: "https://a.example.com/1.bin")!
+    let urlB = URL(string: "https://a.example.com/2.bin")!
+    var held = FakeProbeOrigin.Behavior()
+    held.holdsUntilReleased = true
+    await origin.setBehavior(held, for: urlA)
+    await origin.setBehavior(held, for: urlB)
+
+    let session = GrabberSession(
+        prober: LinkProber(transport: origin, deepSniffEnabled: false),
+        budget: GrabberSession.Budget(globalMaxConcurrentProbes: 1, maxConcurrentPerHost: 4)
+    )
+    #expect(await session.snapshot().isChecking == false)
+
+    let ingestTask = Task { await session.ingest(urls: [urlA, urlB]) }
+    while await origin.requestLog.isEmpty { await Task.yield() }
+    #expect(await session.snapshot().isChecking)
+
+    await session.cancelChecks()
+    await origin.release(urlA)
+    await origin.release(urlB)
+    await ingestTask.value
+
+    let snap = await session.snapshot()
+    #expect(snap.isChecking == false)
+    #expect(snap.links.contains { $0.verdict == .checkFailed })
+    #expect(snap.recheckableCount >= 1)
+}
+
 @Test func pruneOlderThanRemovesRowsPastTheCutoffAndKeepsFresherOnes() async throws {
     let origin = FakeProbeOrigin()
     let session = GrabberSession(prober: LinkProber(transport: origin, deepSniffEnabled: false))
