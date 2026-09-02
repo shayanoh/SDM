@@ -1,0 +1,6 @@
+The bundled ffmpeg binaries are the native macOS static builds from
+https://ffmpeg.martin-riedl.de/ (build 1788094033_N-126314-g3386acd2f9). FFmpeg is free software
+licensed under the LGPL v2.1+ / GPL v2+; see https://ffmpeg.org/legal.html.
+Corresponding source: https://git.ffmpeg.org/ffmpeg.git and the build
+recipe at https://github.com/mZ4h/FFmpeg-Builds-macOS
+SDM invokes ffmpeg only as a separate process (mere aggregation).

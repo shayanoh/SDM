@@ -35,20 +35,20 @@ self-reviews under `docs/superpowers/plans/`. Each was either kept as-is
   refresh it *before* spawning workers rather than eating one wasted `403`.
   *(Spec §2 / §7.3(c).)*
 
-- [ ] **4. yt-dlp version surfacing / self-update.** yt-dlp breaks against
-  YouTube every few weeks when stale. Show the detected version in Settings,
-  warn when it looks old, offer a "Update yt-dlp" button (`yt-dlp -U`).
-  *(Spec §2.)*
+- [x] **4. yt-dlp version surfacing / self-update.** DONE 2026-09-03 — see
+  `docs/superpowers/specs/2026-09-03-managed-binaries-design.md`. Settings →
+  YouTube → Components shows installed + latest version, channel picker, and
+  a "Check now" button. Self-update is our own version check + SHA-256
+  download (not `yt-dlp -U`).
 
-- [ ] **5. Bundle yt-dlp / ffmpeg + self-updating.** Ship the binaries inside
-  the .app instead of requiring `brew install`, with a mechanism to keep the
-  bundled yt-dlp current. *Hint:* `BinaryLocator` already supports a manual
-  path override via `setOverride(_:for:)` — a bundled-binary path is just
-  another override source, and wiring that plumbing would also make the
-  deferred "yt-dlp path" / "ffmpeg path" file-picker fields in Settings
-  (spec §4.5 / §9.4) land cheaply. Needs a `BinaryLocator` reference plumbed
-  through `EngineController` and `GrabberController` (the grabber controller
-  currently has no `applyStoredSettings` hook). *(Spec §2 + Part 5 self-review.)*
+- [x] **5. Bundle yt-dlp / ffmpeg + self-updating.** DONE 2026-09-03 —
+  `SDMResolve/ManagedBinaries.swift` + `ManagedBinariesController`. ffmpeg and
+  QuickJS-ng ship as LZFSE blobs (`scripts/vendor-binaries.sh`, Git LFS) and
+  inflate on launch; yt-dlp is downloaded and self-updated. One shared
+  `BinaryLocator` (managed-dir only) is plumbed through `EngineController` and
+  `GrabberController`. The deferred "yt-dlp path / ffmpeg path" Settings
+  file-pickers (spec §4.5 / §9.4) are **superseded** — resolution is
+  managed-only by design.
 
 - [ ] **6. Overdue Phase 1 decisions** (from
   `memory/sdm-phase-1-followups.md`, owed since before Phase 3):

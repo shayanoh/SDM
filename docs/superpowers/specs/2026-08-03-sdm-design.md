@@ -17,7 +17,7 @@ A macOS download manager with segmented (multi-connection) transfers, robust res
 |---|---|---|
 | Distribution | Direct download, Developer ID signed + notarized, **App Sandbox off** | Needs to exec helper binaries and write to arbitrary user-chosen folders without security-scoped bookmark friction. Mac App Store is explicitly out of scope; Apple rejects apps bundling yt-dlp-class downloaders. |
 | Deployment target | **macOS 15.0** baseline, enhanced on **macOS 26** | Must run on the user's macOS 15 machine; macOS 26 gets Liquid Glass via availability checks isolated to one modifier file. |
-| YouTube | **User-installed yt-dlp, used as a metadata extractor only** | Generic HTTP downloads work with zero dependencies. yt-dlp may be bundled in a later phase; the resolver protocol makes that a drop-in change. |
+| YouTube | **yt-dlp used as a metadata extractor only** (as of 2026-09-03 it is auto-provisioned, not user-installed) | Generic HTTP downloads work with zero dependencies. yt-dlp/ffmpeg/QuickJS are now managed by SDM — see `2026-09-03-managed-binaries-design.md`. |
 | Language | Swift 6 language mode, strict concurrency | The engine is heavily concurrent; compiler-enforced data isolation is worth the upfront cost. |
 | Persistence | Plain `Codable` + atomic JSON snapshot + per-download sidecar. **No SwiftData.** | See §4. |
 | UI | SwiftUI, `NavigationSplitView` + `MenuBarExtra` | Native, and the logic worth testing lives outside the views anyway. |

@@ -18,6 +18,10 @@ public struct YtDlpResolver: LinkResolver {
     private let locator: BinaryLocator
     private let cookieSource: @Sendable () -> CookieSource
     private let maxPlaylistVideos: @Sendable () -> Int
+    /// Tokens spliced into every yt-dlp invocation — the app supplies
+    /// `--extractor-args youtube:jsruntime=quickjs` (QuickJS is off by
+    /// default in yt-dlp) and `--ffmpeg-location <managed bin dir>`.
+    private let extraArguments: @Sendable () -> [String]
     private let resolveTimeout: Duration
     private let playlistTimeout: Duration
 
@@ -26,6 +30,7 @@ public struct YtDlpResolver: LinkResolver {
         locator: BinaryLocator,
         cookieSource: @escaping @Sendable () -> CookieSource = { .none },
         maxPlaylistVideos: @escaping @Sendable () -> Int = { 50 },
+        extraArguments: @escaping @Sendable () -> [String] = { [] },
         resolveTimeout: Duration = .seconds(60),
         playlistTimeout: Duration = .seconds(120)
     ) {
@@ -33,6 +38,7 @@ public struct YtDlpResolver: LinkResolver {
         self.locator = locator
         self.cookieSource = cookieSource
         self.maxPlaylistVideos = maxPlaylistVideos
+        self.extraArguments = extraArguments
         self.resolveTimeout = resolveTimeout
         self.playlistTimeout = playlistTimeout
     }
@@ -130,7 +136,7 @@ public struct YtDlpResolver: LinkResolver {
         let out: ProcessOutput
         do {
             out = try await runner.run(
-                executable: executable, arguments: arguments, timeout: timeout)
+                executable: executable, arguments: arguments + extraArguments(), timeout: timeout)
         } catch ProcessRunError.timedOut {
             resolveLog.error(
                 "yt-dlp timed out: \(arguments.joined(separator: " "), privacy: .public)")

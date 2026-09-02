@@ -1,0 +1,1 @@
+SDM/Resources/vendor/*.lzfse filter=lfs diff=lfs merge=lfs -text

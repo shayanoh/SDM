@@ -74,7 +74,12 @@ final class EngineController {
     private var previousSnapshot: EngineSnapshot?
     private let downloadFolder: URL
 
-    init(notificationManager: NotificationManager) {
+    init(
+        notificationManager: NotificationManager,
+        binaryLocator: BinaryLocator = BinaryLocator(searchPaths: [
+            ManagedBinariesController.binDirectory
+        ])
+    ) {
         notifications = notificationManager
         let support = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -86,7 +91,6 @@ final class EngineController {
         // muxer. Cookie source and playlist cap are Part 4 Settings — literals
         // for now.
         let processRunner = SystemProcessRunner()
-        let binaryLocator = BinaryLocator()
         engine = DownloadEngine(
             transport: URLSessionTransport(),
             stateStore: JSONStateStore(fileURL: support.appendingPathComponent("state.json")),
@@ -101,7 +105,8 @@ final class EngineController {
             resolver: YtDlpResolver(
                 runner: processRunner, locator: binaryLocator,
                 cookieSource: { YouTubeSettingsStore.cookieSource },
-                maxPlaylistVideos: { YouTubeSettingsStore.maxPlaylistVideos }
+                maxPlaylistVideos: { YouTubeSettingsStore.maxPlaylistVideos },
+                extraArguments: { ManagedBinariesController.ytDlpExtraArguments }
             ),
             muxer: FFmpegMuxer(runner: processRunner, locator: binaryLocator)
         )

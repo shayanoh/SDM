@@ -11,6 +11,7 @@ import SwiftUI
 /// Cancel from a snapshot taken on appear.
 struct SettingsView: View {
     @Environment(EngineController.self) private var controller
+    @Environment(ManagedBinariesController.self) private var managedBinaries
     @Environment(ThemeStore.self) private var themeStore
     @Environment(ActivationPolicyController.self) private var activationPolicyController
     @Environment(NotificationManager.self) private var notificationManager
@@ -38,6 +39,7 @@ struct SettingsView: View {
     @State private var ytAllowAAC = YouTubeSettingsStore.allowAAC
     @State private var ytMaxPlaylistVideos = YouTubeSettingsStore.maxPlaylistVideos
     @State private var ytCookieSource = YouTubeSettingsStore.cookieSource
+    @State private var ytDlpChannel = YouTubeSettingsStore.ytDlpChannel
     @State private var downloadFinishedEnabled = NotificationSettings.downloadFinishedEnabled
     @State private var packageFinishedEnabled = NotificationSettings.packageFinishedEnabled
     @State private var downloadFailedEnabled = NotificationSettings.downloadFailedEnabled
@@ -259,11 +261,61 @@ struct SettingsView: View {
                     .frame(width: 160)
                 }
             }
+            componentsSection
             Spacer(minLength: 0)
         }
         .padding(.top, 12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(theme.surfacePrimaryColor)
+    }
+
+    @ViewBuilder
+    private var componentsSection: some View {
+        let status = managedBinaries.status
+        SettingsSection(title: "Components", theme: theme) {
+            HStack {
+                Text("yt-dlp")
+                Spacer()
+                Text(status.ytDlpVersion ?? "not installed")
+                    .foregroundStyle(status.ytDlpVersion == nil ? .secondary : .primary)
+            }
+            if let latest = status.latestKnown, latest != status.ytDlpVersion {
+                Text("latest: \(latest)").font(.caption).foregroundStyle(.secondary)
+            }
+            HStack {
+                Text("Update channel")
+                Spacer()
+                Picker("", selection: $ytDlpChannel) {
+                    Text("Stable").tag(YtDlpChannel.stable)
+                    Text("Nightly").tag(YtDlpChannel.nightly)
+                }
+                .labelsHidden()
+                .frame(width: 120)
+                .onChange(of: ytDlpChannel) { _, new in
+                    YouTubeSettingsStore.ytDlpChannel = new
+                    Task { await managedBinaries.checkNow() }
+                }
+            }
+            HStack {
+                Button("Check now") { Task { await managedBinaries.checkNow() } }
+                Spacer()
+            }
+            if let error = status.lastError {
+                Text(error).font(.caption).foregroundStyle(.red).lineLimit(2)
+            }
+            Divider()
+            HStack {
+                Text("ffmpeg")
+                Spacer()
+                Text("\(status.ffmpegVersion ?? "—")  (bundled)").foregroundStyle(.secondary)
+            }
+            HStack {
+                Text("JS runtime")
+                Spacer()
+                Text("QuickJS-ng \(status.qjsVersion ?? "—")  (bundled)")
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     private var notificationsTab: some View {

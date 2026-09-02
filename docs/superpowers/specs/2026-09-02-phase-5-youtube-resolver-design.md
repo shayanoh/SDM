@@ -44,10 +44,11 @@ file, assembled into a single output with `ffmpeg -c copy`.
   A later phase adds the yt-dlp-as-downloader path with text progress parsing.
 - **Proactive URL refresh.** URLs are refreshed reactively on `403` only; a
   long-paused item eats one `403` on resume and refreshes then.
-- **yt-dlp version surfacing / self-update.** The user maintains their own
-  yt-dlp.
+- **yt-dlp version surfacing / self-update.** IMPLEMENTED 2026-09-03 —
+  `docs/superpowers/specs/2026-09-03-managed-binaries-design.md`.
 - **SponsorBlock, chapters, subtitles, thumbnail embedding, re-encoding.**
-- **Bundling yt-dlp / ffmpeg** (still deferred per parent §14).
+- **Bundling yt-dlp / ffmpeg.** IMPLEMENTED 2026-09-03 (same spec) — ffmpeg +
+  QuickJS-ng bundled, yt-dlp downloaded & self-updated; managed-only resolution.
 
 > **Post-implementation note (2026-09-02).** The bullets above were all reviewed
 > after Phase 5 shipped. Their current disposition lives in **`todo.md`** at the
