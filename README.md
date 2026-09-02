@@ -2,7 +2,9 @@
 
 A macOS download manager with segmented (multi-connection) transfers, robust resume, clipboard-driven link grabbing, and YouTube support.
 
-> **Status: pre-implementation.** The design is complete and documented; the code is still Xcode boilerplate. See [the design spec](docs/superpowers/specs/2026-08-03-sdm-design.md).
+> **Status: implemented.** All five design phases are merged; the YouTube
+> toolchain (yt-dlp / ffmpeg / QuickJS) is now provisioned automatically. See
+> [the design spec](docs/superpowers/specs/2026-08-03-sdm-design.md).
 
 ## Features
 
@@ -34,7 +36,7 @@ A macOS download manager with segmented (multi-connection) transfers, robust res
 - Quality, resolution, and codec preference list, applied automatically at grab time
 - Per-link override, with filesize updating instantly
 - Downloads through the same segmented engine as everything else
-- Requires [yt-dlp](https://github.com/yt-dlp/yt-dlp) (`brew install yt-dlp`); generic HTTP downloads work without it
+- `yt-dlp`, `ffmpeg`, and a JavaScript runtime are **provisioned automatically** — no `brew install` needed (see [Vendored binaries](#vendored-binaries)); generic HTTP downloads work regardless
 
 **Interface**
 
@@ -48,11 +50,37 @@ A macOS download manager with segmented (multi-connection) transfers, robust res
 ## Requirements
 
 - macOS 15.0 or later (macOS 26 additionally gets Liquid Glass styling)
-- `yt-dlp` and `ffmpeg` for YouTube downloads only
+- Nothing else — the YouTube toolchain is bundled or self-downloaded (see below)
 
 ## Building
 
 Open `SDM.xcodeproj` in Xcode and build the `SDM` scheme.
+
+The vendored `*.lzfse` blobs under `SDM/Resources/vendor/` are stored with
+**Git LFS** — run `git lfs install` once before cloning, or `git lfs pull`
+after, so they materialize.
+
+## Vendored binaries
+
+SDM does not ask you to `brew install` anything. Its three helper binaries
+live in `~/Library/Application Support/SDM/bin/`:
+
+| Binary | How it gets there | Updates |
+|---|---|---|
+| `ffmpeg` | Bundled in the app as a per-arch LZFSE blob, inflated on first launch | Only when a new SDM build ships a newer pinned build |
+| `qjs` (QuickJS-ng) | Bundled universal LZFSE blob, inflated on first launch — the JavaScript runtime yt-dlp now needs for full YouTube support | Same as ffmpeg |
+| `yt-dlp` | **Downloaded** from GitHub releases on first launch, SHA-256 verified, ad-hoc signed | Self-checks every 6 h (15 min while missing); auto-updates. Stable or nightly channel, chosen in **Settings → YouTube → Components**. Never uses `yt-dlp -U`. |
+
+yt-dlp is invoked with `--extractor-args youtube:jsruntime=quickjs` so it
+uses the bundled `qjs`. All of this is implemented in
+`SDMKit/Sources/SDMResolve/ManagedBinaries.swift` and driven by the app's
+`ManagedBinariesController`.
+
+To refresh the pinned `ffmpeg` / `qjs` versions, edit the version pins at the
+top of `scripts/vendor-binaries.sh`, run it, and commit the regenerated
+blobs and `vendor-manifest.json`. A fresh clone that has not run the script
+carries a placeholder `vendor-manifest.json` (`"0"` versions); the app treats
+absent blobs as "nothing to inflate" and yt-dlp still self-downloads.
 
 ## Documentation
 

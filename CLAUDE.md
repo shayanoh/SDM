@@ -10,7 +10,9 @@ macOS download manager. Segmented transfers, resume, clipboard link grabbing, Yo
 
 `SDMKit/` is a local SPM package with **four library targets** — `SDMCore`, `SDMEngine`, `SDMGrabber`, `SDMResolve` — linked into the `SDM` app target. The engine, scheduler, persistence, linkgrabber, menu bar, notifications, theming, activation-policy modes, and the yt-dlp/YouTube feature (multi-component downloads, `ffmpeg` muxing, silent 403 URL refresh, playlists, format picker, YouTube Settings tab) all work end to end.
 
-**What's still open lives in `todo.md` at the repo root** — a handful of consciously-deferred Phase 5 items (HLS/DASH wholesale download, proactive URL refresh, per-component details panel, yt-dlp bundling + self-update) and the small Phase 1 follow-ups owed since before Phase 3. Nothing in the design specs or plan docs is an open backlog; they carry "IMPLEMENTED" / "SUPERSEDED" status banners.
+**What's still open lives in `todo.md` at the repo root** — a handful of consciously-deferred Phase 5 items (HLS/DASH wholesale download, proactive URL refresh, per-component details panel) and the small Phase 1 follow-ups owed since before Phase 3. Nothing in the design specs or plan docs is an open backlog; they carry "IMPLEMENTED" / "SUPERSEDED" status banners.
+
+**Managed binaries (2026-09-03):** `yt-dlp` / `ffmpeg` / `qjs` (QuickJS-ng) are provisioned into `~/Library/Application Support/SDM/bin/` — ffmpeg/qjs bundled as LZFSE blobs and inflated on launch, yt-dlp downloaded + SHA-256-verified + self-updated by `SDMResolve/ManagedBinaries.swift`. No `brew install` required. Spec: `docs/superpowers/specs/2026-09-03-managed-binaries-design.md`.
 
 ## Fixed decisions
 
@@ -75,6 +77,7 @@ The two properties that must never regress:
 
 - Format Swift with `swift-format` before committing.
 - Add packages via Xcode or `Package.swift` through SPM tooling — never hand-edit `Package.resolved`.
+- Vendored `ffmpeg`/`qjs` blobs (`SDM/Resources/vendor/*.lzfse`) are Git LFS; regenerate with `scripts/vendor-binaries.sh` and commit the results.
 - Verify library APIs against current documentation (Context7) rather than from memory; SwiftUI, SwiftData, and macOS 26 APIs have all moved recently.
 
 ## Git

@@ -81,7 +81,9 @@ final class ManagedBinariesController {
     /// (Xcode synchronized groups don't preserve subfolders), so each file is
     /// looked up by name at the resource root.
     nonisolated private static func bundledVendorAssets() -> [VendorAsset] {
-        guard let manifestURL = Bundle.main.url(forResource: "vendor-manifest", withExtension: "json"),
+        guard
+            let manifestURL = Bundle.main.url(
+                forResource: "vendor-manifest", withExtension: "json"),
             let data = try? Data(contentsOf: manifestURL),
             let versions = try? JSONDecoder().decode([String: String].self, from: data)
         else { return [] }
