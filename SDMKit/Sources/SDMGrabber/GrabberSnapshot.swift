@@ -3,17 +3,20 @@
 /// straight off this.
 public struct GrabberSnapshot: Sendable, Equatable {
     public let links: [ProbedLink]
+    public let mediaRows: [MediaRow]
     public let packages: [PackageCandidate]
     public let checkedCount: Int
     public let totalCount: Int
 
     public init(
         links: [ProbedLink],
+        mediaRows: [MediaRow] = [],
         packages: [PackageCandidate],
         checkedCount: Int,
         totalCount: Int
     ) {
         self.links = links
+        self.mediaRows = mediaRows
         self.packages = packages
         self.checkedCount = checkedCount
         self.totalCount = totalCount

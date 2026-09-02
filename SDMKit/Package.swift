@@ -19,11 +19,11 @@ let package = Package(
             // the define below to silence it, e.g. before a public release build.
             // swiftSettings: [.define("SDM_ENGINE_LOGGING")]
         ),
-        .target(name: "SDMGrabber", dependencies: ["SDMCore"]),
+        .target(name: "SDMGrabber", dependencies: ["SDMCore", "SDMResolve"]),
         .target(name: "SDMResolve", dependencies: ["SDMCore"]),
         .testTarget(name: "SDMCoreTests", dependencies: ["SDMCore"]),
         .testTarget(name: "SDMEngineTests", dependencies: ["SDMEngine", "SDMResolve"]),
-        .testTarget(name: "SDMGrabberTests", dependencies: ["SDMGrabber"]),
+        .testTarget(name: "SDMGrabberTests", dependencies: ["SDMGrabber", "SDMResolve"]),
         .testTarget(
             name: "SDMResolveTests", dependencies: ["SDMResolve"],
             resources: [.copy("Fixtures")]),
