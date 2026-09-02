@@ -23,6 +23,7 @@ struct LinkGrabberView: View {
     @State private var isShowingRenameAlert = false
     @State private var renamingPackageID: UUID?
     @State private var newPackageName = ""
+    @State private var heldBackMessage: String?
 
     private var theme: Theme { themeStore.resolved(for: colorScheme) }
 
@@ -35,7 +36,7 @@ struct LinkGrabberView: View {
                     LinkRow(link: $0, controller: controller, theme: theme)
                 }
                 ForEach(mediaRowsInNoPackage()) {
-                    MediaLinkRow(row: $0, theme: theme)
+                    MediaLinkRow(row: $0, controller: controller, theme: theme)
                 }
                 ForEach(controller.snapshot.packages) { package in
                     // Deliberately not a `Section` with a `header:` — macOS
@@ -54,7 +55,7 @@ struct LinkGrabberView: View {
                             .draggable(DraggedLinkID(linkID: link.id))
                     }
                     ForEach(mediaRows(in: package)) { row in
-                        MediaLinkRow(row: row, theme: theme)
+                        MediaLinkRow(row: row, controller: controller, theme: theme)
                             .draggable(DraggedLinkID(linkID: row.id))
                     }
                 }
@@ -194,6 +195,11 @@ struct LinkGrabberView: View {
                 .controlSize(.small)
                 .disabled(snapshot.packages.isEmpty)
             }
+            if let heldBackMessage {
+                Text(heldBackMessage)
+                    .font(.caption)
+                    .foregroundStyle(theme.faultyColor)
+            }
         }
         .padding()
         // Applied before `sdmSurface` so the opaque theme color is what's
@@ -224,7 +230,12 @@ struct LinkGrabberView: View {
     /// grabber — once a link is a download it has no reason to still show up
     /// as something waiting to be grabbed.
     private func addToDownloads(_ package: PackageCandidate, startImmediately: Bool) {
-        let (items, _) = controller.downloadItems(inPackage: package.id)
+        let (items, heldBack) = controller.downloadItems(inPackage: package.id)
+        guard !items.isEmpty || heldBack > 0 else { return }
+        heldBackMessage =
+            heldBack > 0
+            ? "\(heldBack) item\(heldBack == 1 ? "" : "s") held back — choose a format first"
+            : nil
         guard !items.isEmpty else { return }
         let name = package.name
         let note = package.note
@@ -261,10 +272,9 @@ struct LinkGrabberView: View {
     }
 }
 
-/// Minimal media-row rendering — the full treatment (format picker, spinner,
-/// per-state affordances) is Phase 5 Part 5.
 private struct MediaLinkRow: View {
     let row: MediaRow
+    let controller: GrabberController
     let theme: Theme
 
     var body: some View {
@@ -277,10 +287,57 @@ private struct MediaLinkRow: View {
                 Text("duplicate").font(.caption).foregroundStyle(theme.faultyColor)
             }
             Spacer()
-            badge
+            if let media = row.media, canPick {
+                formatPicker(media)
+            } else {
+                badge
+            }
             Text(sizeText).font(.caption).foregroundStyle(theme.textSecondaryColor)
         }
         .padding(.vertical, 2)
+    }
+
+    private var canPick: Bool {
+        switch row.state {
+        case .resolved, .unselected, .needsFfmpeg: return true
+        default: return false
+        }
+    }
+
+    @ViewBuilder
+    private func formatPicker(_ media: SDMCore.ResolvedMedia) -> some View {
+        let options = MediaFormatMenu.options(
+            for: media, preferences: YouTubeSettingsStore.qualityPreferences)
+        let matching = options.filter(\.matchesPreferences)
+        let nonMatching = options.filter { !$0.matchesPreferences }
+        Menu {
+            ForEach(matching) { option in
+                Button(option.label) { pick(option.choice) }
+            }
+            if !matching.isEmpty && !nonMatching.isEmpty { Divider() }
+            ForEach(nonMatching) { option in
+                Button("⚠ " + option.label) { pick(option.choice) }
+            }
+        } label: {
+            Text(pickerLabel)
+                .font(.caption)
+                .foregroundStyle(row.state == .resolved ? theme.onlineColor : theme.faultyColor)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+    }
+
+    private func pick(_ choice: SDMCore.FormatChoice) {
+        let id = row.id
+        Task { await controller.setFormatChoice(choice, for: id) }
+    }
+
+    private var pickerLabel: String {
+        switch row.state {
+        case .resolved: return formatSummary
+        case .needsFfmpeg: return "requires ffmpeg"
+        default: return "choose a format"
+        }
     }
 
     @ViewBuilder

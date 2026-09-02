@@ -100,8 +100,8 @@ final class EngineController {
             ),
             resolver: YtDlpResolver(
                 runner: processRunner, locator: binaryLocator,
-                cookieSource: { .none },  // Part 4: read from Settings
-                maxPlaylistVideos: { 50 }  // Part 4: read from Settings
+                cookieSource: { YouTubeSettingsStore.cookieSource },
+                maxPlaylistVideos: { YouTubeSettingsStore.maxPlaylistVideos }
             ),
             muxer: FFmpegMuxer(runner: processRunner, locator: binaryLocator)
         )
@@ -301,6 +301,13 @@ final class EngineController {
 
     func retry(_ itemID: UUID) async {
         await engine.retry(itemID)
+        publish(await engine.snapshot())
+    }
+
+    /// Re-runs only the `ffmpeg` mux for a failed muxed item whose parts are
+    /// all downloaded. Spec §9.3's "Retry mux".
+    func retryMux(_ itemID: UUID) async {
+        await engine.retryMux(itemID)
         publish(await engine.snapshot())
     }
 

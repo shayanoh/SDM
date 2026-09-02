@@ -391,6 +391,15 @@ struct PackagesListView: View {
         }
         .disabled(!items.contains(where: isFailedItem))
 
+        Button("Retry Mux\(suffix)", systemImage: "arrow.trianglehead.clockwise") {
+            Task {
+                for item in items where isFailedMuxItem(item) {
+                    await controller.retryMux(item.id)
+                }
+            }
+        }
+        .disabled(!items.contains(where: isFailedMuxItem))
+
         Button("Reset Download\(suffix)", systemImage: "arrow.left.to.line") {
             Task { for item in items { await controller.resetDownload(item.id) } }
         }
@@ -668,6 +677,17 @@ struct BottomPanel: View {
                     }
                     .disabled(
                         downloadItem.state != .completed || downloadItem.fileMissing)
+                }
+            }
+            if downloadItem.assembly == .mux {
+                GridRow {
+                    Text("Assembly")
+                    Text(
+                        downloadItem.isAssembling
+                            ? "Running ffmpeg…" : "Video + audio, muxed with ffmpeg"
+                    )
+                    .foregroundStyle(theme.textSecondaryColor)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             GridRow {
@@ -1196,6 +1216,12 @@ private func isFailedItem(_ item: ItemSnapshot) -> Bool {
     return false
 }
 
+/// A muxed YouTube item whose parts downloaded but `ffmpeg` failed — the
+/// one case "Retry Mux" applies to. Spec §9.3.
+private func isFailedMuxItem(_ item: ItemSnapshot) -> Bool {
+    isFailedItem(item) && item.assembly == .mux
+}
+
 /// "Open File" only makes sense for a genuinely finished, still-present file.
 private func canOpen(_ item: ItemSnapshot) -> Bool {
     item.state == .completed && !item.fileMissing
@@ -1412,17 +1438,18 @@ private struct ItemRow: View {
     }
 
     private var stateIconName: String {
+        if item.isAssembling { return "wand.and.stars" }
         switch item.state {
         case .running:
-            "arrow.down.circle"
+            return "arrow.down.circle"
         case .completed:
-            "checkmark.circle"
+            return "checkmark.circle"
         case .failed:
-            "exclamationmark.arrow.trianglehead.counterclockwise.rotate.90"
+            return "exclamationmark.arrow.trianglehead.counterclockwise.rotate.90"
         case .queued:
-            "clock.circle"
+            return "clock.circle"
         case .stopped:
-            "pause.circle"
+            return "pause.circle"
         }
     }
 
@@ -1492,6 +1519,7 @@ private struct ItemRow: View {
     }
 
     private static func describe(_ item: ItemSnapshot) -> String {
+        if item.isAssembling { return "Assembling…" }
         let base: String
         switch item.state {
         case .queued: base = "Queued"

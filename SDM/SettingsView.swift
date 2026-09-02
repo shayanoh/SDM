@@ -1,4 +1,5 @@
 import SDMCore
+import SDMResolve
 import SwiftUI
 
 /// Content of the dedicated `WindowGroup(id: "settings")` (see `SDMApp`) —
@@ -26,6 +27,16 @@ struct SettingsView: View {
     @State private var clipboardWatchingEnabled = GrabberSettings.clipboardWatchingEnabled
     @State private var autoAddAndStartOnGrab = GrabberSettings.autoAddAndStartOnGrab
     @State private var deepSniffEnabled = GrabberSettings.deepSniffEnabled
+    @State private var ytMaxHeight = YouTubeSettingsStore.maxHeight
+    @State private var ytAllowAV1 = YouTubeSettingsStore.allowAV1
+    @State private var ytAllowVP9 = YouTubeSettingsStore.allowVP9
+    @State private var ytAllowH264 = YouTubeSettingsStore.allowH264
+    @State private var ytAllowMP4 = YouTubeSettingsStore.allowMP4
+    @State private var ytAllowWebM = YouTubeSettingsStore.allowWebM
+    @State private var ytAllowOpus = YouTubeSettingsStore.allowOpus
+    @State private var ytAllowAAC = YouTubeSettingsStore.allowAAC
+    @State private var ytMaxPlaylistVideos = YouTubeSettingsStore.maxPlaylistVideos
+    @State private var ytCookieSource = YouTubeSettingsStore.cookieSource
     @State private var downloadFinishedEnabled = NotificationSettings.downloadFinishedEnabled
     @State private var packageFinishedEnabled = NotificationSettings.packageFinishedEnabled
     @State private var downloadFailedEnabled = NotificationSettings.downloadFailedEnabled
@@ -56,6 +67,9 @@ struct SettingsView: View {
                 appearanceTab.tabItem { Label("Appearance", systemImage: "paintbrush") }
                 downloadsTab.tabItem { Label("Downloads", systemImage: "arrow.down.circle") }
                 linkgrabberTab.tabItem { Label("Linkgrabber", systemImage: "link") }
+                youtubeTab.tabItem {
+                    Label("YouTube", systemImage: "play.rectangle.on.rectangle")
+                }
                 notificationsTab.tabItem { Label("Notifications", systemImage: "bell") }
             }
             .padding(20)
@@ -181,6 +195,56 @@ struct SettingsView: View {
         .background(theme.surfacePrimaryColor)
     }
 
+    private var youtubeTab: some View {
+        // Only one codec/container/audio may be the last one left checked —
+        // `FormatSelector` must never get an empty allowlist (spec §9.4).
+        let videoCount = [ytAllowAV1, ytAllowVP9, ytAllowH264].filter { $0 }.count
+        let containerCount = [ytAllowMP4, ytAllowWebM].filter { $0 }.count
+        let audioCount = [ytAllowOpus, ytAllowAAC].filter { $0 }.count
+        return VStack(alignment: .leading, spacing: 16) {
+            SettingsSection(title: "Quality", theme: theme) {
+                Grid(alignment: .leading, verticalSpacing: 10) {
+                    SteppedNumberField(
+                        label: "Maximum resolution (p)", value: $ytMaxHeight, range: 144...4320)
+                    SteppedNumberField(
+                        label: "Maximum playlist videos", value: $ytMaxPlaylistVideos,
+                        range: 10...200)
+                }
+            }
+            SettingsSection(title: "Video codecs", theme: theme) {
+                Toggle("AV1", isOn: $ytAllowAV1).disabled(ytAllowAV1 && videoCount == 1)
+                Toggle("VP9", isOn: $ytAllowVP9).disabled(ytAllowVP9 && videoCount == 1)
+                Toggle("H.264", isOn: $ytAllowH264).disabled(ytAllowH264 && videoCount == 1)
+            }
+            SettingsSection(title: "Containers", theme: theme) {
+                Toggle("MP4", isOn: $ytAllowMP4).disabled(ytAllowMP4 && containerCount == 1)
+                Toggle("WebM", isOn: $ytAllowWebM).disabled(ytAllowWebM && containerCount == 1)
+            }
+            SettingsSection(title: "Audio codecs", theme: theme) {
+                Toggle("Opus", isOn: $ytAllowOpus).disabled(ytAllowOpus && audioCount == 1)
+                Toggle("AAC", isOn: $ytAllowAAC).disabled(ytAllowAAC && audioCount == 1)
+            }
+            SettingsSection(title: "Authentication", theme: theme) {
+                HStack {
+                    Text("Cookies from browser")
+                    Spacer()
+                    Picker("", selection: $ytCookieSource) {
+                        ForEach(CookieSource.allCases, id: \.self) { source in
+                            Text(source == .none ? "None" : source.rawValue.capitalized)
+                                .tag(source)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 160)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.top, 12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(theme.surfacePrimaryColor)
+    }
+
     private var notificationsTab: some View {
         VStack(alignment: .leading, spacing: 16) {
             SettingsSection(title: "Notifications", theme: theme) {
@@ -234,6 +298,16 @@ struct SettingsView: View {
         }
         GrabberSettings.autoAddAndStartOnGrab = autoAddAndStartOnGrab
         GrabberSettings.deepSniffEnabled = deepSniffEnabled
+        YouTubeSettingsStore.maxHeight = ytMaxHeight
+        YouTubeSettingsStore.allowAV1 = ytAllowAV1
+        YouTubeSettingsStore.allowVP9 = ytAllowVP9
+        YouTubeSettingsStore.allowH264 = ytAllowH264
+        YouTubeSettingsStore.allowMP4 = ytAllowMP4
+        YouTubeSettingsStore.allowWebM = ytAllowWebM
+        YouTubeSettingsStore.allowOpus = ytAllowOpus
+        YouTubeSettingsStore.allowAAC = ytAllowAAC
+        YouTubeSettingsStore.maxPlaylistVideos = ytMaxPlaylistVideos
+        YouTubeSettingsStore.cookieSource = ytCookieSource
         NotificationSettings.downloadFinishedEnabled = downloadFinishedEnabled
         NotificationSettings.packageFinishedEnabled = packageFinishedEnabled
         NotificationSettings.downloadFailedEnabled = downloadFailedEnabled

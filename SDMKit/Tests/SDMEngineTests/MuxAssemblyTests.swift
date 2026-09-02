@@ -117,3 +117,24 @@ private func muxItem(_ v: URL, _ a: URL) -> DownloadItem {
     let snap = try #require(await engine.snapshot().packages.first?.items.first)
     if case .failed = snap.state {} else { Issue.record("expected .failed") }
 }
+
+@Test func snapshotCarriesTheItemsAssemblyMode() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let router = TwoHostRouter(
+        videoHost: "v.example", videoPayload: testPayload(2000),
+        audioHost: "a.example", audioPayload: testPayload(500))
+    let engine = DownloadEngine(
+        transport: router, stateStore: InMemoryStateStore(),
+        settings: EngineSettings(
+            maxConcurrent: 1, segmentsPerItem: 2, globalMaxConnections: 8, downloadFolder: dir),
+        muxer: FakeMuxer())
+    await engine.add(
+        DownloadPackage(
+            name: "P",
+            items: [
+                muxItem(URL(string: "https://v.example/v")!, URL(string: "https://a.example/a")!)
+            ]))
+    let snap = try #require(await engine.snapshot().packages.first?.items.first)
+    #expect(snap.assembly == .mux)
+}

@@ -1011,7 +1011,8 @@ public actor DownloadEngine {
                             retryPolicy.maxAttempts - $0
                         },
                         fileMissing: fileMissing,
-                        isAssembling: assembling.contains(item.id)
+                        isAssembling: assembling.contains(item.id),
+                        assembly: item.assembly
                     )
                 )
             }
