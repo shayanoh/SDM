@@ -115,15 +115,21 @@ struct SDMApp: App {
     @State private var notificationManager: NotificationManager
     @State private var notifiedLinkIDs: Set<UUID> = []
     @State private var menuBarIconController = MenuBarIconController()
+    @State private var managedBinaries: ManagedBinariesController
     @Environment(\.openWindow) private var openWindow
 
     init() {
         let notification = NotificationManager()
-        let engine = EngineController(notificationManager: notification)
+        let managed = ManagedBinariesController(
+            notify: { body in Task { @MainActor in notification.postInfo(body) } })
+        let engine = EngineController(
+            notificationManager: notification, binaryLocator: managed.binaryLocator)
         let clipboard = ClipboardWatcher()
-        let grabber = GrabberController()
+        let grabber = GrabberController(
+            binaryLocator: managed.binaryLocator, managedBinaries: managed)
         let activationPolicy = ActivationPolicyController()
         _notificationManager = State(initialValue: notification)
+        _managedBinaries = State(initialValue: managed)
         _controller = State(initialValue: engine)
         _clipboardWatcher = State(initialValue: clipboard)
         _grabberController = State(initialValue: grabber)
@@ -133,6 +139,7 @@ struct SDMApp: App {
         appDelegate.activationPolicyController = activationPolicy
 
         engine.startHeartbeatIfNeeded()
+        managed.start()
         clipboard.onLinksDetected = { urls in
             guard GrabberSettings.clipboardWatchingEnabled else { return }
             Task { await grabber.ingest(urls: urls) }
@@ -229,6 +236,7 @@ struct SDMApp: App {
         Window("Settings", id: "settings") {
             SettingsView()
                 .environment(controller)
+                .environment(managedBinaries)
                 .environment(themeStore)
                 .environment(activationPolicyController)
                 .environment(clipboardWatcher)

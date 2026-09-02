@@ -93,6 +93,11 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
         )
     }
 
+    /// A plain informational banner — used for "yt-dlp updated to …".
+    func postInfo(_ body: String) {
+        post(title: "SDM", body: body)
+    }
+
     private func post(title: String, body: String, userInfo: [AnyHashable: Any] = [:]) {
         let content = UNMutableNotificationContent()
         content.title = title

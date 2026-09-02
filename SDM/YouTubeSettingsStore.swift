@@ -23,6 +23,13 @@ nonisolated enum YouTubeSettingsStore {
         static let allowAAC = "sdm.yt.allowAAC"
         static let maxPlaylistVideos = "sdm.yt.maxPlaylistVideos"
         static let cookieSourceRaw = "sdm.yt.cookieSource"
+        static let ytDlpChannel = "sdm.yt.ytDlpChannel"
+    }
+
+    /// The yt-dlp release channel used by `ManagedBinaries` for self-update.
+    static var ytDlpChannel: YtDlpChannel {
+        get { YtDlpChannel(rawValue: d.string(forKey: Key.ytDlpChannel) ?? "") ?? .stable }
+        set { d.set(newValue.rawValue, forKey: Key.ytDlpChannel) }
     }
 
     private static func bool(_ key: String) -> Bool { d.object(forKey: key) as? Bool ?? true }

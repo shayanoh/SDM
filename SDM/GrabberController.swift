@@ -14,10 +14,15 @@ final class GrabberController {
 
     private let session: GrabberSession
     private var autoClearTask: Task<Void, Never>?
+    private let managedBinaries: ManagedBinariesController?
 
-    init() {
+    init(
+        binaryLocator: BinaryLocator = BinaryLocator(
+            searchPaths: [ManagedBinariesController.binDirectory]),
+        managedBinaries: ManagedBinariesController? = nil
+    ) {
+        self.managedBinaries = managedBinaries
         let processRunner = SystemProcessRunner()
-        let binaryLocator = BinaryLocator()
         session = GrabberSession(
             prober: LinkProber(
                 transport: URLSessionProbeTransport(),
@@ -30,7 +35,8 @@ final class GrabberController {
             resolver: YtDlpResolver(
                 runner: processRunner, locator: binaryLocator,
                 cookieSource: { YouTubeSettingsStore.cookieSource },
-                maxPlaylistVideos: { YouTubeSettingsStore.maxPlaylistVideos }
+                maxPlaylistVideos: { YouTubeSettingsStore.maxPlaylistVideos },
+                extraArguments: { ManagedBinariesController.ytDlpExtraArguments }
             ),
             qualityPreferences: { YouTubeSettingsStore.qualityPreferences },
             ffmpegAvailable: { GrabberController.ffmpegOnDisk }
@@ -58,8 +64,8 @@ final class GrabberController {
     /// A cheap synchronous check of the common Homebrew install paths — the
     /// Settings path override is Part 5.
     nonisolated static var ffmpegOnDisk: Bool {
-        FileManager.default.isExecutableFile(atPath: "/opt/homebrew/bin/ffmpeg")
-            || FileManager.default.isExecutableFile(atPath: "/usr/local/bin/ffmpeg")
+        FileManager.default.isExecutableFile(
+            atPath: ManagedBinariesController.binDirectory.appendingPathComponent("ffmpeg").path)
     }
 
     func updateSnapshot() async {
@@ -70,11 +76,13 @@ final class GrabberController {
     }
 
     func ingest(text: String) async {
+        managedBinaries?.kick()
         await session.ingest(text: text)
         snapshot = await session.snapshot()
     }
 
     func ingest(urls: [URL]) async {
+        managedBinaries?.kick()
         await session.ingest(urls: urls)
         snapshot = await session.snapshot()
     }
