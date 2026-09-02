@@ -128,3 +128,32 @@ import Testing
         _ = try await task.start()
     }
 }
+
+@Test func expiredUrlOnARefreshableComponentThrowsUrlExpired() async throws {
+    var b = FakeOrigin.Behavior()
+    b.statusOverride = 403
+    let origin = FakeOrigin(payload: testPayload(2000), behavior: b)
+    let dir = try makeScratchDirectory()
+    let task = DownloadTask(
+        id: UUID(), sourceURL: URL(string: "https://gv/v137")!,
+        destinationURL: dir.appendingPathComponent("v.f137.mp4"),
+        transport: origin,
+        configuration: DownloadTask.Configuration(
+            workerCount: 1, minChunk: 64, checkpointInterval: 128,
+            cachedCompleted: nil, refreshableFormatID: "137"))
+    await #expect(throws: DownloadError.urlExpired(formatID: "137")) { _ = try await task.start() }
+}
+
+@Test func expiredUrlWithoutARefreshableFormatIsAPlainServerError() async throws {
+    var b = FakeOrigin.Behavior()
+    b.statusOverride = 403
+    let origin = FakeOrigin(payload: testPayload(2000), behavior: b)
+    let dir = try makeScratchDirectory()
+    let task = DownloadTask(
+        id: UUID(), sourceURL: URL(string: "https://x/f")!,
+        destinationURL: dir.appendingPathComponent("f.bin"),
+        transport: origin,
+        configuration: DownloadTask.Configuration(
+            workerCount: 1, minChunk: 64, checkpointInterval: 128, cachedCompleted: nil))
+    await #expect(throws: DownloadError.serverError(status: 403)) { _ = try await task.start() }
+}

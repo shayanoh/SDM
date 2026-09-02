@@ -14,7 +14,7 @@ let package = Package(
         .target(name: "SDMCore", resources: [.process("Resources")]),
         .target(
             name: "SDMEngine",
-            dependencies: ["SDMCore"],
+            dependencies: ["SDMCore", "SDMResolve"],
             // Debug-only scheduler/engine/worker event logging (os.log). Comment out
             // the define below to silence it, e.g. before a public release build.
             // swiftSettings: [.define("SDM_ENGINE_LOGGING")]
@@ -22,7 +22,7 @@ let package = Package(
         .target(name: "SDMGrabber", dependencies: ["SDMCore"]),
         .target(name: "SDMResolve", dependencies: ["SDMCore"]),
         .testTarget(name: "SDMCoreTests", dependencies: ["SDMCore"]),
-        .testTarget(name: "SDMEngineTests", dependencies: ["SDMEngine"]),
+        .testTarget(name: "SDMEngineTests", dependencies: ["SDMEngine", "SDMResolve"]),
         .testTarget(name: "SDMGrabberTests", dependencies: ["SDMGrabber"]),
         .testTarget(
             name: "SDMResolveTests", dependencies: ["SDMResolve"],

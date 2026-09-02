@@ -40,6 +40,13 @@ public struct RetryPolicy: Sendable {
                 return .transient
             case .truncatedResponse:
                 return .transient
+            case .urlExpired:
+                // If the engine has a resolver it refreshes the URL and never
+                // reaches here; without one, treat it like any expired signed
+                // URL — transient, so it backs off and eventually terminates.
+                return .transient
+            case .refreshFailed(let reason):
+                return .permanent(reason: reason)
             }
         }
         // A destination that already exists is the one local failure that

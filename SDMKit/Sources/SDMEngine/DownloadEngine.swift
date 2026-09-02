@@ -93,11 +93,28 @@ public actor DownloadEngine {
     /// closed, and it issues no further requests. What is bounded at all
     /// times is the number of items in state `.running`, since preemption
     /// sets `.queued` synchronously.
-    private struct Runner {
-        let task: DownloadTask
-        let job: Task<Void, Never>
+    /// One component of an in-flight item: a `DownloadTask` writing one file.
+    /// A generic HTTP item has one; a muxed YouTube item has two. Parent
+    /// spec §7.1.
+    private struct ComponentRun {
+        /// Index into `DownloadItem.components` — stable across the run.
+        let componentIndex: Int
+        var task: DownloadTask
         let destinationURL: URL
+    }
+
+    /// One in-flight item: every component's task plus the single job
+    /// awaiting them and running assembly.
+    private struct Runner {
+        var components: [ComponentRun]
+        let job: Task<Void, Never>
+        /// Identifies this specific run, so a superseded job's late
+        /// `finishItem` cannot clobber its replacement.
+        let runID: UUID
         var retireIntent: RetireIntent = .none
+
+        var allTasks: [DownloadTask] { components.map(\.task) }
+        var allDestinations: [URL] { components.map(\.destinationURL) }
     }
 
     /// Why a runner is being torn down, decided at the moment it is marked
@@ -115,7 +132,12 @@ public actor DownloadEngine {
 
     private let transport: any HTTPTransport
     private let stateStore: any StateStore
+    private let resolver: (any LinkResolver)?
+    private let muxer: (any Muxer)?
     private var settings: EngineSettings
+    /// Items currently in the `ffmpeg` assembly step. Their `state` stays
+    /// `.running`; the snapshot exposes this as `isAssembling`.
+    private var assembling: Set<UUID> = []
 
     private var packages: [DownloadPackage] = []
     private var runners: [UUID: Runner] = [:]
@@ -165,12 +187,16 @@ public actor DownloadEngine {
         transport: any HTTPTransport,
         stateStore: any StateStore,
         settings: EngineSettings,
-        retryPolicy: RetryPolicy = RetryPolicy()
+        retryPolicy: RetryPolicy = RetryPolicy(),
+        resolver: (any LinkResolver)? = nil,
+        muxer: (any Muxer)? = nil
     ) {
         self.transport = transport
         self.stateStore = stateStore
         self.settings = settings
         self.retryPolicy = retryPolicy
+        self.resolver = resolver
+        self.muxer = muxer
     }
 
     // MARK: - Mutations
@@ -662,8 +688,12 @@ public actor DownloadEngine {
         attemptStartBytes[itemID] = nil
 
         mutateItem(itemID) {
-            $0.completed = RangeSet()
-            $0.totalBytes = nil
+            for index in $0.components.indices {
+                $0.components[index].completed = RangeSet()
+                $0.components[index].totalBytes = nil
+                $0.components[index].isResumable = nil
+                $0.components[index].validator = nil
+            }
             if $0.isEnabled {
                 switch priorState {
                 case .queued, .running: $0.state = .queued
@@ -672,8 +702,6 @@ public actor DownloadEngine {
             } else {
                 $0.state = .stopped
             }
-            $0.isResumable = nil
-            $0.validator = nil
         }
         await persist()
         await reconcile()
@@ -704,7 +732,7 @@ public actor DownloadEngine {
         guard let runner = runners[itemID] else { return }
         runners[itemID]?.retireIntent = .preempted
         runner.job.cancel()
-        await runner.task.pause()
+        for task in runner.allTasks { await task.pause() }
         _ = await runner.job.value
     }
 
@@ -727,7 +755,8 @@ public actor DownloadEngine {
         guard let runner = runners[itemID], runner.retireIntent == .none else { return }
         runners[itemID]?.retireIntent = .userStopped
         runner.job.cancel()
-        Task { await runner.task.pause() }
+        let tasks = runner.allTasks
+        Task { for task in tasks { await task.pause() } }
     }
 
     private func trashIfExists(_ url: URL) {
@@ -758,7 +787,10 @@ public actor DownloadEngine {
         precondition(count >= 1, "segment count must be at least 1")
         segmentOverrides[itemID] = count
         if let runner = runners[itemID], runner.retireIntent == .none {
-            await runner.task.setWorkerCount(count)
+            let perComponent = Swift.max(1, count / runner.components.count)
+            for componentRun in runner.components {
+                await componentRun.task.setWorkerCount(perComponent)
+            }
         }
     }
 
@@ -804,14 +836,18 @@ public actor DownloadEngine {
     public func tick() async {
         currentTick += 1
         for (itemID, runner) in runners where runner.retireIntent == .none {
-            let transferred = await runner.task.completedRanges.totalBytes
+            var transferred: Int64 = 0
+            for componentRun in runner.components {
+                transferred += await componentRun.task.completedRanges.totalBytes
+                // Spec §4.3: "every ~8 MB per worker or every 5 s, whichever
+                // comes first". `DownloadTask.record` implements the byte
+                // half; this is the only caller of the wall-clock half.
+                await componentRun.task.checkpointTick()
+                if let failure = await componentRun.task.lastCheckpointFailure {
+                    checkpointFailures[itemID] = failure
+                }
+            }
             recordProgress(transferred, for: itemID)
-            // Spec §4.3: "every ~8 MB per worker or every 5 s, whichever comes
-            // first". `DownloadTask.record` implements the byte half; this is
-            // the only caller of the wall-clock half, so without it a slow
-            // origin would never checkpoint at all.
-            await runner.task.checkpointTick()
-            checkpointFailures[itemID] = await runner.task.lastCheckpointFailure
         }
         // Spec's "immediately drop to zero when not downloading": a sampler
         // whose item is not `.running` gets `idle()`, not `tick()`, so it
@@ -891,10 +927,57 @@ public actor DownloadEngine {
                 var active = 0
                 var checkpointFailure = checkpointFailures[item.id]
                 if let runner = runners[item.id] {
-                    completed = await runner.task.completedRanges
-                    totalBytes = await runner.task.expectedTotalBytes ?? totalBytes
-                    active = await runner.task.activeWorkerCount
-                    checkpointFailure = await runner.task.lastCheckpointFailure
+                    // Live total: prefer each component task's probed size,
+                    // summed, once every component has one; otherwise keep the
+                    // stored aggregate (which is nil until finish writes it).
+                    var liveSizes: [Int64] = []
+                    for componentRun in runner.components {
+                        if let size = await componentRun.task.expectedTotalBytes {
+                            liveSizes.append(size)
+                        }
+                    }
+                    if item.components.count == runner.components.count,
+                        liveSizes.count == item.components.count
+                    {
+                        totalBytes = liveSizes.reduce(0, +)
+                    }
+                    // Item-space progress: each component task's ranges shifted
+                    // by the sum of the component sizes before it. Falls back
+                    // to the stored per-component `completed` (already
+                    // shifted by `DownloadItem.completed`) when a size is
+                    // still unknown.
+                    let bases = item.componentBaseOffsets
+                    var union = RangeSet()
+                    for componentRun in runner.components {
+                        let base =
+                            componentRun.componentIndex < bases.count
+                            ? bases[componentRun.componentIndex] : 0
+                        let ranges = await componentRun.task.completedRanges
+                        for range in ranges.ranges {
+                            union.insert(
+                                ByteRange(start: range.start + base, end: range.end + base))
+                        }
+                        active += await componentRun.task.activeWorkerCount
+                        if let failure = await componentRun.task.lastCheckpointFailure {
+                            checkpointFailure = failure
+                        }
+                    }
+                    // Only the running components contribute live ranges; a
+                    // component that finished before this snapshot keeps its
+                    // stored (shifted) set.
+                    if bases.count == item.components.count {
+                        let runningIndices = Set(runner.components.map(\.componentIndex))
+                        for (index, component) in item.components.enumerated()
+                        where !runningIndices.contains(index) {
+                            for range in component.completed.ranges {
+                                union.insert(
+                                    ByteRange(
+                                        start: range.start + bases[index],
+                                        end: range.end + bases[index]))
+                            }
+                        }
+                    }
+                    completed = union
                 }
                 let sampler = samplers[item.id] ?? SpeedSampler()
                 // Spec-adjacent UI need: a `.completed` item whose file has
@@ -927,7 +1010,8 @@ public actor DownloadEngine {
                         remainingAttempts: failedAttempts[item.id].map {
                             retryPolicy.maxAttempts - $0
                         },
-                        fileMissing: fileMissing
+                        fileMissing: fileMissing,
+                        isAssembling: assembling.contains(item.id)
                     )
                 )
             }
@@ -964,7 +1048,7 @@ public actor DownloadEngine {
         isShutDown = true
         let live = runners.values.map { $0 }
         for runner in live { runner.job.cancel() }
-        for runner in live { await runner.task.pause() }
+        for runner in live { for task in runner.allTasks { await task.pause() } }
         for runner in live { _ = await runner.job.value }
         await persist()
         ticksSincePendingChange = nil
@@ -1044,7 +1128,7 @@ public actor DownloadEngine {
         where !desired.contains(itemID) && runner.retireIntent == .none {
             runners[itemID]?.retireIntent = .preempted
             runner.job.cancel()
-            retiring.append(runner.task)
+            retiring.append(contentsOf: runner.allTasks)
             mutateItem(itemID) { $0.state = .queued }
             changed = true
         }
@@ -1053,9 +1137,9 @@ public actor DownloadEngine {
         // offsets and corrupt it. Retiring runners are still in `runners`, so
         // this also covers restarting an item whose previous task has not
         // unwound yet.
-        var claimed = Set(runners.values.map(\.destinationURL))
+        var claimed = Set(runners.values.flatMap(\.allDestinations))
         for itemID in desired where runners[itemID] == nil {
-            let runContext: RunContext
+            let runContext: ItemRunContext
             do {
                 guard let resolved = try context(for: itemID) else { continue }
                 runContext = resolved
@@ -1069,44 +1153,46 @@ public actor DownloadEngine {
                 changed = true
                 continue
             }
-            guard claimed.insert(runContext.destinationURL).inserted else { continue }
+            let destinations = runContext.contexts.map(\.destinationURL)
+            guard destinations.allSatisfy({ !claimed.contains($0) }) else { continue }
+            for destination in destinations { claimed.insert(destination) }
             mutateItem(itemID) { $0.state = .running }
             startedAtTick[itemID] = currentTick
             changed = true
 
-            let completed = completedRanges(of: itemID)
-            let completedTotalBytes = completed.totalBytes
-
+            let completedTotalBytes = completedRanges(of: itemID).totalBytes
             attemptStartBytes[itemID] = completedTotalBytes
             // The one place a byte total may legitimately go backwards: a new
             // task starts over from whatever the sidecar lets it resume at.
             // Seeding the sampler baseline here — rather than letting
             // `recordProgress` rebase itself — keeps the delta strictly
-            // monotonic everywhere else, so a tick that reads a stale total
-            // while a job completes underneath it cannot cause the same span
-            // to be counted twice across a preempt/resume cycle.
+            // monotonic everywhere else.
             sampledBytes[itemID] = completedTotalBytes
-            let task = DownloadTask(
-                id: itemID,
-                sourceURL: runContext.sourceURL,
-                destinationURL: runContext.destinationURL,
-                transport: transport,
-                configuration: DownloadTask.Configuration(
-                    workerCount: allocatedSegments[itemID] ?? runContext.segments,
-                    minChunk: settings.minSegmentSizeBytes,
-                    checkpointInterval: settings.checkpointIntervalBytes,
-                    cachedCompleted: completed
-                )
-            )
+
+            let totalSegments = allocatedSegments[itemID] ?? runContext.segments
+            let perComponent = Swift.max(1, totalSegments / runContext.contexts.count)
+            let componentRuns: [ComponentRun] = runContext.contexts.map { componentContext in
+                let task = DownloadTask(
+                    id: itemID,
+                    sourceURL: componentContext.sourceURL,
+                    destinationURL: componentContext.destinationURL,
+                    transport: transport,
+                    configuration: DownloadTask.Configuration(
+                        workerCount: perComponent,
+                        minChunk: settings.minSegmentSizeBytes,
+                        checkpointInterval: settings.checkpointIntervalBytes,
+                        cachedCompleted: componentContext.cachedCompleted,
+                        refreshableFormatID: componentContext.refreshableFormatID))
+                return ComponentRun(
+                    componentIndex: componentContext.componentIndex, task: task,
+                    destinationURL: componentContext.destinationURL)
+            }
+            let runID = UUID()
             let job = Task { [weak self] in
                 guard let self else { return }
-                await self.run(itemID: itemID, task: task)
+                await self.runItem(itemID: itemID, runID: runID)
             }
-            runners[itemID] = Runner(
-                task: task,
-                job: job,
-                destinationURL: runContext.destinationURL
-            )
+            runners[itemID] = Runner(components: componentRuns, job: job, runID: runID)
         }
 
         // Re-clamp every already-running item too, not just fresh starts: a
@@ -1116,7 +1202,10 @@ public actor DownloadEngine {
         for (itemID, runner) in runners
         where runner.retireIntent == .none && desired.contains(itemID) {
             if let allocated = allocatedSegments[itemID] {
-                await runner.task.setWorkerCount(allocated)
+                let perComponent = Swift.max(1, allocated / runner.components.count)
+                for componentRun in runner.components {
+                    await componentRun.task.setWorkerCount(perComponent)
+                }
             }
         }
 
@@ -1175,151 +1264,325 @@ public actor DownloadEngine {
     /// that could preempt it is already looking at the real value.
     private func refreshResumability() async {
         for (itemID, runner) in runners where runner.retireIntent == .none {
-            guard let supportsRanges = await runner.task.probedSupportsRanges else { continue }
-            mutateItem(itemID) { $0.isResumable = supportsRanges }
+            for componentRun in runner.components {
+                guard let supportsRanges = await componentRun.task.probedSupportsRanges
+                else { continue }
+                mutateItem(itemID) { item in
+                    if componentRun.componentIndex < item.components.count {
+                        item.components[componentRun.componentIndex].isResumable = supportsRanges
+                    }
+                }
+            }
         }
     }
 
-    private struct RunContext: Sendable {
+    private struct ComponentContext: Sendable {
+        let componentIndex: Int
         let sourceURL: URL
         let destinationURL: URL
+        let cachedCompleted: RangeSet
+        let refreshableFormatID: String?
+    }
+
+    private struct ItemRunContext: Sendable {
+        let contexts: [ComponentContext]
         let segments: Int
     }
 
-    /// Resolves where an item's bytes go, creating the package folder.
+    /// Resolves where each not-yet-complete component of an item writes,
+    /// creating the package folder.
     ///
     /// Throws rather than swallowing a `createDirectory` failure: a read-only
     /// volume or a permission problem is not something re-attempting fixes,
     /// and hiding it behind `try?` turned it into an undiagnosable retry loop
     /// one layer down.
-    private func context(for itemID: UUID) throws -> RunContext? {
+    private func context(for itemID: UUID) throws -> ItemRunContext? {
         for package in packages {
             guard let item = package.items.first(where: { $0.id == itemID }) else { continue }
             let folder = settings.downloadFolder.appendingPathComponent(package.name)
             do {
                 try FileManager.default.createDirectory(
-                    at: folder,
-                    withIntermediateDirectories: true
-                )
+                    at: folder, withIntermediateDirectories: true)
             } catch {
                 throw EngineError.destinationFolderUnavailable(
-                    path: folder.path,
-                    underlying: error.localizedDescription
-                )
+                    path: folder.path, underlying: error.localizedDescription)
             }
-            return RunContext(
-                sourceURL: item.url,
-                destinationURL: folder.appendingPathComponent(item.filename),
-                segments: segmentCount(for: itemID)
-            )
+            var contexts: [ComponentContext] = []
+            for (index, component) in item.components.enumerated() where !component.isComplete {
+                let formatID: String?
+                if case .resolved(_, _, let id) = component.origin {
+                    formatID = id
+                } else {
+                    formatID = nil
+                }
+                contexts.append(
+                    ComponentContext(
+                        componentIndex: index,
+                        sourceURL: component.url,
+                        destinationURL: folder.appendingPathComponent(component.partFilename),
+                        cachedCompleted: component.completed,
+                        refreshableFormatID: formatID))
+            }
+            // Every component already complete → still hand back one context
+            // for component 0 so the run finalizes/assembles rather than
+            // stalling. (`isComplete` on a component needs a known size; an
+            // unprobed component is not complete, so this only bites a truly
+            // finished item that lost its runner.)
+            if contexts.isEmpty {
+                contexts.append(
+                    ComponentContext(
+                        componentIndex: 0, sourceURL: item.components[0].url,
+                        destinationURL: folder.appendingPathComponent(
+                            item.components[0].partFilename),
+                        cachedCompleted: item.components[0].completed,
+                        refreshableFormatID: nil))
+            }
+            return ItemRunContext(contexts: contexts, segments: segmentCount(for: itemID))
         }
         return nil
     }
 
-    private func run(itemID: UUID, task: DownloadTask) async {
-        let state: ItemState?
-        do {
-            _ = try await task.start()
-            state = .completed
-            failedAttempts[itemID] = nil
-            retryHoldTicks[itemID] = nil
-        } catch {
-            switch runners[itemID]?.retireIntent ?? .none {
-            case .preempted:
-                // Preemption, not failure. `reconcile()` cancelled this job
-                // and paused its task, so `start()` throwing here is the
-                // expected shape of a scheduler decision — charging it to the
-                // item's retry budget would eventually mark a perfectly
-                // healthy download `.failed` for having been outranked too
-                // often, and holding it in backoff would stop it resuming the
-                // moment a slot frees up.
-                state = .queued
-            case .userStopped:
-                // A deliberate Stop/Disable, not a failure. `state` was
-                // already set to `.stopped` synchronously by `stopItem`/
-                // `setEnabled` — retiring here is non-blocking, precisely so
-                // that call didn't have to wait for this moment — and may
-                // have moved on since (re-enabled and restarted). `nil` tells
-                // `finish()` to leave it alone rather than reassert a verdict
-                // about a run that's no longer current.
-                state = nil
-            case .none:
-                let progressed =
-                    await task.completedRanges.totalBytes > (attemptStartBytes[itemID] ?? 0)
-                state = failureState(for: error, itemID: itemID, madeProgress: progressed)
+    /// Runs every component task of an item in parallel, then assembles.
+    /// Replaces the single-task `run`; a one-component item is the N=1 case.
+    private func runItem(itemID: UUID, runID: UUID) async {
+        guard let components = runners[itemID]?.components else { return }
+
+        // Fan out. A component throwing `urlExpired` is refreshed and
+        // restarted in place (Task 6); any other throw is the first error we
+        // keep, and the siblings are paused.
+        var firstError: (any Error)?
+        await withTaskGroup(of: (any Error)?.self) { group in
+            for componentRun in components {
+                group.addTask { [weak self] in
+                    guard let self else { return nil }
+                    return await self.runComponent(
+                        itemID: itemID, runID: runID, componentRun: componentRun)
+                }
+            }
+            for await error in group where error != nil {
+                if firstError == nil {
+                    firstError = error
+                    // Stop the siblings — their partial bytes stay on disk.
+                    if let live = runners[itemID]?.components {
+                        for sibling in live { await sibling.task.pause() }
+                    }
+                }
             }
         }
 
-        let completed = await task.completedRanges
-        let totalBytes = await task.expectedTotalBytes
-        // Also captured here, not only in `refreshResumability()`: a download
-        // short enough to finish before any reconcile happens would otherwise
-        // never record what its probe found.
-        let isResumable = await task.probedSupportsRanges
-        // Kept after the runner retires: "this download's resume state could
-        // not be written" is exactly the thing a user must still see once the
-        // download has stopped.
-        checkpointFailures[itemID] = await task.lastCheckpointFailure
-        finish(
-            itemID: itemID,
-            task: task,
-            completed: completed,
-            totalBytes: totalBytes,
-            isResumable: isResumable,
-            state: state
-        )
+        let retireIntent = runners[itemID]?.retireIntent ?? .none
+        let state: ItemState?
+        switch (retireIntent, firstError) {
+        case (.preempted, _):
+            state = .queued
+        case (.userStopped, _):
+            state = nil
+        case (.none, .some(let error)):
+            let progressed =
+                completedRanges(of: itemID).totalBytes > (attemptStartBytes[itemID] ?? 0)
+            state = failureState(for: error, itemID: itemID, madeProgress: progressed)
+        case (.none, .none):
+            state = await assemble(itemID: itemID)
+            if state == .completed {
+                failedAttempts[itemID] = nil
+                retryHoldTicks[itemID] = nil
+            }
+        }
+
+        await finishItem(itemID: itemID, runID: runID, state: state)
         await persist()
     }
 
-    /// Retires a finished runner, keeping whatever bytes it managed so a
-    /// preempted or failed item resumes rather than restarts.
-    private func finish(
-        itemID: UUID,
-        task: DownloadTask,
-        completed: RangeSet,
-        totalBytes: Int64?,
-        isResumable: Bool?,
-        state: ItemState?
-    ) {
-        recordProgress(completed.totalBytes, for: itemID)
-        // Only the runner that is still the current one may write back; a
-        // superseded task must not clobber its replacement's state.
-        guard runners[itemID]?.task === task else { return }
+    /// Runs one component's task to completion. Returns the thrown error, or
+    /// `nil` on success. A `403`/`410` on a `.resolved` component is
+    /// refreshed via the injected resolver and the task is restarted in
+    /// place against its existing bytes; anything else propagates. Parent
+    /// spec §7.3.
+    private func runComponent(
+        itemID: UUID, runID: UUID, componentRun: ComponentRun
+    ) async -> (any Error)? {
+        var task = componentRun.task
+        let index = componentRun.componentIndex
+        while true {
+            do {
+                _ = try await task.start()
+                return nil
+            } catch let DownloadError.urlExpired(formatID) {
+                guard let resolver,
+                    let component = itemComponent(itemID: itemID, index: index),
+                    case .resolved(let extractor, let videoID, _) = component.origin
+                else { return DownloadError.serverError(status: 403) }
+
+                // A refresh consumes one attempt against the existing cap, so
+                // a genuinely broken video still terminates.
+                let attempt = (failedAttempts[itemID] ?? 0) + 1
+                failedAttempts[itemID] = attempt
+                guard attempt < retryPolicy.maxAttempts else {
+                    failedAttempts[itemID] = nil
+                    return DownloadError.refreshFailed(
+                        reason: "Gave up refreshing the download URL after \(attempt) attempts")
+                }
+
+                let refreshed: RefreshedFormat
+                do {
+                    refreshed = try await resolver.refresh(
+                        extractor: extractor, videoID: videoID, formatID: formatID)
+                } catch {
+                    return DownloadError.refreshFailed(
+                        reason: "Could not refresh the URL: \(error)")
+                }
+                guard refreshed.formatID == formatID else {
+                    return DownloadError.refreshFailed(reason: "The video's format changed")
+                }
+                if let known = component.totalBytes, let fresh = refreshed.filesize, fresh != known
+                {
+                    return DownloadError.refreshFailed(reason: "The video's size changed")
+                }
+
+                mutateItem(itemID) { item in
+                    if index < item.components.count { item.components[index].url = refreshed.url }
+                }
+                let perComponent = Swift.max(
+                    1, segmentCount(for: itemID) / (runners[itemID]?.components.count ?? 1))
+                let newTask = DownloadTask(
+                    id: itemID, sourceURL: refreshed.url,
+                    destinationURL: componentRun.destinationURL, transport: transport,
+                    configuration: DownloadTask.Configuration(
+                        workerCount: perComponent, minChunk: settings.minSegmentSizeBytes,
+                        checkpointInterval: settings.checkpointIntervalBytes,
+                        cachedCompleted: component.completed, refreshableFormatID: formatID))
+                if let slot = runners[itemID]?.components.firstIndex(where: {
+                    $0.componentIndex == index
+                }) {
+                    runners[itemID]?.components[slot].task = newTask
+                }
+                task = newTask
+                continue
+            } catch {
+                return error
+            }
+        }
+    }
+
+    private func itemComponent(itemID: UUID, index: Int) -> FileComponent? {
+        for package in packages {
+            guard let item = package.items.first(where: { $0.id == itemID }) else { continue }
+            return index < item.components.count ? item.components[index] : nil
+        }
+        return nil
+    }
+
+    /// Assembly step after every component completed. `.none` → each task
+    /// already finalized its own file, nothing to do. `.mux` → run `ffmpeg
+    /// -c copy` over the finalized parts into the output container, then
+    /// delete the parts. Parent spec §7.2.
+    private func assemble(itemID: UUID) async -> ItemState {
+        guard let loc = location(of: itemID) else { return .completed }
+        let package = packages[loc.packageIndex]
+        let item = package.items[loc.itemIndex]
+        guard item.assembly == .mux else { return .completed }
+        return await runMux(item: item, packageName: package.name)
+    }
+
+    /// Runs the mux for a `.mux` item whose components are all downloaded.
+    /// Shared by `assemble()` and `retryMux()`.
+    private func runMux(item: DownloadItem, packageName: String) async -> ItemState {
+        guard let muxer else {
+            return .failed(reason: "ffmpeg is not configured")
+        }
+        guard item.components.count == 2 else {
+            return .failed(reason: "a muxed item needs exactly two components")
+        }
+        let folder = settings.downloadFolder.appendingPathComponent(packageName)
+        let videoPart = folder.appendingPathComponent(item.components[0].partFilename)
+        let audioPart = folder.appendingPathComponent(item.components[1].partFilename)
+        let output = folder.appendingPathComponent(item.outputFilename)
+        let container = MediaContainer.fromFileExtension(
+            (item.outputFilename as NSString).pathExtension)
+
+        assembling.insert(item.id)
+        defer { assembling.remove(item.id) }
+        do {
+            try await muxer.mux(
+                videoPart: videoPart, audioPart: audioPart, into: output, container: container)
+        } catch {
+            let tail: String
+            if case MuxError.ffmpegFailed(let stderrTail) = error {
+                tail = stderrTail
+            } else {
+                tail = "\(error)"
+            }
+            return .failed(reason: "mux failed: \(tail)")
+        }
+        try? FileManager.default.removeItem(at: videoPart)
+        try? FileManager.default.removeItem(at: audioPart)
+        for component in item.components {
+            ResumeSidecar.remove(
+                at: ResumeSidecar.url(for: folder.appendingPathComponent(component.partFilename)))
+        }
+        return .completed
+    }
+
+    /// Re-runs only the mux step for a `.failed` item whose components are
+    /// all downloaded — the "Retry mux" action. Parent spec §7.2 / §9.3.
+    public func retryMux(_ itemID: UUID) async {
+        guard let loc = location(of: itemID) else { return }
+        let package = packages[loc.packageIndex]
+        let item = package.items[loc.itemIndex]
+        guard item.assembly == .mux, case .failed = item.state,
+            item.components.allSatisfy(\.isComplete)
+        else { return }
+        let state = await runMux(item: item, packageName: package.name)
+        mutateItem(itemID) { $0.state = state }
+        await persist()
+    }
+
+    /// Retires a finished runner, writing each component's final bytes back
+    /// onto `DownloadItem.components[k]` so a preempted or failed item
+    /// resumes rather than restarts.
+    private func finishItem(itemID: UUID, runID: UUID, state: ItemState?) async {
+        guard let runner = runners[itemID], runner.runID == runID else { return }
+
+        var totalCompleted: Int64 = 0
+        var perComponent:
+            [(index: Int, completed: RangeSet, totalBytes: Int64?, isResumable: Bool?)] =
+                []
+        for componentRun in runner.components {
+            let completed = await componentRun.task.completedRanges
+            let totalBytes = await componentRun.task.expectedTotalBytes
+            let isResumable = await componentRun.task.probedSupportsRanges
+            if let failure = await componentRun.task.lastCheckpointFailure {
+                checkpointFailures[itemID] = failure
+            }
+            totalCompleted += completed.totalBytes
+            perComponent.append((componentRun.componentIndex, completed, totalBytes, isResumable))
+        }
+
+        recordProgress(totalCompleted, for: itemID)
+
+        // Superseded run — a newer one has replaced it; do not write back.
+        guard runners[itemID]?.runID == runID else { return }
         runners[itemID] = nil
         startedAtTick[itemID] = nil
-        // A confirmed non-resumable item that isn't landing `.completed` will
-        // have its next attempt restart at byte zero regardless of *why*
-        // this runner retired (a deliberate Stop, a transient failure queued
-        // for retry, or a permanent one) — `DownloadTask.prepare()` refuses
-        // to trust a sidecar when `acceptsRanges` is false. Recording the old
-        // task's partial `completed` here would misrepresent the item as
-        // "resumable from partway," and would seed the next `reconcile()`'s
-        // `sampledBytes` baseline (via `completedBytes(of:)`) at that stale
-        // non-zero figure — reporting 0 B/s on the speed graph until the new
-        // attempt's real bytes climb back past a total it never actually
-        // carried forward. `state` is compared rather than gated on `!=
-        // nil`: the deliberate-Stop case is exactly the one that passes
-        // `state: nil` (see the doc comment below), so gating on `state !=
-        // nil` would have excluded the very case this exists for.
-        let displayCompleted: RangeSet
-        if isResumable == false, state != .completed {
-            displayCompleted = RangeSet()
-        } else {
-            displayCompleted = completed
-        }
-        mutateItem(itemID) {
-            $0.completed = displayCompleted
-            if let totalBytes { $0.totalBytes = totalBytes }
-            if let isResumable { $0.isResumable = isResumable }
-            // `nil` (only ever passed for `.userStopped`) means: `state` was
-            // already set synchronously by `stopItem`/`setEnabled` at the
-            // moment this runner was retired, and — because retiring here is
-            // deliberately non-blocking — the user may since have re-enabled
-            // and restarted the item before this old, cancelled attempt got
-            // around to actually unwinding. Overwriting here would clobber
-            // that newer, authoritative state with a stale verdict about a
-            // run that no longer reflects what the item is doing.
-            if let state { $0.state = state }
+
+        mutateItem(itemID) { item in
+            for entry in perComponent where entry.index < item.components.count {
+                // Same non-resumable-restart display rule as before, per
+                // component: a confirmed non-resumable component that is not
+                // landing `.completed` shows zero rather than a partial that
+                // its next attempt will discard.
+                let display: RangeSet =
+                    (entry.isResumable == false && state != .completed)
+                    ? RangeSet() : entry.completed
+                item.components[entry.index].completed = display
+                if let totalBytes = entry.totalBytes {
+                    item.components[entry.index].totalBytes = totalBytes
+                }
+                if let isResumable = entry.isResumable {
+                    item.components[entry.index].isResumable = isResumable
+                }
+            }
+            if let state { item.state = state }
         }
     }
 

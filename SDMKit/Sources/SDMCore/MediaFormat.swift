@@ -44,6 +44,16 @@ public enum MediaContainer: Sendable, Codable, Equatable, Hashable {
         case .other(let ext): return ext
         }
     }
+
+    public static func fromFileExtension(_ ext: String) -> MediaContainer {
+        switch ext.lowercased() {
+        case "mp4", "m4v": return .mp4
+        case "webm": return .webm
+        case "m4a": return .m4a
+        case "": return .other("bin")
+        default: return .other(ext.lowercased())
+        }
+    }
 }
 
 public struct MediaFormat: Sendable, Codable, Equatable, Identifiable {
