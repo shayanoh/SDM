@@ -223,3 +223,34 @@ private let privateStderr =
     #expect(tail.contains("ERROR: something specific happened"))
     #expect(tail.count <= 2000)
 }
+
+// MARK: - extra arguments
+
+@Test func splicesExtraArgumentsIntoSingleResolve() async throws {
+    let runner = FakeProcessRunner()
+    runner.responses = [("-J", ok(try fixtureData("video_muxed")))]
+    let r = YtDlpResolver(
+        runner: runner, locator: makeLocator(),
+        extraArguments: {
+            ["--extractor-args", "youtube:jsruntime=quickjs", "--ffmpeg-location", "/x/bin"]
+        })
+    _ = try await r.resolve(u("https://www.youtube.com/watch?v=dQw4w9WgXcQ"))
+    let call = try #require(runner.calls.first)
+    #expect(call.arguments.contains("youtube:jsruntime=quickjs"))
+    #expect(call.arguments.contains("/x/bin"))
+}
+
+@Test func splicesExtraArgumentsIntoPlaylistAndRefresh() async throws {
+    let runner = FakeProcessRunner()
+    runner.responses = [
+        ("--flat-playlist", ok(try fixtureData("playlist_flat"))),
+        ("-J", ok(try fixtureData("video_refresh_ok"))),
+    ]
+    let r = YtDlpResolver(
+        runner: runner, locator: makeLocator(),
+        extraArguments: { ["--sponsorblock-mark", "none"] })
+    _ = try? await r.resolve(u("https://www.youtube.com/playlist?list=PL123"))
+    _ = try? await r.refresh(sourceURL: u("https://www.youtube.com/watch?v=abc"), formatID: "18")
+    #expect(runner.calls.count == 2)
+    #expect(runner.calls.allSatisfy { $0.arguments.contains("--sponsorblock-mark") })
+}
