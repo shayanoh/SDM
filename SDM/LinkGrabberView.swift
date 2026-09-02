@@ -28,44 +28,49 @@ struct LinkGrabberView: View {
     private var theme: Theme { themeStore.resolved(for: colorScheme) }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            List {
-                ForEach(linksInNoPackage()) {
-                    LinkRow(link: $0, controller: controller, theme: theme)
+        List {
+            ForEach(linksInNoPackage()) {
+                LinkRow(link: $0, controller: controller, theme: theme)
+            }
+            ForEach(mediaRowsInNoPackage()) {
+                MediaLinkRow(row: $0, controller: controller, theme: theme)
+            }
+            ForEach(controller.snapshot.packages) { package in
+                // Deliberately not a `Section` with a `header:` — macOS
+                // renders a `Section` header as an AppKit "group row"
+                // (`NSTableView`'s floating-header chrome), which paints
+                // its own background regardless of `.listRowBackground`
+                // or `.listStyle`. A package header here is instead a
+                // plain sibling row ahead of its links, the same way
+                // `PackagesListView` avoids the same trap by using
+                // `DisclosureGroup` rather than `Section` — a normal row
+                // that `.listRowBackground` actually controls.
+                packageHeader(package)
+                    .listRowBackground(theme.surfaceSecondaryColor)
+                ForEach(links(in: package)) { link in
+                    LinkRow(link: link, controller: controller, theme: theme)
+                        .draggable(DraggedLinkID(linkID: link.id))
                 }
-                ForEach(mediaRowsInNoPackage()) {
-                    MediaLinkRow(row: $0, controller: controller, theme: theme)
-                }
-                ForEach(controller.snapshot.packages) { package in
-                    // Deliberately not a `Section` with a `header:` — macOS
-                    // renders a `Section` header as an AppKit "group row"
-                    // (`NSTableView`'s floating-header chrome), which paints
-                    // its own background regardless of `.listRowBackground`
-                    // or `.listStyle`. A package header here is instead a
-                    // plain sibling row ahead of its links, the same way
-                    // `PackagesListView` avoids the same trap by using
-                    // `DisclosureGroup` rather than `Section` — a normal row
-                    // that `.listRowBackground` actually controls.
-                    packageHeader(package)
-                        .listRowBackground(theme.surfaceSecondaryColor)
-                    ForEach(links(in: package)) { link in
-                        LinkRow(link: link, controller: controller, theme: theme)
-                            .draggable(DraggedLinkID(linkID: link.id))
-                    }
-                    ForEach(mediaRows(in: package)) { row in
-                        MediaLinkRow(row: row, controller: controller, theme: theme)
-                            .draggable(DraggedLinkID(linkID: row.id))
-                    }
+                ForEach(mediaRows(in: package)) { row in
+                    MediaLinkRow(row: row, controller: controller, theme: theme)
+                        .draggable(DraggedLinkID(linkID: row.id))
                 }
             }
-            // `List` paints its own opaque system background regardless of
-            // what sits behind it — without hiding that, `surfacePrimary`
-            // never actually shows through.
-            .scrollContentBackground(.hidden)
-            .background(theme.surfacePrimaryColor)
-            .listStyle(.plain)
+        }
+        // `List` paints its own opaque system background regardless of what
+        // sits behind it — without hiding that, `surfacePrimary` never shows.
+        .scrollContentBackground(.hidden)
+        .background(theme.surfacePrimaryColor)
+        .listStyle(.plain)
+        // The header is a `safeAreaInset` rather than a sibling in a `VStack`
+        // so the `List` reserves space for it and its scroll content starts
+        // *below* it — a `VStack { header; List }` let a freshly-added first
+        // row render underneath the header until you scrolled.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            VStack(spacing: 0) {
+                header
+                Divider()
+            }
         }
         .alert("Rename package", isPresented: $isShowingRenameAlert) {
             TextField("Name", text: $newPackageName)
@@ -184,11 +189,11 @@ struct LinkGrabberView: View {
                 statPill(label: "Offline", count: snapshot.offlineCount, color: theme.offlineColor)
                 statPill(
                     label: "Check failed", count: snapshot.failedCount, color: theme.failedColor)
-                Button("Recheck") {
+                Button("Recheck All") {
                     Task { await controller.recheckFailed() }
                 }
                 .controlSize(.small)
-                .disabled(snapshot.failedCount == 0)
+                .disabled(snapshot.recheckableCount == 0)
                 Button("Clear", role: .destructive) {
                     Task { await controller.clear() }
                 }

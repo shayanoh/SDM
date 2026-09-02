@@ -105,3 +105,46 @@ private final class ConcurrencyTrackingResolver: LinkResolver, @unchecked Sendab
     #expect(resolver.peak <= 3)
     #expect(resolver.peak >= 2)  // it did actually parallelize some
 }
+
+@Test func theSamePlaylistCanBeAddedAgainAfterItsEntriesWereHandedOff() async {
+    let resolver = playlistResolver(title: "Repeat", count: 4, totalAvailable: 4)
+    let session = session(resolver)
+    let url = URL(string: "https://www.youtube.com/playlist?list=PLrepeat")!
+
+    await session.ingest(urls: [url])
+    #expect(await session.snapshot().mediaRows.count == 4)
+
+    // Simulate the handoff removing every entry row.
+    for row in await session.snapshot().mediaRows { await session.removeLink(row.id) }
+    #expect(await session.snapshot().mediaRows.isEmpty)
+
+    // The same playlist URL must ingest again — the origin URL was left in
+    // `seenURLs` before this fix and silently deduped.
+    await session.ingest(urls: [url])
+    #expect(await session.snapshot().mediaRows.count == 4)
+}
+
+@Test func recheckReResolvesFailedMediaRows() async {
+    final class Counter: @unchecked Sendable { var n = 0 }
+    let counter = Counter()
+    let resolver = FakeLinkResolver { _ in
+        counter.n += 1
+        if counter.n == 1 { throw ResolveError.ytDlpFailed(stderrTail: "temporary blip") }
+        return singleMedia(
+            videoID: "v", title: "Now works",
+            formats: [vf("137", 720, .h264, .mp4), af("140", .aac, .m4a)])
+    }
+    let session = GrabberSession(
+        prober: LinkProber(transport: FakeProbeOrigin(), deepSniffEnabled: false),
+        resolver: resolver)
+    await session.ingest(urls: [URL(string: "https://www.youtube.com/watch?v=abc")!])
+    guard case .failed = await session.snapshot().mediaRows[0].state else {
+        Issue.record("expected first attempt to fail")
+        return
+    }
+    #expect(await session.snapshot().recheckableCount == 1)
+
+    await session.recheckFailed()
+    #expect(await session.snapshot().mediaRows[0].state == .resolved)
+    #expect(await session.snapshot().recheckableCount == 0)
+}

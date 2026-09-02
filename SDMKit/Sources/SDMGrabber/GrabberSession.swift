@@ -111,7 +111,8 @@ public actor GrabberSession {
             applyResolvedMedia(media, to: id)
         case .playlist(let title, let entries, let totalAvailable):
             await expandPlaylist(
-                originID: id, title: title, entries: entries, totalAvailable: totalAvailable)
+                originID: id, originURL: url, title: title, entries: entries,
+                totalAvailable: totalAvailable)
         }
     }
 
@@ -171,16 +172,22 @@ public actor GrabberSession {
     /// named package, and lazily resolves each entry's formats. Parent
     /// spec §6.2. Implemented in Part 4 Task 3.
     private func expandPlaylist(
-        originID: UUID, title: String, entries: [ResolvedMedia], totalAvailable: Int
+        originID: UUID, originURL: URL, title: String, entries: [ResolvedMedia],
+        totalAvailable: Int
     ) async {
         // Replace the origin row with one row per entry, all in one group.
+        // The playlist URL itself no longer has a row, so it must leave
+        // `seenURLs` — otherwise re-adding the same playlist later is
+        // silently deduped and nothing happens.
         let group = UUID()
         order.removeAll { $0 == originID }
         mediaRows[originID] = nil
+        seenURLs.remove(originURL)
         var entryIDs: [UUID] = []
         for entry in entries {
             let entryID = UUID()
             let watchURL = URL(string: "https://www.youtube.com/watch?v=\(entry.videoID)")!
+            guard seenURLs.insert(watchURL).inserted else { continue }
             mediaRows[entryID] = MediaRow(
                 id: entryID, sourceURL: watchURL, title: entry.title, state: .resolving,
                 playlistGroup: group, isDuplicate: knownDownloadURLs.contains(watchURL))
@@ -352,14 +359,43 @@ public actor GrabberSession {
         recluster()
     }
 
-    /// Re-runs the probe for every link whose most recent check failed
-    /// outright (`.checkFailed`) — a transient network/transport error
-    /// rather than a genuine verdict about the URL, so unlike faulty/offline
-    /// it is worth retrying without the operator re-pasting the link.
+    /// Re-checks everything worth retrying: HTTP links whose probe failed
+    /// outright (`.checkFailed`), and media rows that failed to resolve or
+    /// are waiting on a now-maybe-installed binary. Faulty/offline links and
+    /// `.unsupported` media rows are genuine verdicts and are left alone.
     public func recheckFailed() async {
-        let failedIDs = order.filter { links[$0]?.verdict == .checkFailed }
-        guard !failedIDs.isEmpty else { return }
-        await probeBounded(failedIDs)
+        let failedProbes = order.filter { links[$0]?.verdict == .checkFailed }
+        let failedMedia = order.filter { id in
+            guard let state = mediaRows[id]?.state else { return false }
+            switch state {
+            case .failed, .needsYtDlp, .needsFfmpeg: return true
+            default: return false
+            }
+        }
+        guard !failedProbes.isEmpty || !failedMedia.isEmpty else { return }
+
+        if !failedProbes.isEmpty { await probeBounded(failedProbes) }
+
+        // Re-resolve under the same small concurrency cap as playlist
+        // expansion — a burst of yt-dlp processes trips YouTube's rate limit.
+        var pending = failedMedia
+        for id in pending { mediaRows[id]?.state = .resolving }
+        await withTaskGroup(of: Void.self) { group in
+            var active = 0
+            func launch() {
+                while active < budget.maxConcurrentResolves, !pending.isEmpty {
+                    let id = pending.removeFirst()
+                    guard mediaRows[id] != nil else { continue }
+                    active += 1
+                    group.addTask { [weak self] in await self?.resolveMedia(id) }
+                }
+            }
+            launch()
+            while await group.next() != nil {
+                active -= 1
+                launch()
+            }
+        }
         recluster()
     }
 

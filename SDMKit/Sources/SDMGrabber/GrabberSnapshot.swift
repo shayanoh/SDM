@@ -31,4 +31,16 @@ public struct GrabberSnapshot: Sendable, Equatable {
         }.count
     }
     public var failedCount: Int { links.filter { $0.verdict == .checkFailed }.count }
+
+    /// Rows a "Recheck All" would actually retry: failed HTTP probes plus
+    /// media rows that failed to resolve or need a binary.
+    public var recheckableCount: Int {
+        failedCount
+            + mediaRows.filter {
+                switch $0.state {
+                case .failed, .needsYtDlp, .needsFfmpeg: return true
+                default: return false
+                }
+            }.count
+    }
 }
