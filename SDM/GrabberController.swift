@@ -13,6 +13,7 @@ final class GrabberController {
         links: [], packages: [], checkedCount: 0, totalCount: 0)
 
     private let session: GrabberSession
+    private var autoClearTask: Task<Void, Never>?
 
     init() {
         let processRunner = SystemProcessRunner()
@@ -34,6 +35,24 @@ final class GrabberController {
             qualityPreferences: { YouTubeSettingsStore.qualityPreferences },
             ffmpegAvailable: { GrabberController.ffmpegOnDisk }
         )
+        startAutoClearLoop()
+    }
+
+    /// Once a minute, drops rows older than the "auto-clear grabbed links"
+    /// setting. Runs for the app's lifetime (independent of whether the
+    /// Linkgrabber tab is visible).
+    private func startAutoClearLoop() {
+        autoClearTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(60))
+                guard let self else { return }
+                guard let maxAge = GrabberSettings.autoClearGrabbedLinksAfter.seconds else {
+                    continue
+                }
+                await self.session.pruneOlderThan(maxAge)
+                self.snapshot = await self.session.snapshot()
+            }
+        }
     }
 
     /// A cheap synchronous check of the common Homebrew install paths — the

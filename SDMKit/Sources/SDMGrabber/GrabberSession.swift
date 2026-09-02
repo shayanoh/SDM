@@ -45,6 +45,9 @@ public actor GrabberSession {
     /// Note text keyed by package name, reattached after every `recluster()`
     /// — the mechanism for a truncated playlist's "50 of 320 videos".
     private var packageNotes: [String: String] = [:]
+    /// When each row entered the session, for the "auto-clear after N
+    /// minutes" setting.
+    private var addedAt: [UUID: Date] = [:]
 
     public init(
         prober: LinkProber,
@@ -72,8 +75,10 @@ public actor GrabberSession {
         let httpURLs = urls.filter(URLExtractor.isGrabbable)
         var freshProbes: [UUID] = []
         var freshMedia: [UUID] = []
+        let now = Date()
         for url in httpURLs where seenURLs.insert(url).inserted {
             let id = UUID()
+            addedAt[id] = now
             if resolver?.canHandle(url) == true {
                 mediaRows[id] = MediaRow(
                     id: id, sourceURL: url, isDuplicate: knownDownloadURLs.contains(url))
@@ -183,11 +188,16 @@ public actor GrabberSession {
         order.removeAll { $0 == originID }
         mediaRows[originID] = nil
         seenURLs.remove(originURL)
+        // The entries inherit the origin row's age, so a playlist added and
+        // forgotten clears on the same schedule as anything else.
+        let addedTime = addedAt[originID] ?? Date()
+        addedAt[originID] = nil
         var entryIDs: [UUID] = []
         for entry in entries {
             let entryID = UUID()
             let watchURL = URL(string: "https://www.youtube.com/watch?v=\(entry.videoID)")!
             guard seenURLs.insert(watchURL).inserted else { continue }
+            addedAt[entryID] = addedTime
             mediaRows[entryID] = MediaRow(
                 id: entryID, sourceURL: watchURL, title: entry.title, state: .resolving,
                 playlistGroup: group, isDuplicate: knownDownloadURLs.contains(watchURL))
@@ -271,6 +281,7 @@ public actor GrabberSession {
         }
         order.removeAll { $0 == id }
         manualOverrides[id] = nil
+        addedAt[id] = nil
         recluster()
     }
 
@@ -286,7 +297,10 @@ public actor GrabberSession {
             }
         }
         order.removeAll { linkID in package.linkIDs.contains(linkID) }
-        for linkID in package.linkIDs { manualOverrides[linkID] = nil }
+        for linkID in package.linkIDs {
+            manualOverrides[linkID] = nil
+            addedAt[linkID] = nil
+        }
         packageNotes[package.name] = nil
         recluster()
     }
@@ -299,7 +313,29 @@ public actor GrabberSession {
         seenURLs.removeAll()
         manualOverrides.removeAll()
         packageNotes.removeAll()
+        addedAt.removeAll()
         packages.removeAll()
+    }
+
+    /// Removes every row that entered the session more than `maxAge` seconds
+    /// ago — the "auto-clear grabbed links after N minutes" setting. `now`
+    /// is injectable for tests.
+    public func pruneOlderThan(_ maxAge: TimeInterval, now: Date = Date()) {
+        let cutoff = now.addingTimeInterval(-maxAge)
+        let expired = order.filter { (addedAt[$0] ?? now) < cutoff }
+        guard !expired.isEmpty else { return }
+        let expiredSet = Set(expired)
+        for id in expired {
+            if let link = links.removeValue(forKey: id) {
+                seenURLs.remove(link.originalURL)
+            } else if let row = mediaRows.removeValue(forKey: id) {
+                seenURLs.remove(row.sourceURL)
+            }
+            manualOverrides[id] = nil
+            addedAt[id] = nil
+        }
+        order.removeAll { expiredSet.contains($0) }
+        recluster()
     }
 
     /// Forces a link into a package, overriding automatic clustering. Spec

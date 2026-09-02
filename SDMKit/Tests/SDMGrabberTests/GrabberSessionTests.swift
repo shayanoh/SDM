@@ -101,3 +101,33 @@ import Testing
     for url in [hostAFirst, hostASecond, hostB] { await origin.release(url) }
     await ingestTask.value
 }
+
+@Test func pruneOlderThanRemovesRowsPastTheCutoffAndKeepsFresherOnes() async throws {
+    let origin = FakeProbeOrigin()
+    let session = GrabberSession(prober: LinkProber(transport: origin, deepSniffEnabled: false))
+
+    await session.ingest(urls: [URL(string: "https://a.example/old.zip")!])
+    try await Task.sleep(for: .milliseconds(30))
+    // Everything ingested from here on is strictly newer than `cutoff`.
+    let cutoff = Date()
+    await session.ingest(urls: [URL(string: "https://b.example/new.zip")!])
+
+    // A generous max age: nothing is old enough yet.
+    await session.pruneOlderThan(3600, now: cutoff)
+    #expect(await session.snapshot().links.count == 2)
+
+    // maxAge 0 with `now == cutoff`: rows added before `cutoff` go, the one
+    // added after stays.
+    await session.pruneOlderThan(0, now: cutoff)
+    #expect(
+        await session.snapshot().links.map(\.originalURL.absoluteString)
+            == ["https://b.example/new.zip"])
+}
+
+@Test func pruneOlderThanIsANoOpForANeverExpiredList() async {
+    let session = GrabberSession(
+        prober: LinkProber(transport: FakeProbeOrigin(), deepSniffEnabled: false))
+    await session.ingest(urls: [URL(string: "https://x.example/f.zip")!])
+    await session.pruneOlderThan(3600)
+    #expect(await session.snapshot().links.count == 1)
+}

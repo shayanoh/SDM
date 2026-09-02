@@ -27,6 +27,7 @@ struct SettingsView: View {
     @State private var clipboardWatchingEnabled = GrabberSettings.clipboardWatchingEnabled
     @State private var autoAddAndStartOnGrab = GrabberSettings.autoAddAndStartOnGrab
     @State private var deepSniffEnabled = GrabberSettings.deepSniffEnabled
+    @State private var autoClearInterval = GrabberSettings.autoClearGrabbedLinksAfter
     @State private var ytMaxHeight = YouTubeSettingsStore.maxHeight
     @State private var ytAllowAV1 = YouTubeSettingsStore.allowAV1
     @State private var ytAllowVP9 = YouTubeSettingsStore.allowVP9
@@ -187,6 +188,17 @@ struct SettingsView: View {
                 Toggle("Watch clipboard for links", isOn: $clipboardWatchingEnabled)
                 Toggle("Auto-add and start on grab", isOn: $autoAddAndStartOnGrab)
                 Toggle("Deep sniff (stage 2)", isOn: $deepSniffEnabled)
+                HStack {
+                    Text("Auto-clear grabbed links")
+                    Spacer()
+                    Picker("", selection: $autoClearInterval) {
+                        ForEach(GrabberSettings.AutoClearInterval.allCases) { interval in
+                            Text(interval.label).tag(interval)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 170)
+                }
             }
             Spacer(minLength: 0)
         }
@@ -307,6 +319,7 @@ struct SettingsView: View {
         }
         GrabberSettings.autoAddAndStartOnGrab = autoAddAndStartOnGrab
         GrabberSettings.deepSniffEnabled = deepSniffEnabled
+        GrabberSettings.autoClearGrabbedLinksAfter = autoClearInterval
         YouTubeSettingsStore.maxHeight = ytMaxHeight
         YouTubeSettingsStore.allowAV1 = ytAllowAV1
         YouTubeSettingsStore.allowVP9 = ytAllowVP9
