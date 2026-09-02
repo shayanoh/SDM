@@ -102,6 +102,32 @@ import Testing
     await ingestTask.value
 }
 
+@Test func recheckRetriesTheGivenLinksRegardlessOfVerdict() async throws {
+    let origin = FakeProbeOrigin()
+    let urlA = URL(string: "https://a.example.com/a.mp4")!
+    let urlB = URL(string: "https://a.example.com/b.mp4")!
+    var gone = FakeProbeOrigin.Behavior()
+    gone.statusCode = 404
+    await origin.setBehavior(gone, for: urlA)
+    await origin.setBehavior(gone, for: urlB)
+
+    let session = GrabberSession(prober: LinkProber(transport: origin, deepSniffEnabled: false))
+    await session.ingest(urls: [urlA, urlB])
+    #expect(await session.snapshot().links.allSatisfy { $0.verdict == .offline })
+
+    var ok = FakeProbeOrigin.Behavior()
+    ok.statusCode = 200
+    ok.headers = ["content-length": "5000000"]
+    await origin.setBehavior(ok, for: urlA)
+
+    let idA = try #require(await session.snapshot().links.first { $0.originalURL == urlA }?.id)
+    await session.recheck(ids: [idA])
+
+    let links = await session.snapshot().links
+    #expect(links.first { $0.originalURL == urlA }?.verdict == .online)
+    #expect(links.first { $0.originalURL == urlB }?.verdict == .offline)
+}
+
 @Test func pruneOlderThanRemovesRowsPastTheCutoffAndKeepsFresherOnes() async throws {
     let origin = FakeProbeOrigin()
     let session = GrabberSession(prober: LinkProber(transport: origin, deepSniffEnabled: false))

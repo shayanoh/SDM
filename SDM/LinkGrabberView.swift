@@ -1,3 +1,4 @@
+import AppKit
 import SDMCore
 import SDMGrabber
 import SwiftUI
@@ -24,11 +25,12 @@ struct LinkGrabberView: View {
     @State private var renamingPackageID: UUID?
     @State private var newPackageName = ""
     @State private var heldBackMessage: String?
+    @State private var selection: Set<UUID> = []
 
     private var theme: Theme { themeStore.resolved(for: colorScheme) }
 
     var body: some View {
-        List {
+        List(selection: $selection) {
             ForEach(linksInNoPackage()) {
                 LinkRow(link: $0, controller: controller, theme: theme)
             }
@@ -72,6 +74,9 @@ struct LinkGrabberView: View {
                 Divider()
             }
         }
+        .contextMenu(forSelectionType: UUID.self) { ids in
+            rowContextMenu(for: ids)
+        }
         .alert("Rename package", isPresented: $isShowingRenameAlert) {
             TextField("Name", text: $newPackageName)
             Button("Rename") {
@@ -105,6 +110,46 @@ struct LinkGrabberView: View {
 
                 try? await Task.sleep(for: .seconds(0.25))
             }
+        }
+    }
+
+    @ViewBuilder
+    private func rowContextMenu(for ids: Set<UUID>) -> some View {
+        if !ids.isEmpty {
+            let canAdd = !controller.handoffGroups(for: ids).isEmpty
+            Button("Recheck") {
+                Task { await controller.recheck(ids) }
+            }
+            Button("Copy URL") {
+                guard let id = ids.first, let url = controller.url(for: id) else { return }
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(url.absoluteString, forType: .string)
+            }
+            .disabled(ids.count != 1)
+            Divider()
+            Button("Add to Downloads") { addSelectedToDownloads(ids, startImmediately: false) }
+                .disabled(!canAdd)
+            Button("Add and Start") { addSelectedToDownloads(ids, startImmediately: true) }
+                .disabled(!canAdd)
+            Divider()
+            Button("Remove", role: .destructive) {
+                Task { await controller.removeLinks(ids) }
+                selection.subtract(ids)
+            }
+        }
+    }
+
+    private func addSelectedToDownloads(_ ids: Set<UUID>, startImmediately: Bool) {
+        let groups = controller.handoffGroups(for: ids)
+        guard !groups.isEmpty else { return }
+        Task {
+            for group in groups {
+                await engineController.addItems(
+                    name: group.name, note: group.note, items: group.items,
+                    startImmediately: startImmediately)
+                for id in group.handoffIDs { await controller.removeLink(id) }
+            }
+            selection.subtract(ids)
         }
     }
 

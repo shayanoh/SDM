@@ -411,10 +411,29 @@ public actor GrabberSession {
         guard !failedProbes.isEmpty || !failedMedia.isEmpty else { return }
 
         if !failedProbes.isEmpty { await probeBounded(failedProbes) }
+        await resolveMediaBounded(failedMedia)
+        recluster()
+    }
 
-        // Re-resolve under the same small concurrency cap as playlist
-        // expansion — a burst of yt-dlp processes trips YouTube's rate limit.
-        var pending = failedMedia
+    /// Re-probes / re-resolves exactly the given rows, whatever their current
+    /// verdict — the per-item "Recheck" context-menu action. Unlike
+    /// `recheckFailed()`, an already-online link or resolved media row is
+    /// retried too, because the operator asked for it explicitly.
+    public func recheck(ids: Set<UUID>) async {
+        let probes = order.filter { ids.contains($0) && links[$0] != nil }
+        let media = order.filter { ids.contains($0) && mediaRows[$0] != nil }
+        guard !probes.isEmpty || !media.isEmpty else { return }
+
+        if !probes.isEmpty { await probeBounded(probes) }
+        await resolveMediaBounded(media)
+        recluster()
+    }
+
+    /// Re-resolves the given media rows under the small resolve concurrency
+    /// cap — a burst of yt-dlp processes trips YouTube's rate limit.
+    private func resolveMediaBounded(_ ids: [UUID]) async {
+        var pending = ids.filter { mediaRows[$0] != nil }
+        guard !pending.isEmpty else { return }
         for id in pending { mediaRows[id]?.state = .resolving }
         await withTaskGroup(of: Void.self) { group in
             var active = 0
@@ -432,7 +451,6 @@ public actor GrabberSession {
                 launch()
             }
         }
-        recluster()
     }
 
     // MARK: - Probing

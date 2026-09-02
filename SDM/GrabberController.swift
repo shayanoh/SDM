@@ -124,6 +124,88 @@ final class GrabberController {
         snapshot = await session.snapshot()
     }
 
+    /// Re-probes / re-resolves exactly these rows — the per-item "Recheck"
+    /// context-menu action, which retries regardless of current verdict.
+    func recheck(_ ids: Set<UUID>) async {
+        await session.recheck(ids: ids)
+        snapshot = await session.snapshot()
+    }
+
+    func removeLinks(_ ids: Set<UUID>) async {
+        for id in ids { await session.removeLink(id) }
+        snapshot = await session.snapshot()
+    }
+
+    /// The URL shown by "Copy URL": a link's resolved/original address, or a
+    /// media row's source page.
+    func url(for id: UUID) -> URL? {
+        if let link = snapshot.links.first(where: { $0.id == id }) { return link.finalURL }
+        return snapshot.mediaRows.first(where: { $0.id == id })?.sourceURL
+    }
+
+    /// Whether a row can be handed to the engine right now: an online or
+    /// faulty HTTP link, or a fully resolved media row. Offline / check-failed
+    /// links and media rows still waiting on a format or a binary can't.
+    func isAddable(_ id: UUID) -> Bool {
+        if let link = snapshot.links.first(where: { $0.id == id }) {
+            switch link.verdict {
+            case .online, .faulty: return true
+            default: return false
+            }
+        }
+        if let row = snapshot.mediaRows.first(where: { $0.id == id }) {
+            return row.state == .resolved
+        }
+        return false
+    }
+
+    /// One engine handoff per package the addable rows among `ids` belong to
+    /// (standalone rows each go under their own filename). Non-addable rows
+    /// are dropped. Empty when nothing in the selection can be added.
+    struct SelectionHandoff: Identifiable {
+        let name: String
+        let note: String?
+        let items: [DownloadItem]
+        let handoffIDs: [UUID]
+        var id: String { name }
+    }
+
+    func handoffGroups(for ids: Set<UUID>) -> [SelectionHandoff] {
+        let addable = ids.filter { isAddable($0) }
+        guard !addable.isEmpty else { return [] }
+
+        var groupOrder: [String] = []
+        var byName: [String: (note: String?, http: [ProbedLink], media: [MediaRow])] = [:]
+        for id in addable {
+            let package = snapshot.packages.first { $0.linkIDs.contains(id) }
+            let name = package?.name ?? standaloneName(for: id)
+            if byName[name] == nil {
+                byName[name] = (package?.note ?? nil, [], [])
+                groupOrder.append(name)
+            }
+            if let link = snapshot.links.first(where: { $0.id == id }) {
+                byName[name]?.http.append(link)
+            } else if let row = snapshot.mediaRows.first(where: { $0.id == id }) {
+                byName[name]?.media.append(row)
+            }
+        }
+
+        return groupOrder.compactMap { name in
+            guard let group = byName[name] else { return nil }
+            let (items, _) = MediaHandoff.build(httpLinks: group.http, mediaRows: group.media)
+            guard !items.isEmpty else { return nil }
+            return SelectionHandoff(
+                name: name, note: group.note, items: items,
+                handoffIDs: group.http.map(\.id) + group.media.map(\.id))
+        }
+    }
+
+    private func standaloneName(for id: UUID) -> String {
+        if let link = snapshot.links.first(where: { $0.id == id }) { return link.effectiveFilename }
+        if let row = snapshot.mediaRows.first(where: { $0.id == id }) { return row.displayFilename }
+        return "Download"
+    }
+
     /// The original URLs of a package's confirmed links, for handoff to the
     /// download engine.
     func urls(inPackage id: UUID) -> [URL] {
