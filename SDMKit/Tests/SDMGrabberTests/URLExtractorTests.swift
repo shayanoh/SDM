@@ -45,3 +45,29 @@ import Testing
 @Test func returnsEmptyForTextWithNoLinks() {
     #expect(URLExtractor.extractLinks(from: "just some text, nothing to see").isEmpty)
 }
+
+@Test func ignoresBareHostURLsWithNoPathOrQuery() {
+    let text = """
+        7.3.2.example.org
+        https://something.com/
+        http://another.com
+        visit https://real.example/file.zip for the download
+        https://cdn.example.com/?token=abc123
+        https://www.youtube.com/@SomeCreator
+        """
+    #expect(
+        URLExtractor.extractLinks(from: text) == [
+            URL(string: "https://real.example/file.zip")!,
+            URL(string: "https://cdn.example.com/?token=abc123")!,
+            URL(string: "https://www.youtube.com/@SomeCreator")!,
+        ])
+}
+
+@Test func isGrabbableRules() {
+    #expect(!URLExtractor.isGrabbable(URL(string: "https://something.com")!))
+    #expect(!URLExtractor.isGrabbable(URL(string: "https://something.com/")!))
+    #expect(!URLExtractor.isGrabbable(URL(string: "http://7.3.2.example.org")!))
+    #expect(URLExtractor.isGrabbable(URL(string: "https://x.com/f.mp4")!))
+    #expect(URLExtractor.isGrabbable(URL(string: "https://x.com/?id=1")!))
+    #expect(URLExtractor.isGrabbable(URL(string: "https://www.youtube.com/watch?v=abc")!))
+}

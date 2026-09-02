@@ -67,9 +67,9 @@ public actor GrabberSession {
     }
 
     public func ingest(urls: [URL]) async {
-        let httpURLs = urls.filter {
-            ["http", "https"].contains($0.scheme?.lowercased())
-        }
+        // Same gate as text extraction — a dropped bare-host URL is not a
+        // download.
+        let httpURLs = urls.filter(URLExtractor.isGrabbable)
         var freshProbes: [UUID] = []
         var freshMedia: [UUID] = []
         for url in httpURLs where seenURLs.insert(url).inserted {
