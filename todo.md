@@ -1,54 +1,105 @@
-# Downloads UI overhaul — progress tracking
+# SDM — Todo
 
-Decisions locked in with Shayan:
-- Deleting a file on disk moves it to Trash (recoverable), never a permanent unlink.
-- When the last item in a package is removed, the empty package row disappears from the list too.
+The downloads-UI overhaul and all five phases of the design
+(`docs/superpowers/specs/2026-08-03-sdm-design.md` + the Phase 5 spec
+`docs/superpowers/specs/2026-09-02-phase-5-youtube-resolver-design.md`)
+are implemented and merged to `main`. 401 tests, both targets build.
 
-## Engine (SDMKit/SDMEngine) — DONE
-- [x] `DownloadEngine.removeItem(_:deleteFile:)` — stop runner if running, remove sidecar, trash file if requested, remove item, drop package if now empty, trash empty package folder if requested
-- [x] `DownloadEngine.removePackage(_:deleteFiles:)` — stop all runners in package, trash whole package folder if requested, remove package
-- [x] `DownloadEngine.resetDownload(_:)` — stop runner, clear sidecar + partial file, reset progress/state to queued
-- [x] `DownloadEngine.reorderPackages(_:)` — reorder `packages` array by given id order
-- [x] `DownloadEngine.setEnabledForAllItems(_:)` — global pause/resume
-- [x] `ItemSnapshot.fileMissing` — true when a `.completed` item's destination file no longer exists on disk
-- [x] `PackageSnapshot.completedBytes` — sum of item completed bytes, for package-level "x MB/y MB"
-- [x] Engine unit tests for the above (removeItem/removePackage/resetDownload/reorderPackages/fileMissing) — all pass, 253/253 suite green
+The deferred items below were **all read and reviewed on 2026-09-02** —
+sourced from the Phase 5 spec §2 "Deferred" and the Part 1–5 plan
+self-reviews under `docs/superpowers/plans/`. Each was either kept as-is
+(see "Decided — no change") or turned into a todo item here.
 
-## EngineController (SDM app) — DONE
-- [x] Wrap the new engine calls: `removeItem`, `removePackage`, `resetDownload`, `reorderPackages`, `setAllEnabled`
-- [x] Batch variant for multi-select delete (`removeItems`)
+---
 
-## Downloads list UI (ContentView.swift) — DONE
-- [x] Remove the URL textbox + Add button from the downloads tab (adding now only happens via Linkgrabber)
-- [x] Redesign list as collapsible packages (DisclosureGroup): larger package header, light/dark banding between packages, zebra striping between item rows (macOS's native alternating-content colors)
-- [x] Package header shows aggregate progress "x MB / y MB"
-- [x] Item row shows its own "downloaded / total" size, no start/stop button — a state icon instead (queued/stopped/running/completed/failed)
-- [x] Completed items: no stop/start button anywhere — only a state icon + a missing-file badge when `fileMissing`; restart is "Reset Download" in the context menu
-- [x] Right-click context menu per item: Start/Stop, Retry (when failed), Reset Download, Remove from List, Remove and Delete File — via `.contextMenu(forSelectionType:)`, so it scopes to the full selection automatically
-- [x] Right-click context menu per package: Remove from List, Remove and Delete Files
-- [x] Multi-selection: `List(selection:)` gives native click/shift/cmd-click; Cmd-A selects everything currently listed; Cmd-Backspace deletes the selection **with file trashing** (Finder convention — confirmed with Shayan's earlier Trash decision, not the non-destructive variant)
-- [x] Package reordering via drag (`.onMove` on the package-level `ForEach`)
-- [x] Global Pause All / Resume All button in the bottom bar
+## Todo (priority order)
 
-## Linkgrabber integration — DONE
-- [x] After "Add to downloads" / "Add and start", clear those links from the Linkgrabber list
+- [ ] **1. Per-component details breakout.** Add `ItemSnapshot.components:
+  [ComponentSnapshot]` (per-component url / part-file path / size / progress /
+  error) and render the bottom details panel of a muxed item as two rows
+  (video, audio) instead of the single "Video + audio, muxed with ffmpeg"
+  line. Needs an engine `snapshot()` addition. *(Spec §5.3 / §9.3; deferred
+  through Parts 3–5.)*
 
-## Verification — DONE
-- [x] `swift test` in SDMKit passes — 253/253, including 7 new removal/reorder/pause tests
-- [x] Manual smoke test in the running app (real persisted data): context menu (single + selection), Cmd-A, Cmd-Backspace confirmation dialog, Pause All/Resume All toggle, missing-file badge, collapsible packages — all confirmed working live
-- [x] `swift-format` run on all touched files
+- [ ] **2. HLS/DASH wholesale fallback.** A video that exposes only segmented
+  `.m3u8` / DASH manifests with no single `Range`-capable URL is currently
+  marked `unsupported` in the grabber and not handed off (live-stream VODs,
+  some brand-new uploads). Add the yt-dlp-as-downloader path: hand the URL to
+  yt-dlp to download wholesale, parse progress from its stdout text.
+  Non-resumable, degraded path. *(Spec §2; the `unsupported` state + its test
+  already exist.)*
 
-## Note for Shayan
-Manual smoke-testing ran against the real app (your actual `state.json`, not a sandbox). I toggled **Pause All** then **Resume All** to check the button — that flips every item's enabled flag, so any items you'd individually paused before this session are now enabled again. Nothing was deleted (I cancelled every destructive confirmation dialog before confirming). Worth a glance at your download list to re-pause anything that should stay stopped.
+- [ ] **3. Proactive URL refresh.** `googlevideo` URLs expire after a few
+  hours. Refresh reactively-on-403 already works (`URLRefreshTests`). Add:
+  when resuming a `.resolved` item whose stored URL is older than ~5h,
+  refresh it *before* spawning workers rather than eating one wasted `403`.
+  *(Spec §2 / §7.3(c).)*
 
-## Round 2 — DONE (per your follow-up requests, not visually re-tested per your instruction)
-- [x] Backspace alone now removes the selection from the list only (no file touched); Cmd-Backspace removes *and* trashes the file (unchanged from before)
-- [x] Both shown as shortcut hints on their context-menu items ("Remove from List" / "Remove and Delete File(s)")
-- [x] **Package delete bug**: found the likely cause — the view had two independent `.confirmationDialog` modifiers (one for item deletion, one for package deletion) stacked on the same view, a known SwiftUI pattern where the second one can silently never present. Unified both into one `PendingDeletion` enum (`.items`/`.package`) driving a single `.sheet(item:)`, so there is exactly one confirmation surface now.
-- [x] Confirmation dialog rewritten as a bigger custom sheet (`DeletionConfirmationView`): shows item count, total size, and a scrollable list of filenames before you confirm
-- [x] New setting **"Resume downloads automatically when SDM opens"** (Settings → Downloads), off by default. When off, `EngineController.startHeartbeat()` forces every restored item's enabled flag off right after `restore()`, so nothing pulls bytes just because the app launched.
-- [x] Start/Stop context-menu items are now disabled when meaningless (Start disabled unless the item is genuinely stopped; Stop disabled unless it's running or queued-and-enabled)
-- [x] Grammar fix: multi-selection now shows "Start All" / "Stop All" instead of "Starts" / "Stops"
-- [x] Completed tab rows now have a right-click menu: Reset Download, Remove from List, Remove and Delete File
+- [ ] **4. yt-dlp version surfacing / self-update.** yt-dlp breaks against
+  YouTube every few weeks when stale. Show the detected version in Settings,
+  warn when it looks old, offer a "Update yt-dlp" button (`yt-dlp -U`).
+  *(Spec §2.)*
 
-Build succeeds and the 253-test SDMKit suite still passes. Not re-verified visually in the running app per your request — over to you.
+- [ ] **5. Bundle yt-dlp / ffmpeg + self-updating.** Ship the binaries inside
+  the .app instead of requiring `brew install`, with a mechanism to keep the
+  bundled yt-dlp current. *Hint:* `BinaryLocator` already supports a manual
+  path override via `setOverride(_:for:)` — a bundled-binary path is just
+  another override source, and wiring that plumbing would also make the
+  deferred "yt-dlp path" / "ffmpeg path" file-picker fields in Settings
+  (spec §4.5 / §9.4) land cheaply. Needs a `BinaryLocator` reference plumbed
+  through `EngineController` and `GrabberController` (the grabber controller
+  currently has no `applyStoredSettings` hook). *(Spec §2 + Part 5 self-review.)*
+
+- [ ] **6. Overdue Phase 1 decisions** (from
+  `memory/sdm-phase-1-followups.md`, owed since before Phase 3):
+  - [ ] `RetryPolicy.classify(any Error)` falls through to `.transient` for
+    any type outside `TransportError`/`DownloadError`, with no reason string —
+    an unrecognized *permanent* failure retries to the attempt cap. Decide the
+    classification + reason.
+  - [ ] Retry backoff "jitter" is not jitter: the delay is deterministic per
+    attempt number, so concurrent retries stay in lockstep — the thundering
+    herd spec §6.4 asks jitter to prevent. Likely fix: per-client seeded
+    randomness with a test-injected seed.
+  - [ ] `URLSessionTransport` continuation race: `setResponseContinuation`
+    can re-insert an entry nothing will resume if `didCompleteWithError` wins
+    the race against `withCheckedThrowingContinuation`; `fetch()` then never
+    returns (bounded only by the 5 s `shutdownBlocking` backstop). Fix with a
+    terminal marker on the entry.
+  - [ ] `DownloadEngine.flushIfDebounceElapsed` clears
+    `ticksSincePendingChange` before awaiting `flush()`; `JSONStateStore`
+    keeps `pending` on a failed write, but nothing re-arms the debounce
+    window until an unrelated change occurs.
+  - [ ] Per-item bookkeeping (`failedAttempts`, `retryHoldTicks`,
+    `attemptStartBytes`, `checkpointFailures`) is never pruned — now matters,
+    an item-removal API exists.
+  - [ ] `URLSessionTransport` uses one serialized delegate `OperationQueue`
+    for every transfer (up to maxConcurrent × segments).
+  - [ ] `SparseFile.write()` does not check `isClosed` (pre-existing).
+  - [ ] `applicationWillTerminate` hook has no automated coverage (AppKit
+    offers no test seam) — needs one manual ⌘Q-mid-download check against the
+    resume criterion.
+
+---
+
+## Decided — read, reviewed, no change needed (2026-09-02)
+
+- **Distinct `ItemState.assembling` case.** The spec (§7.2) wanted a real
+  enum case for the mux step; it is instead represented as `state == .running`
+  plus `ItemSnapshot.isAssembling == true`. Functionally identical — the item
+  holds its scheduler slot, is never rescheduled during the mux, and the UI
+  shows "Assembling…" and a `wand.and.stars` icon. A real enum case would
+  touch ~8 exhaustive `switch` statements for zero behavior change.
+  **Approved as-is.**
+
+- **Per-component connection-demand precision.** A 2-component muxed YouTube
+  item reports connection demand keyed by item (one demand, host from
+  component 0), so it counts as one download against the 8-per-host cap
+  rather than two. The per-host cap is politeness / rate-limit avoidance, not
+  correctness. **Approved as-is.**
+
+---
+
+## Wishlist (not planned)
+
+- SponsorBlock, chapter markers, subtitle download, thumbnail embedding,
+  re-encoding — yt-dlp post-processing features, never in scope. *(Spec §2.)*
