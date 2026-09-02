@@ -33,8 +33,8 @@ public protocol LinkResolver: Sendable {
     /// Grab-time resolution. May shell out; may take seconds.
     func resolve(_ url: URL) async throws -> ResolvedTarget
 
-    /// Mid-download URL refresh for one expired component.
-    func refresh(
-        extractor: String, videoID: String, formatID: String
-    ) async throws -> RefreshedFormat
+    /// Mid-download URL refresh for one expired component: re-resolve
+    /// `sourceURL` (the item's grabbed URL) and hand back a fresh direct URL
+    /// for `formatID`.
+    func refresh(sourceURL: URL, formatID: String) async throws -> RefreshedFormat
 }

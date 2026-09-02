@@ -11,9 +11,7 @@ final class FakeResolver: LinkResolver, @unchecked Sendable {
     init(_ f: @escaping @Sendable (String) throws -> RefreshedFormat) { refreshResult = f }
     func canHandle(_ url: URL) -> Bool { false }
     func resolve(_ url: URL) async throws -> ResolvedTarget { throw ResolveError.unsupported }
-    func refresh(
-        extractor: String, videoID: String, formatID: String
-    ) async throws -> RefreshedFormat {
+    func refresh(sourceURL: URL, formatID: String) async throws -> RefreshedFormat {
         try refreshResult(formatID)
     }
 }
@@ -23,7 +21,7 @@ private func resolvedItem(_ url: URL, totalBytes: Int64?) -> DownloadItem {
         components: [
             FileComponent(
                 url: url, partFilename: "clip.f137.mp4", totalBytes: totalBytes,
-                origin: .resolved(extractor: "youtube", videoID: "abc", formatID: "137"))
+                origin: .resolved(formatID: "137"))
         ], outputFilename: "clip.mp4", assembly: .none, state: .queued)
 }
 

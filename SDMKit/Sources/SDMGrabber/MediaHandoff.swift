@@ -35,9 +35,7 @@ public enum MediaHandoff {
                         url: video.url,
                         partFilename: "\(stem).f\(video.id).\(video.container.fileExtension)",
                         totalBytes: video.filesizeEffective,
-                        origin: .resolved(
-                            extractor: media.extractor, videoID: media.videoID,
-                            formatID: video.id)))
+                        origin: .resolved(formatID: video.id)))
             }
             if let audio = choice.audio {
                 components.append(
@@ -45,9 +43,7 @@ public enum MediaHandoff {
                         url: audio.url,
                         partFilename: "\(stem).f\(audio.id).\(audio.container.fileExtension)",
                         totalBytes: audio.filesizeEffective,
-                        origin: .resolved(
-                            extractor: media.extractor, videoID: media.videoID,
-                            formatID: audio.id)))
+                        origin: .resolved(formatID: audio.id)))
             }
             guard !components.isEmpty else {
                 heldBack += 1

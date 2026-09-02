@@ -162,7 +162,7 @@ private let privateStderr =
     runner.responses = [("-J", ok(try fixtureData("video_refresh_ok")))]
     let r = YtDlpResolver(runner: runner, locator: makeLocator())
     let refreshed = try await r.refresh(
-        extractor: "youtube", videoID: "dQw4w9WgXcQ", formatID: "137")
+        sourceURL: u("https://www.youtube.com/watch?v=dQw4w9WgXcQ"), formatID: "137")
     #expect(refreshed.formatID == "137")
     #expect(refreshed.filesize == 118_000_000)
     #expect(refreshed.url.absoluteString.contains("sn-FRESH"))
@@ -175,21 +175,21 @@ private let privateStderr =
     runner.responses = [("-J", ok(try fixtureData("video_refresh_format_gone")))]
     let r = YtDlpResolver(runner: runner, locator: makeLocator())
     await #expect(throws: ResolveError.formatGone) {
-        try await r.refresh(extractor: "youtube", videoID: "dQw4w9WgXcQ", formatID: "137")
+        try await r.refresh(sourceURL: u("https://youtu.be/dQw4w9WgXcQ"), formatID: "137")
     }
 }
 
 @Test func refreshWithoutYtDlpThrowsBinaryMissing() async {
     let r = YtDlpResolver(runner: FakeProcessRunner(), locator: makeLocator(hasYtDlp: false))
     await #expect(throws: ResolveError.binaryMissing) {
-        try await r.refresh(extractor: "youtube", videoID: "x", formatID: "137")
+        try await r.refresh(sourceURL: u("https://youtu.be/x"), formatID: "137")
     }
 }
 
-@Test func refreshRejectsNonYouTubeExtractor() async {
+@Test func refreshRejectsANonYouTubeSourceURL() async {
     let r = YtDlpResolver(runner: FakeProcessRunner(), locator: makeLocator())
     await #expect(throws: ResolveError.unsupported) {
-        try await r.refresh(extractor: "vimeo", videoID: "x", formatID: "1")
+        try await r.refresh(sourceURL: u("https://vimeo.com/12345"), formatID: "1")
     }
 }
 

@@ -64,10 +64,10 @@ private func u(_ s: String) -> URL { URL(string: s)! }
         components: [
             FileComponent(
                 url: u("https://gv/v"), partFilename: "t.f137.mp4", totalBytes: 100,
-                origin: .resolved(extractor: "youtube", videoID: "abc", formatID: "137")),
+                origin: .resolved(formatID: "137")),
             FileComponent(
                 url: u("https://gv/a"), partFilename: "t.f251.webm", totalBytes: 20,
-                origin: .resolved(extractor: "youtube", videoID: "abc", formatID: "251")),
+                origin: .resolved(formatID: "251")),
         ], outputFilename: "t.mp4", assembly: .mux, state: .stopped)
     let data = try JSONEncoder().encode(item)
     #expect(try JSONDecoder().decode(DownloadItem.self, from: data) == item)

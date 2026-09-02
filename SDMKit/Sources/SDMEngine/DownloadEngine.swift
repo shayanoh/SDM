@@ -1344,7 +1344,7 @@ public actor DownloadEngine {
             var contexts: [ComponentContext] = []
             for (index, component) in item.components.enumerated() where !component.isComplete {
                 let formatID: String?
-                if case .resolved(_, _, let id) = component.origin {
+                if case .resolved(let id) = component.origin {
                     formatID = id
                 } else {
                     formatID = nil
@@ -1444,7 +1444,8 @@ public actor DownloadEngine {
             } catch let DownloadError.urlExpired(formatID) {
                 guard let resolver,
                     let component = itemComponent(itemID: itemID, index: index),
-                    case .resolved(let extractor, let videoID, _) = component.origin
+                    case .resolved = component.origin,
+                    let sourceURL = itemSourceURL(itemID: itemID)
                 else { return DownloadError.serverError(status: 403) }
 
                 // A refresh consumes one attempt against the existing cap, so
@@ -1460,7 +1461,7 @@ public actor DownloadEngine {
                 let refreshed: RefreshedFormat
                 do {
                     refreshed = try await resolver.refresh(
-                        extractor: extractor, videoID: videoID, formatID: formatID)
+                        sourceURL: sourceURL, formatID: formatID)
                 } catch {
                     return DownloadError.refreshFailed(
                         reason: "Could not refresh the URL: \(error)")
@@ -1502,6 +1503,13 @@ public actor DownloadEngine {
         for package in packages {
             guard let item = package.items.first(where: { $0.id == itemID }) else { continue }
             return index < item.components.count ? item.components[index] : nil
+        }
+        return nil
+    }
+
+    private func itemSourceURL(itemID: UUID) -> URL? {
+        for package in packages {
+            if let item = package.items.first(where: { $0.id == itemID }) { return item.sourceURL }
         }
         return nil
     }

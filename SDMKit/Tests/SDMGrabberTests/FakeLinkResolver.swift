@@ -17,9 +17,7 @@ final class FakeLinkResolver: LinkResolver, @unchecked Sendable {
         url.host.map { handledHosts.contains($0) } ?? false
     }
     func resolve(_ url: URL) async throws -> ResolvedTarget { try resolveResult(url) }
-    func refresh(
-        extractor: String, videoID: String, formatID: String
-    ) async throws -> RefreshedFormat {
+    func refresh(sourceURL: URL, formatID: String) async throws -> RefreshedFormat {
         try refreshResult(formatID)
     }
 }

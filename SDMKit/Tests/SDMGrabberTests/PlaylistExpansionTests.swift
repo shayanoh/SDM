@@ -67,9 +67,7 @@ private final class ConcurrencyTrackingResolver: LinkResolver, @unchecked Sendab
     init(entries: [ResolvedMedia]) { self.entries = entries }
 
     func canHandle(_ url: URL) -> Bool { url.host?.contains("youtube") ?? false }
-    func refresh(extractor: String, videoID: String, formatID: String) async throws
-        -> RefreshedFormat
-    {
+    func refresh(sourceURL: URL, formatID: String) async throws -> RefreshedFormat {
         RefreshedFormat(url: url, filesize: nil, formatID: formatID)
     }
     private var url: URL { URL(string: "https://gv/x")! }

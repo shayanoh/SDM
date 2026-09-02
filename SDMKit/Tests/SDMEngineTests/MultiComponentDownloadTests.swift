@@ -258,7 +258,7 @@ private struct GatedVideoRouter: HTTPTransport {
         components: [
             FileComponent(
                 url: URL(string: "https://gv/prog")!, partFilename: "clip.f18.mp4",
-                origin: .resolved(extractor: "youtube", videoID: "abc", formatID: "18"))
+                origin: .resolved(formatID: "18"))
         ], outputFilename: "clip.mp4", assembly: .none, state: .queued)
     await engine.add(DownloadPackage(name: "P", items: [item]))
     try await engine.runUntilIdle()

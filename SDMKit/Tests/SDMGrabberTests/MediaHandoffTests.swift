@@ -28,8 +28,7 @@ private func resolvedRow(mux: Bool) -> MediaRow {
     // The item's URL is the grabbed YouTube URL, not a googlevideo stream.
     #expect(items[0].url == URL(string: "https://youtu.be/abc")!)
     #expect(items[0].components[0].url.absoluteString.hasPrefix("https://gv/"))
-    if case .resolved(_, let videoID, let formatID) = items[0].components[0].origin {
-        #expect(videoID == "abc")
+    if case .resolved(let formatID) = items[0].components[0].origin {
         #expect(formatID == "137")
     } else {
         Issue.record("component 0 should be .resolved")

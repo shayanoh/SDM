@@ -48,15 +48,14 @@ public struct YtDlpResolver: LinkResolver {
         isPlaylistURL(url) ? try await resolvePlaylist(url) : try await resolveSingle(url)
     }
 
-    public func refresh(
-        extractor: String, videoID: String, formatID: String
-    ) async throws -> RefreshedFormat {
-        guard extractor == "youtube" else { throw ResolveError.unsupported }
+    public func refresh(sourceURL: URL, formatID: String) async throws -> RefreshedFormat {
+        guard canHandle(sourceURL) else { throw ResolveError.unsupported }
         let ytdlp = try await requireYtDlp()
-        let canonical = "https://www.youtube.com/watch?v=\(videoID)"
+        // `--no-playlist` so a `watch?v=…&list=…` source still resolves the
+        // one video; yt-dlp normalizes youtu.be / shorts / tracking params.
         let args =
             ["-J", "--no-warnings", "--no-playlist"]
-            + cookieSource().ytDlpArguments + [canonical]
+            + cookieSource().ytDlpArguments + [sourceURL.absoluteString]
         let out = try await runYtDlp(ytdlp, args, timeout: resolveTimeout)
         let dump = try decodeDump(out.stdout, context: "-J")
         guard let raw = (dump.formats ?? []).first(where: { $0.formatID == formatID }),

@@ -1,10 +1,59 @@
 import Foundation
 
-/// Where a component's bytes come from, and what is needed to refresh its
-/// URL if it expires mid-download. Parent spec §5.1.
-public enum ComponentOrigin: Equatable, Codable, Sendable, Hashable {
+/// Where a component's bytes come from.
+///
+/// `.resolved` marks a stream a `LinkResolver` produced: when its URL
+/// expires mid-download the engine calls `resolver.refresh(sourceURL:
+/// DownloadItem.sourceURL, formatID:)` to get a fresh one. Only the
+/// `formatID` is stored — the video's identity lives once, in
+/// `DownloadItem.sourceURL`. Parent spec §5.1.
+public enum ComponentOrigin: Equatable, Sendable, Hashable {
     case http
-    case resolved(extractor: String, videoID: String, formatID: String)
+    case resolved(formatID: String)
+}
+
+extension ComponentOrigin: Codable {
+    private enum Kind: String, Codable { case http, resolved }
+    private enum CodingKeys: String, CodingKey {
+        case kind, formatID
+        // legacy: pre-slim `.resolved(extractor:videoID:formatID:)`
+        case resolved
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        // Current shape: {"kind":"resolved","formatID":"137"} / {"kind":"http"}.
+        if let kind = try container.decodeIfPresent(Kind.self, forKey: .kind) {
+            switch kind {
+            case .http: self = .http
+            case .resolved:
+                self = .resolved(formatID: try container.decode(String.self, forKey: .formatID))
+            }
+            return
+        }
+        // Legacy synthesized shape: {"resolved":{"extractor":…,"videoID":…,
+        // "formatID":"137"}}; anything else (incl. {"http":{}}) is `.http`.
+        if let nested = try? container.nestedContainer(
+            keyedBy: LegacyResolvedKeys.self, forKey: .resolved)
+        {
+            self = .resolved(formatID: try nested.decode(String.self, forKey: .formatID))
+            return
+        }
+        self = .http
+    }
+
+    private enum LegacyResolvedKeys: String, CodingKey { case extractor, videoID, formatID }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .http:
+            try container.encode(Kind.http, forKey: .kind)
+        case .resolved(let formatID):
+            try container.encode(Kind.resolved, forKey: .kind)
+            try container.encode(formatID, forKey: .formatID)
+        }
+    }
 }
 
 /// What has to happen once every component of an item is fully downloaded.
