@@ -3,11 +3,13 @@ import SDMCore
 import SDMResolve
 
 /// Backs the YouTube quality/cookies/playlist settings from spec §12.
-/// Deliberately a plain enum (not `@MainActor`) so the resolver's
-/// `@Sendable` provider closures can read it directly — `UserDefaults` is
-/// thread-safe. Mirrors `EngineSettingsStore`'s direct-`UserDefaults`
-/// pattern.
-enum YouTubeSettingsStore {
+///
+/// Explicitly `nonisolated` — the app target defaults every unmarked type to
+/// `@MainActor` (`SWIFT_DEFAULT_ACTOR_ISOLATION`), but the resolver's
+/// `@Sendable` provider closures read this off the main actor, and
+/// `UserDefaults` is thread-safe. Mirrors `EngineSettingsStore`'s
+/// direct-`UserDefaults` pattern.
+nonisolated enum YouTubeSettingsStore {
     private static let d = UserDefaults.standard
 
     private enum Key {
