@@ -1510,8 +1510,28 @@ public actor DownloadEngine {
         guard let loc = location(of: itemID) else { return .completed }
         let package = packages[loc.packageIndex]
         let item = package.items[loc.itemIndex]
-        guard item.assembly == .mux else { return .completed }
-        return await runMux(item: item, packageName: package.name)
+        if item.assembly == .mux {
+            return await runMux(item: item, packageName: package.name)
+        }
+        // No mux, but a single component whose finalized part file is not
+        // already the output name (a progressive YouTube stream lands as
+        // `<title> [id].f18.mp4`, the item's output is `<title> [id].mp4`).
+        // Rename it so the item's destination matches what is on disk.
+        if item.components.count == 1, item.components[0].partFilename != item.outputFilename {
+            let folder = settings.downloadFolder.appendingPathComponent(package.name)
+            let from = folder.appendingPathComponent(item.components[0].partFilename)
+            let to = folder.appendingPathComponent(item.outputFilename)
+            if FileManager.default.fileExists(atPath: from.path) {
+                try? FileManager.default.removeItem(at: to)
+                do {
+                    try FileManager.default.moveItem(at: from, to: to)
+                } catch {
+                    return .failed(reason: "Could not name the file: \(error.localizedDescription)")
+                }
+            }
+            ResumeSidecar.remove(at: ResumeSidecar.url(for: from))
+        }
+        return .completed
     }
 
     /// Runs the mux for a `.mux` item whose components are all downloaded.

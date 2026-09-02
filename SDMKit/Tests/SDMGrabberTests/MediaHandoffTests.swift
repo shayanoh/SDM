@@ -34,10 +34,14 @@ private func resolvedRow(mux: Bool) -> MediaRow {
     #expect(items[0].components[1].partFilename.contains(".f140."))
 }
 
-@Test func aProgressiveRowBecomesAOneComponentItem() {
+@Test func aProgressiveRowBecomesAOneComponentItemNamedItsFinalName() {
     let (items, _) = MediaHandoff.build(httpLinks: [], mediaRows: [resolvedRow(mux: false)])
     #expect(items[0].components.count == 1)
     #expect(items[0].assembly == .none)
+    // No `.fNNN` for a single stream — the part file is the output file, so
+    // nothing has to rename it and the item's destination matches disk.
+    #expect(items[0].components[0].partFilename == items[0].outputFilename)
+    #expect(items[0].outputFilename == "Clip [abc].mp4")
 }
 
 @Test func unselectedRowsAreHeldBackButHttpSiblingsGoThrough() {

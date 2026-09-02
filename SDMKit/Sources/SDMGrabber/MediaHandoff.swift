@@ -53,6 +53,13 @@ public enum MediaHandoff {
                 heldBack += 1
                 continue
             }
+            // A single progressive/audio-only stream needs no assembly — name
+            // its part file the final name from the start so nothing has to
+            // rename it. Only a mux keeps `.fNNN` names (two parts share the
+            // folder until ffmpeg combines them).
+            if components.count == 1 {
+                components[0].partFilename = output
+            }
             items.append(
                 DownloadItem(
                     components: components, outputFilename: output,

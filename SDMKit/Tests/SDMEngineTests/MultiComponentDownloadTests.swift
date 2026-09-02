@@ -243,3 +243,30 @@ private struct GatedVideoRouter: HTTPTransport {
     #expect(items[0].partFilenames == ["clip.f137.mp4", "clip.f251.webm"])
     #expect(items[1].partFilenames == ["f.bin"])
 }
+
+@Test func aSingleComponentItemWhosePartNameDiffersIsRenamedToTheOutputName() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let payload = testPayload(3000)
+    let engine = DownloadEngine(
+        transport: FakeOrigin(payload: payload), stateStore: InMemoryStateStore(),
+        settings: EngineSettings(
+            maxConcurrent: 1, segmentsPerItem: 2, globalMaxConnections: 8, downloadFolder: dir))
+    // A stale-shaped progressive item: part file "clip.f18.mp4", output
+    // "clip.mp4", assembly .none.
+    let item = DownloadItem(
+        components: [
+            FileComponent(
+                url: URL(string: "https://gv/prog")!, partFilename: "clip.f18.mp4",
+                origin: .resolved(extractor: "youtube", videoID: "abc", formatID: "18"))
+        ], outputFilename: "clip.mp4", assembly: .none, state: .queued)
+    await engine.add(DownloadPackage(name: "P", items: [item]))
+    try await engine.runUntilIdle()
+
+    let snap = try #require(await engine.snapshot().packages.first?.items.first)
+    #expect(snap.state == .completed)
+    #expect(!snap.fileMissing)
+    #expect(try Data(contentsOf: dir.appendingPathComponent("P/clip.mp4")) == payload)
+    #expect(
+        !FileManager.default.fileExists(atPath: dir.appendingPathComponent("P/clip.f18.mp4").path))
+}
