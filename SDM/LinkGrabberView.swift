@@ -217,17 +217,16 @@ struct LinkGrabberView: View {
     /// grabber — once a link is a download it has no reason to still show up
     /// as something waiting to be grabbed.
     private func addToDownloads(_ package: PackageCandidate, startImmediately: Bool) {
-        let probedLinks = controller.probedLinks(inPackage: package.id)
-        let urlItems = probedLinks.map {
-            PackageUrlItem(
-                url: $0.originalURL, size: $0.contentLength, effectiveFilename: $0.effectiveFilename
-            )
-        }
+        let (items, _) = controller.downloadItems(inPackage: package.id)
+        guard !items.isEmpty else { return }
         let name = package.name
-        let linkIDs = package.linkIDs
+        let note = package.note
+        // Only the rows that actually handed off leave the grabber; held-back
+        // media rows (no format yet) stay put.
+        let linkIDs = controller.handoffLinkIDs(inPackage: package.id)
         Task {
-            await engineController.addPackage(
-                name: name, urlItems: urlItems, startImmediately: startImmediately)
+            await engineController.addItems(
+                name: name, note: note, items: items, startImmediately: startImmediately)
             for linkID in linkIDs {
                 await controller.removeLink(linkID)
             }

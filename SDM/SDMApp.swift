@@ -182,7 +182,8 @@ struct SDMApp: App {
                 })
         }
         .onChange(of: grabberController.snapshot) { _, newSnapshot in
-            let freshIDs = Set(newSnapshot.links.map(\.id)).subtracting(notifiedLinkIDs)
+            let freshIDs = Set(newSnapshot.links.map(\.id) + newSnapshot.mediaRows.map(\.id))
+                .subtracting(notifiedLinkIDs)
             if !freshIDs.isEmpty {
                 notifiedLinkIDs.formUnion(freshIDs)
                 notificationManager.notifyLinksGrabbed(count: freshIDs.count)
@@ -193,20 +194,21 @@ struct SDMApp: App {
                 let ids = Set(package.linkIDs)
                 guard ids.isDisjoint(with: autoAddedLinkIDs) else { continue }
                 let links = newSnapshot.links.filter { ids.contains($0.id) }
-                guard !links.isEmpty, links.allSatisfy({ $0.verdict == .online }) else {
-                    continue
-                }
+                let media = newSnapshot.mediaRows.filter { ids.contains($0.id) }
+                // Only auto-add a package whose every row is ready: HTTP links
+                // online, media rows resolved. A half-ready package waits.
+                guard !links.isEmpty || !media.isEmpty,
+                    links.allSatisfy({ $0.verdict == .online }),
+                    media.allSatisfy({ $0.state == .resolved })
+                else { continue }
                 autoAddedLinkIDs.formUnion(ids)
                 let name = package.name
-                let urlItems = links.map {
-                    PackageUrlItem(
-                        url: $0.originalURL, size: $0.contentLength,
-                        effectiveFilename: $0.effectiveFilename)
-                }
-
+                let note = package.note
+                let (items, _) = grabberController.downloadItems(inPackage: package.id)
+                guard !items.isEmpty else { continue }
                 Task {
-                    await controller.addPackage(
-                        name: name, urlItems: urlItems, startImmediately: true)
+                    await controller.addItems(
+                        name: name, note: note, items: items, startImmediately: true)
                 }
             }
         }
