@@ -9,12 +9,24 @@ public actor GrabberSession {
     public struct Budget: Sendable {
         public var globalMaxConcurrentProbes: Int
         public var maxConcurrentPerHost: Int
+        /// How many yt-dlp `-J` extractions may run at once when expanding a
+        /// playlist. Kept small and independent of the probe caps: each
+        /// resolve spawns a Python process that runs a JS runtime and hits
+        /// the network, so a big playlist at the probe concurrency (dozens)
+        /// pins the CPU and every resolve times out. Parent spec §6.2.
+        public var maxConcurrentResolves: Int
 
-        public init(globalMaxConcurrentProbes: Int = 16, maxConcurrentPerHost: Int = 4) {
+        public init(
+            globalMaxConcurrentProbes: Int = 16,
+            maxConcurrentPerHost: Int = 4,
+            maxConcurrentResolves: Int = 4
+        ) {
             precondition(globalMaxConcurrentProbes >= 1)
             precondition(maxConcurrentPerHost >= 1)
+            precondition(maxConcurrentResolves >= 1)
             self.globalMaxConcurrentProbes = globalMaxConcurrentProbes
             self.maxConcurrentPerHost = maxConcurrentPerHost
+            self.maxConcurrentResolves = maxConcurrentResolves
         }
     }
 
@@ -180,12 +192,14 @@ public actor GrabberSession {
             entries.count < totalAvailable
             ? "\(entries.count) of \(totalAvailable) videos" : nil
 
-        // Lazily resolve each entry under the probe budget.
+        // Lazily resolve each entry, but only a few yt-dlp processes at once
+        // — the probe concurrency (dozens) would pin the CPU and time every
+        // extraction out. See `Budget.maxConcurrentResolves`.
         await withTaskGroup(of: (UUID, Result<ResolvedTarget, any Error>).self) { taskGroup in
             var pending = entryIDs
             var active = 0
             func launch() {
-                while active < budget.globalMaxConcurrentProbes, !pending.isEmpty {
+                while active < budget.maxConcurrentResolves, !pending.isEmpty {
                     let entryID = pending.removeFirst()
                     guard let url = mediaRows[entryID]?.sourceURL, let resolver else { continue }
                     active += 1

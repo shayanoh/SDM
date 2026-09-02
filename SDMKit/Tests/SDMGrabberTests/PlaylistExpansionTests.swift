@@ -56,3 +56,52 @@ private func session(_ resolver: FakeLinkResolver) -> GrabberSession {
     #expect(await s.snapshot().packages.isEmpty)
     #expect(await s.snapshot().mediaRows.isEmpty)
 }
+
+/// Resolver that records the peak number of `resolve` calls in flight.
+private final class ConcurrencyTrackingResolver: LinkResolver, @unchecked Sendable {
+    private let lock = NSLock()
+    private var inFlight = 0
+    private(set) var peak = 0
+    let entries: [ResolvedMedia]
+
+    init(entries: [ResolvedMedia]) { self.entries = entries }
+
+    func canHandle(_ url: URL) -> Bool { url.host?.contains("youtube") ?? false }
+    func refresh(extractor: String, videoID: String, formatID: String) async throws
+        -> RefreshedFormat
+    {
+        RefreshedFormat(url: url, filesize: nil, formatID: formatID)
+    }
+    private var url: URL { URL(string: "https://gv/x")! }
+
+    func resolve(_ url: URL) async throws -> ResolvedTarget {
+        if url.absoluteString.contains("list=") {
+            return .playlist(title: "P", entries: entries, totalAvailable: entries.count)
+        }
+        lock.withLock {
+            inFlight += 1
+            peak = max(peak, inFlight)
+        }
+        try? await Task.sleep(for: .milliseconds(30))
+        lock.withLock { inFlight -= 1 }
+        return singleMedia(
+            videoID: "v", title: "E", formats: [vf("137", 720, .h264, .mp4), af("140", .aac, .m4a)])
+    }
+}
+
+@Test func playlistEntryResolvesAreCappedAtMaxConcurrentResolves() async {
+    let entries = (1...20).map {
+        ResolvedMedia(
+            extractor: "youtube", videoID: "vid\($0)", title: "E\($0)", durationSeconds: nil,
+            formats: [])
+    }
+    let resolver = ConcurrencyTrackingResolver(entries: entries)
+    let session = GrabberSession(
+        prober: LinkProber(transport: FakeProbeOrigin(), deepSniffEnabled: false),
+        budget: GrabberSession.Budget(globalMaxConcurrentProbes: 32, maxConcurrentResolves: 3),
+        resolver: resolver)
+    await session.ingest(urls: [URL(string: "https://www.youtube.com/playlist?list=PLx")!])
+    #expect(await session.snapshot().mediaRows.count == 20)
+    #expect(resolver.peak <= 3)
+    #expect(resolver.peak >= 2)  // it did actually parallelize some
+}
