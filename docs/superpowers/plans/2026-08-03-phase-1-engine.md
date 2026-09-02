@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status: IMPLEMENTED — all five phases of the project are complete and merged to `main` (Phase 5 finished 2026-09-02).** Historical record only. This plan's "Deferred to later phases" items were all picked up by Phases 2–5; anything still open is in `todo.md` at the repo root (which also lists the small Phase 1 follow-ups owed since before Phase 3).
+
 **Goal:** Build a tested, resumable, segmented HTTP download engine with a priority scheduler, plus a minimal SwiftUI window to drive it.
 
 **Architecture:** A download's progress is a `RangeSet` of completed byte ranges; parallel workers are ephemeral and claim gaps from that set. Resume, mid-flight segment-count changes, and the segmented progress bar all fall out of this one structure. The engine takes `HTTPTransport` and `Clock` as injected protocols, so the whole test suite runs against an in-process fake origin with no network and no real waiting.

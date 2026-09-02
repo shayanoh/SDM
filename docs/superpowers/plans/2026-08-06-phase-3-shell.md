@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status: IMPLEMENTED — all five phases of the project are complete and merged to `main` (Phase 5 finished 2026-09-02).** Historical record only. Any "deferred to later phases" items here were picked up downstream; anything still open lives in `todo.md` at the repo root.
+
 **Goal:** Close out the scheduling gaps Phase 1 deferred (connection ceilings, hysteresis, manual retry), give the engine real persisted settings, and build the spec §13 Phase 3 UI shell — `NavigationSplitView`, drag-and-drop reordering, sparklines, the main bandwidth graph, the menu bar extra, notifications, and the Linkgrabber's manual package-override controls Phase 2 left unwired.
 
 **Architecture:** Every new piece of scheduling logic (`ConnectionAllocator`, hysteresis tracking, manual retry) follows the engine's existing shape: pure value types or actor-isolated state mutated inside `DownloadEngine.reconcile()`, observable only through `EngineSnapshot`. The UI work is additive to the existing `EngineController`/`GrabberController` + `@Observable` + `@Environment` pattern — no new state-management approach is introduced. `SegmentedProgressBar` and the retry/backoff engine machinery already exist from Phase 1; this plan does not touch them except to surface `remainingAttempts`.

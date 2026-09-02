@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status: IMPLEMENTED — all five phases of the project are complete and merged to `main` (Phase 5 finished 2026-09-02).** Historical record only. Any "deferred to later phases" items here were picked up downstream; anything still open lives in `todo.md` at the repo root.
+
 **Goal:** Build a tested `SDMGrabber` module — URL extraction, two-stage link probing, verdict rules, and package clustering — plus the app-side clipboard watcher and Linkgrabber UI that drive it.
 
 **Architecture:** `SDMGrabber` depends only on `SDMCore` (per the spec's module table), so it cannot see `SDMEngine`'s `HTTPTransport`, `DownloadEngine`, or `DownloadItem`. It defines its own narrow `ProbeTransport` protocol for the HEAD/ranged-GET traffic link probing needs, and its own `FakeProbeOrigin` test double, mirroring the shape of `SDMEngine`'s `HTTPTransport`/`FakeOrigin` without depending on them. Probing, verdict evaluation, and package clustering are pure functions or protocol-injected actors — table-driven and fixture-tested, per spec §7.3–§7.4. The clipboard watcher and all `NSPasteboard`/drag-and-drop code live in the `SDM` app target, per the spec's module table (`SDMApp` owns "clipboard watcher"), and reach `SDMGrabber` only through `GrabberSession`.

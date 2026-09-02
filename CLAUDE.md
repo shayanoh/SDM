@@ -6,11 +6,11 @@ macOS download manager. Segmented transfers, resume, clipboard link grabbing, Yo
 
 ## Current state
 
-**Phase 1 is complete** (merged 2026-08-04). The engine, scheduler, persistence, and a plain driver UI all work end to end: 163 tests, no network and no real clock anywhere in the suite. The Xcode boilerplate is gone — `SDM/Item.swift`, the `ModelContainer`, and the default `ContentView` were all deleted.
+**All five phases are complete and merged to `main`** (Phase 1 merged 2026-08-04, Phase 5 merged 2026-09-02). ~401 tests, no network and no real clock anywhere in the suite.
 
-`SDMKit/` is a local SPM package with `SDMCore` and `SDMEngine`, linked into the app target. `SDMGrabber` does not exist yet — it arrives with Phase 2.
+`SDMKit/` is a local SPM package with **four library targets** — `SDMCore`, `SDMEngine`, `SDMGrabber`, `SDMResolve` — linked into the `SDM` app target. The engine, scheduler, persistence, linkgrabber, menu bar, notifications, theming, activation-policy modes, and the yt-dlp/YouTube feature (multi-component downloads, `ffmpeg` muxing, silent 403 URL refresh, playlists, format picker, YouTube Settings tab) all work end to end.
 
-Carried but deliberately not enforced yet, all Phase 3: `globalMaxConnections` and per-host caps (settings only), hysteresis (`Scheduler` supports `startedRecently`; `DownloadEngine` passes an empty set), and the full retry design (`RetryPolicy` classifies and computes backoff, and the engine now caps attempts and holds items in backoff, but nothing refreshes an expired URL). Signed-URL refresh on 403 waits on Phase 5's resolver.
+**What's still open lives in `todo.md` at the repo root** — a handful of consciously-deferred Phase 5 items (HLS/DASH wholesale download, proactive URL refresh, per-component details panel, yt-dlp bundling + self-update) and the small Phase 1 follow-ups owed since before Phase 3. Nothing in the design specs or plan docs is an open backlog; they carry "IMPLEMENTED" / "SUPERSEDED" status banners.
 
 ## Fixed decisions
 
@@ -24,14 +24,15 @@ Do not relitigate these without asking; they were settled during design.
 
 ## Architecture
 
-Local SPM package, four targets:
+Local SPM package, **five targets** (the spec's original four plus `SDMResolve`, added in Phase 5):
 
 | Target | Owns |
 |---|---|
-| `SDMCore` | Domain models, `RangeSet`, value types, no I/O |
-| `SDMEngine` | Worker pools, resume, checkpointing, scheduler, telemetry |
-| `SDMGrabber` | URL extraction, probing, verdict rules, package clustering, resolvers |
-| `SDMApp` (Xcode target) | SwiftUI views, menu bar, notifications, clipboard, theming |
+| `SDMCore` | Domain models (`DownloadItem`/`FileComponent`, `RangeSet`, `MediaFormat`, `QualityPreferences`, `LinkResolver` protocol), value types, no I/O |
+| `SDMEngine` | Worker pools, resume, checkpointing, scheduler, telemetry, per-component parallel download, `ffmpeg` muxing (`Muxer`), 403 URL refresh |
+| `SDMGrabber` | URL extraction, probing, verdict rules, package clustering, YouTube media-row routing, playlist expansion, format-picker list |
+| `SDMResolve` | yt-dlp process invocation (`ProcessRunner`), binary discovery (`BinaryLocator`), `-J` parsing, `FormatSelector`, `YtDlpResolver` |
+| `SDMApp` (Xcode target) | SwiftUI views, menu bar, notifications, clipboard, theming, Settings |
 
 ### The one idea everything rests on
 
@@ -44,7 +45,7 @@ Everything else falls out of this: changing the segment count mid-flight, resumi
 - **Scheduling is a pure function** re-evaluated on every change, not a queue that's kept in sync. Reordering, priority changes, additions, and completions all flow through it.
 - **Running non-resumable items reserve their slots before rank-based filling.** Skipping this produces unsatisfiable desired sets and thrash. `isResumable` is three-state (`Bool?`): `nil` means not yet probed, and the scheduler keys on `== false`, so an unprobed item stays preemptible. Collapsing unknown into "not resumable" makes every running item unpreemptible and silently kills preemption — that bug shipped once already.
 - **Verdict rules and package clustering are pure functions** over value types, with fixture tables. Tune the data, not the control flow.
-- **Views never touch engine actors.** They consume a coalesced snapshot stream (~4 Hz per spec §4.1; the Phase 1 driver UI republishes at 1 Hz off the heartbeat — raise it when the real UI lands).
+- **Views never touch engine actors.** They consume a coalesced snapshot stream published off the engine heartbeat (`AppTiming.ticksPerSecond`).
 - **Colors come from theme roles, never literals.** macOS-26-only APIs live in one `ViewModifier` file, never inline in views.
 
 ## Phasing
@@ -53,9 +54,9 @@ Everything else falls out of this: changing the segment count mid-flight, resumi
 2. Linkgrabber + clipboard watcher
 3. Menu bar, notifications, graphs, segmented progress rendering
 4. Theming, activation policy modes, Liquid Glass
-5. yt-dlp resolver
+5. yt-dlp resolver (rebrainstormed 2026-09-02; delivered as 5 part-plans)
 
-Each phase gets its own implementation plan. Currently: **Phase 1 done, Phase 2 not yet started.**
+Each phase got its own implementation plan under `docs/superpowers/plans/`. **All five phases are complete** — Phase 5 merged 2026-09-02. Follow-up work is in `todo.md`.
 
 ## Testing
 

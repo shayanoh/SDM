@@ -1,7 +1,11 @@
 # SDM Phase 5 — YouTube & the Resolver Seam: Design
 
 Date: 2026-09-02
-Status: Approved design, pre-implementation
+Status: **IMPLEMENTED — delivered as five part-plans
+(`docs/superpowers/plans/2026-09-02-phase-5-part-1..5-*.md`), all merged to
+`main` on 2026-09-02.** 401 tests. This document is the historical design of
+record; a few items in §2 were consciously deferred and are now tracked in
+`todo.md` at the repo root, not here — see the note at the end of §2.
 Supersedes: §8 of `2026-08-03-sdm-design.md` (kept as the high-level intent; this
 document is the authority on behavior and structure for Phase 5).
 
@@ -44,6 +48,19 @@ file, assembled into a single output with `ffmpeg -c copy`.
   yt-dlp.
 - **SponsorBlock, chapters, subtitles, thumbnail embedding, re-encoding.**
 - **Bundling yt-dlp / ffmpeg** (still deferred per parent §14).
+
+> **Post-implementation note (2026-09-02).** The bullets above were all reviewed
+> after Phase 5 shipped. Their current disposition lives in **`todo.md`** at the
+> repo root — HLS/DASH fallback, proactive refresh, yt-dlp version surfacing, and
+> bundling + self-update are open todo items; SponsorBlock/chapters/etc. are on
+> the wishlist. Two things the plan-level Self-Reviews deferred were reviewed and
+> **kept as-is** (also recorded in `todo.md`): the mux step is represented as
+> `state == .running` plus `ItemSnapshot.isAssembling` rather than a distinct
+> `ItemState.assembling` case (§7.2), and a muxed item's two `googlevideo`
+> components count as one download against the per-host cap rather than two
+> (§7.1). The per-component details breakout (`ItemSnapshot.components`, §5.3 /
+> §9.3) and the yt-dlp/ffmpeg path-override Settings fields (§4.5 / §9.4) are open
+> todo items. Everything else in this document is implemented as written.
 
 ## 3. Module structure
 
@@ -581,18 +598,32 @@ auto-pick is always the first matching entry.
 
 ## 11. Migration & compatibility
 
-- `state.json` and `.sdmpart` both gain a one-shot v1→v2 shim on load; no
-  separate migration pass, no user action. A downgrade (v2 store opened by a v1
-  build) is not supported — acceptable for a single-user app.
+- `state.json` gains a one-shot v1→v2 shim on load; no separate migration pass,
+  no user action. A downgrade (v2 store opened by a v1 build) is not supported —
+  acceptable for a single-user app.
 - The parent spec's §8 remains as intent; §12 Settings table is extended by §9.4
-  here; §4.3 sidecar contents are superseded by §7.4.
+  here.
 
-## 12. Open risks carried into implementation
+> **As-built (2026-09-02):** the `ResumeSidecar` v2 described in §7.4 was **not
+> built.** Each `DownloadTask` still writes its own single-file `.sdmpart` next
+> to its own `.incomplete`; a multi-component item just has one per component,
+> keyed to the component's `partFilename`. This is simpler and needs no sidecar
+> migration — the per-component `origin` (videoID/formatID) needed for a
+> cross-restart refresh lives in `DownloadItem.components[k].origin` in
+> `state.json`, which the v1→v2 `state.json` shim already covers. §7.4's
+> "one `.sdmpart` per item" and its migration paragraph do not describe the
+> shipped code.
 
-- Exact `yt-dlp` flags for "newest N of a playlist/channel" and for the flat vs.
-  full extraction split — verify against current yt-dlp, don't assume.
-- `ffmpeg -c copy` container/codec compatibility edge cases (e.g. opus-in-mp4)
-  and the right `-movflags` per container.
-- Chromium App-Bound cookie encryption behavior on the user's macOS version.
-- `assembling` holding a scheduler slot during a large-file mux — revisit if mux
-  times become long enough to starve the queue.
+## 12. Open risks carried into implementation — all resolved
+
+- Exact `yt-dlp` flags for "newest N of a playlist/channel" — resolved:
+  `--flat-playlist -J` then keep the tail for playlists / head for channels
+  (`YtDlpResolver`), covered by `YtDlpResolverTests`.
+- `ffmpeg -c copy` container/`-movflags` — resolved: `+faststart` for mp4 only,
+  `FFmpegMuxer.arguments`, covered by `MuxerTests` including a real-ffmpeg smoke.
+- Chromium App-Bound cookie encryption — the cookie args are passed through and
+  a failure surfaces as `.authRequired` (not swallowed); real-world behavior on
+  a given macOS is still a manual-test item (see `todo.md` / QA checklist).
+- `assembling` holding a scheduler slot during a large mux — accepted; the item
+  stays `.running` and mux is CPU/IO-bound and brief in practice. Revisit only
+  if it becomes a problem.

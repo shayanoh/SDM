@@ -2,6 +2,18 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status: SUPERSEDED — never executed. DO NOT IMPLEMENT.** Phase 5 was
+re-brainstormed from scratch on 2026-09-02 against a dedicated spec
+(`docs/superpowers/specs/2026-09-02-phase-5-youtube-resolver-design.md`)
+and delivered as five separate part-plans
+(`docs/superpowers/plans/2026-09-02-phase-5-part-1..5-*.md`), all merged to
+`main` on 2026-09-02. The final design differs from this document — the
+target is `SDMResolve` (not `SDMResolver`), the resolver is injected
+directly into `DownloadEngine` and `GrabberSession` (no `URLRefresher`
+seam), and HLS/DASH wholesale download is deferred (tracked in `todo.md`),
+not built as a `WholesaleDownloader`. This file is kept only as a record of
+the earlier approach.
+
 **Goal:** Add a `LinkResolver` protocol backed by yt-dlp, so YouTube links grabbed in the Linkgrabber resolve to a real format table, download through the existing segmented engine as first-class items, refresh their signed URL on 403 instead of dying, and mux separately-downloaded video/audio into one file via ffmpeg — with a `--cookies-from-browser` setting (Safari default, Chrome optional with a red warning) and a graceful "requires yt-dlp" state when the tool is missing.
 
 **Architecture:** A new `SDMResolver` SPM target (depends only on `SDMCore`, following the existing layering where `SDMEngine` and `SDMGrabber` both sit one level above `SDMCore` and never depend on each other) owns everything that talks to yt-dlp/ffmpeg: process invocation, format-table parsing, quality selection, muxing, and the wholesale-download fallback. `SDMCore` gains two small shared pieces — a `Muxer` protocol and two value types (`ResolverBinding`, `MuxCompanion`) — so `DownloadItem` can carry resolver provenance without `SDMEngine` needing to depend on `SDMResolver` at all: `DownloadEngine` is instead handed a plain `URLRefresher` protocol (defined in `SDMEngine` itself) and a `Muxer` (from `SDMCore`) at construction time, and the concrete yt-dlp-backed implementations are wired up only in the `SDM` app target, exactly where `URLSessionTransport`/`JSONStateStore` are wired up today. `SDMGrabber` depends on `SDMResolver` directly, since extracting a format table is conceptually the same kind of thing as probing a link.

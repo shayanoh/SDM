@@ -1,7 +1,11 @@
 # SDM — Shayan's Download Manager: Design
 
 Date: 2026-08-03
-Status: Approved design, pre-implementation
+Status: **IMPLEMENTED — all five phases complete and merged to `main` (Phase 5
+finished 2026-09-02).** Phase 5's behavior is governed by its own spec,
+`2026-09-02-phase-5-youtube-resolver-design.md`, which supersedes §8 below.
+Remaining small follow-ups and consciously-deferred items are tracked in
+`todo.md` at the repo root — this document has no open work of its own.
 
 ## 1. Purpose
 
@@ -363,23 +367,30 @@ A launch smoke test and nothing more. Snapshot-testing SwiftUI is high-maintenan
 
 Engine-first vertical slice. Everything else is a client of the engine, and segmentation plus resume are the hardest things to retrofit.
 
-| Phase | Scope |
-|---|---|
-| **1** | `SDMCore` + `SDMEngine`: `RangeSet`, worker pool, resume, sidecars, `.incomplete` handling, scheduler, telemetry, full test suite. Plain functional UI to drive it. |
-| **2** | `SDMGrabber`: clipboard watcher, URL extraction, two-stage probing, verdict rules, package clustering, Linkgrabber UI. |
-| **3** | Menu bar extra, notifications, bandwidth graph, sparklines, segmented progress rendering. |
-| **4** | Theming, activation policy modes, Liquid Glass polish pass. |
-| **5** | yt-dlp resolver: format tables, quality preferences, per-link override, muxing, URL refresh. |
+| Phase | Scope | Status |
+|---|---|---|
+| **1** | `SDMCore` + `SDMEngine`: `RangeSet`, worker pool, resume, sidecars, `.incomplete` handling, scheduler, telemetry, full test suite. Plain functional UI to drive it. | ✅ merged 2026-08-04 |
+| **2** | `SDMGrabber`: clipboard watcher, URL extraction, two-stage probing, verdict rules, package clustering, Linkgrabber UI. | ✅ |
+| **3** | Menu bar extra, notifications, bandwidth graph, sparklines, segmented progress rendering. | ✅ |
+| **4** | Theming, activation policy modes, Liquid Glass polish pass. | ✅ |
+| **5** | yt-dlp resolver: format tables, quality preferences, per-link override, muxing, URL refresh. | ✅ merged 2026-09-02 (5 part-plans; see `2026-09-02-phase-5-*`) |
 
-Each phase gets its own implementation plan.
+Each phase got its own implementation plan under `docs/superpowers/plans/`.
+**All phases are complete.** Small follow-ups and deferred items are in
+`todo.md` at the repo root.
 
 ## 14. Deferred (explicitly out of scope for now)
 
-- Bundling yt-dlp and ffmpeg
+- Bundling yt-dlp and ffmpeg *(now an active `todo.md` item, with a self-update
+  mechanism)*
 - Mac App Store distribution
-- Browser extension integration
+- Browser extension integration *(a Chrome extension shipped anyway, post-design)*
 - Torrent or magnet support
 - Bandwidth throttling / scheduling by time of day
 - Custom theme editor and theme import (the loader supports it; the UI is deferred)
 - Launch at login
 - AI-assisted package naming (the clustering interface accommodates it)
+
+Phase-5-specific deferrals (HLS/DASH wholesale download, proactive URL refresh,
+per-component details panel, etc.) are listed in `todo.md` and in §2 of the
+Phase 5 spec, not here.

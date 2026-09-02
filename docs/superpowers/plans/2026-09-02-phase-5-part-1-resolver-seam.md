@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status: IMPLEMENTED — merged to `main` 2026-09-02.** This plan is a historical record. It has no open work: anything its Self-Review deferred "to a later part" was either completed in Parts 2–5 or reviewed and moved to `todo.md` at the repo root. Do not treat the "Deferred" notes below as a backlog.
+
 **Goal:** Add the `LinkResolver` seam to `SDMCore` and a new `SDMResolve` SPM target containing a yt-dlp-backed resolver, a pure format-selection function, a subprocess runner, and a binary locator — with no changes to `SDMEngine` or `SDMGrabber`.
 
 **Architecture:** `SDMCore` gains the `LinkResolver` protocol and the value types it trades in (`ResolvedTarget`, `ResolvedMedia`, `MediaFormat`, `QualityPreferences`, `FormatChoice`, `RefreshedFormat`). A new `SDMResolve` target (depends only on `SDMCore`, mirroring `SDMEngine`/`SDMGrabber`) holds `SystemProcessRunner` (a `Foundation.Process` wrapper), `BinaryLocator`, `FormatSelector` (a pure function with a fixture table), and `YtDlpResolver` (parses `yt-dlp -J` output into `ResolvedMedia`, selects formats, and refreshes expired URLs). All subprocess and filesystem access is injected as a protocol/closure so every test runs with no yt-dlp binary and no network.
