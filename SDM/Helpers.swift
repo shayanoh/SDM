@@ -40,7 +40,7 @@ func formatTimeIntervalForEta(_ eta: TimeInterval) -> String {
             result = "Less than a minute"
         }
     } else {
-        result = "Never"
+        result = "Soon"
     }
     return result
 }
