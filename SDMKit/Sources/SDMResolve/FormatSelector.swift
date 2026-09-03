@@ -7,7 +7,37 @@ public enum FormatSelector {
     public static func pick(
         _ media: ResolvedMedia, _ prefs: QualityPreferences
     ) -> FormatChoice? {
-        pickDirect(media, prefs) ?? pickWholesale(media, prefs)
+        // Rank direct and HLS/DASH video formats together by quality, so a
+        // 1080p HLS variant beats a metadata-less direct 360p (xnxx/xvideos)
+        // while a real direct 1080p beats an equivalent HLS one.
+        if let best = eligibleVideoFormats(media, prefs).first,
+            let choice = videoChoice(for: best, media, prefs)
+        {
+            return choice
+        }
+
+        // Nothing fits the height ceiling. An HLS/DASH-only video still gets
+        // its smallest variant downloaded wholesale (better than
+        // "unsupported"); a direct video above the cap is left alone — the
+        // user set the ceiling and a resumable download honors it.
+        let smallestStreamed =
+            media.formats
+            .filter { !$0.isDirect && ($0.kind == .videoOnly || $0.kind == .progressive) }
+            .min { ($0.height ?? .max) < ($1.height ?? .max) }
+        if let smallestStreamed, let choice = videoChoice(for: smallestStreamed, media, prefs) {
+            return choice
+        }
+
+        // Audio-only media — only when there is no video-bearing format at all.
+        let hasAnyVideo = media.formats.contains {
+            $0.kind == .videoOnly || $0.kind == .progressive
+        }
+        if !hasAnyVideo, let audio = rankedAudioFormats(media, prefs).first {
+            return FormatChoice(
+                video: nil, audio: audio, outputContainer: audio.container,
+                estimatedBytes: audio.filesizeEffective)
+        }
+        return nil
     }
 
     /// The yt-dlp `-f` expression a wholesale (HLS/DASH) download uses. Leans
@@ -16,77 +46,50 @@ public enum FormatSelector {
         "bv*[height<=\(maxHeight)]+ba/b[height<=\(maxHeight)]/bv*+ba/b"
     }
 
-    private static func pickDirect(
-        _ media: ResolvedMedia, _ prefs: QualityPreferences
+    /// A concrete choice for `best`, or `nil` when it is a direct video-only
+    /// stream with no eligible direct audio to mux against.
+    private static func videoChoice(
+        for best: MediaFormat, _ media: ResolvedMedia, _ prefs: QualityPreferences
     ) -> FormatChoice? {
-        let video = rankedVideoFormats(media, prefs).first
-        let hasAnyVideo = media.formats.contains {
-            ($0.kind == .videoOnly || $0.kind == .progressive) && $0.isDirect
-        }
-
-        if let video {
-            if video.kind == .progressive {
-                return FormatChoice(
-                    video: video, audio: nil, outputContainer: video.container,
-                    estimatedBytes: video.filesizeEffective)
-            }
-            guard let audio = rankedAudioFormats(media, prefs).first else { return nil }
+        if !best.isDirect {
             return FormatChoice(
-                video: video, audio: audio, outputContainer: video.container,
-                estimatedBytes: sumSize(video, audio))
+                video: best, audio: nil,
+                outputContainer: best.container == .webm ? .webm : .mp4,
+                estimatedBytes: best.filesizeEffective,
+                wholesaleSelector: wholesaleSelector(maxHeight: prefs.maxHeight))
         }
-
-        // No eligible video. Only fall back to audio-only when the media
-        // genuinely has no video-bearing formats at all.
-        guard !hasAnyVideo, let audio = rankedAudioFormats(media, prefs).first else {
-            return nil
+        if best.kind == .progressive {
+            return FormatChoice(
+                video: best, audio: nil, outputContainer: best.container,
+                estimatedBytes: best.filesizeEffective)
         }
+        guard let audio = rankedAudioFormats(media, prefs).first else { return nil }
         return FormatChoice(
-            video: nil, audio: audio, outputContainer: audio.container,
-            estimatedBytes: audio.filesizeEffective)
+            video: best, audio: audio, outputContainer: best.container,
+            estimatedBytes: sumSize(best, audio))
     }
 
-    /// When no `.direct` format fits, fall back to the best HLS/DASH variant
-    /// (spec §6.3). Prefers video-bearing streams that fit `maxHeight`, but
-    /// still returns something for a too-tall-only or audio-only stream.
-    private static func pickWholesale(
+    /// Video-bearing formats (direct + HLS/DASH) that satisfy the codec /
+    /// container allowlists and the max-height ceiling, best quality first.
+    /// A `nil` codec is unknown, not disqualifying: many extractors omit it.
+    static func eligibleVideoFormats(
         _ media: ResolvedMedia, _ prefs: QualityPreferences
-    ) -> FormatChoice? {
-        let streamed = media.formats.filter { !$0.isDirect }
-        guard !streamed.isEmpty else { return nil }
-
-        let videoish = streamed.filter {
-            $0.kind == .videoOnly || $0.kind == .progressive
-        }
-        let pool = videoish.isEmpty ? streamed : videoish
-        let underCap = pool.filter { ($0.height ?? 0) <= prefs.maxHeight }
-        let candidates = underCap.isEmpty ? pool : underCap
-        guard
-            let best = candidates.max(by: {
-                (($0.height ?? 0), ($0.tbr ?? 0)) < (($1.height ?? 0), ($1.tbr ?? 0))
-            })
-        else { return nil }
-
-        let allWebm = candidates.allSatisfy { $0.container == .webm }
-        return FormatChoice(
-            video: best, audio: nil,
-            outputContainer: allWebm ? .webm : .mp4,
-            estimatedBytes: best.filesizeEffective,
-            wholesaleSelector: wholesaleSelector(maxHeight: prefs.maxHeight))
+    ) -> [MediaFormat] {
+        media.formats
+            .filter { format in
+                (format.kind == .videoOnly || format.kind == .progressive)
+                    && (format.height ?? 0) <= prefs.maxHeight
+                    && (format.vcodec == nil
+                        || prefs.videoCodecs.contains(format.vcodec!))
+                    && prefs.containers.contains(format.container)
+            }
+            .sorted(by: videoRankLess)
     }
 
     public static func rankedVideoFormats(
         _ media: ResolvedMedia, _ prefs: QualityPreferences
     ) -> [MediaFormat] {
-        media.formats
-            .filter { format in
-                format.isDirect
-                    && (format.kind == .videoOnly || format.kind == .progressive)
-                    && (format.height ?? 0) <= prefs.maxHeight
-                    && format.vcodec.map { prefs.videoCodecs.contains($0) } == true
-                    && prefs.containers.contains(format.container)
-            }
-            .sorted(by: videoRankLess)
+        eligibleVideoFormats(media, prefs).filter(\.isDirect)
     }
 
     public static func rankedAudioFormats(
@@ -95,7 +98,7 @@ public enum FormatSelector {
         media.formats
             .filter { format in
                 format.isDirect && format.kind == .audioOnly
-                    && format.acodec.map { prefs.audioCodecs.contains($0) } == true
+                    && (format.acodec == nil || prefs.audioCodecs.contains(format.acodec!))
             }
             .sorted { a, b in
                 let ra = a.acodec?.rank ?? Int.max
@@ -113,6 +116,8 @@ public enum FormatSelector {
         let ca = a.vcodec?.rank ?? Int.max
         let cb = b.vcodec?.rank ?? Int.max
         if ca != cb { return ca < cb }
+        // A direct (resumable) stream beats an equivalent HLS/DASH one.
+        if a.isDirect != b.isDirect { return a.isDirect }
         if a.container.rank != b.container.rank { return a.container.rank < b.container.rank }
         return (a.tbr ?? 0) > (b.tbr ?? 0)
     }

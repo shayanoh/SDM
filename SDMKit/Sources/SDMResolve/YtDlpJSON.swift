@@ -80,6 +80,16 @@ enum YtDlpParser {
         }
     }
 
+    static func isVideoContainer(_ ext: String?) -> Bool {
+        ["mp4", "m4v", "webm", "mkv", "mov", "flv", "ts", "avi", "3gp"]
+            .contains((ext ?? "").lowercased())
+    }
+
+    static func isAudioContainer(_ ext: String?) -> Bool {
+        ["m4a", "mp3", "aac", "opus", "ogg", "oga", "flac", "wav"]
+            .contains((ext ?? "").lowercased())
+    }
+
     /// yt-dlp `protocol` → how the engine must fetch it. `nil` ⇒ this
     /// format is not usable (rtmp, ism, mss, …). Parent spec §6.1.
     static func deliveryFor(proto raw: String?) -> MediaDelivery? {
@@ -105,7 +115,24 @@ enum YtDlpParser {
         case (.some, .some): kind = .progressive
         case (.some, .none): kind = .videoOnly
         case (.none, .some): kind = .audioOnly
-        case (.none, .none): return nil
+        case (.none, .none):
+            // Some extractors (xnxx, xvideos, …) omit codec info even for
+            // fully downloadable muxed streams. Infer the kind rather than
+            // dropping the format: a real resolution ⇒ a video variant; a
+            // direct single-file video container ⇒ a muxed stream. A
+            // codec-less HLS entry with no resolution is ambiguous (often a
+            // bare audio manifest, e.g. YouTube 233/234) — skip it.
+            if f.height != nil {
+                kind = .progressive
+            } else if delivery == .direct && isVideoContainer(f.ext) {
+                kind = .progressive
+            } else if isAudioContainer(f.ext)
+                || (f.formatID ?? "").lowercased().contains("audio")
+            {
+                kind = .audioOnly
+            } else {
+                return nil
+            }
         }
 
         return MediaFormat(

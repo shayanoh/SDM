@@ -19,6 +19,20 @@ tests, app target builds.
   (`Clip.mp4.ytdl`, `Clip.mp4-FragN`, `Clip.fNNN.*`, `Clip.temp.mp4`) on
   pause / failure / item removal — the old cleanup only knew `.part` and
   `.ytdl`.
+- **Codec-less formats no longer rejected.** xnxx / xvideos (and others)
+  omit `vcodec` / `acodec` on every format. `YtDlpParser` now infers the
+  kind from resolution / container (a direct video container ⇒ progressive;
+  a real height ⇒ a video variant; a codec-less HLS entry with no height ⇒
+  skipped, it is usually a bare audio manifest). `FormatSelector` treats a
+  `nil` codec as unknown, not disqualifying.
+- **Direct and HLS/DASH formats are now ranked together by quality**, so a
+  1080p HLS variant beats a metadata-less direct 360p; a real direct 1080p
+  still beats an equivalent HLS one (delivery is the tiebreak at equal
+  resolution). Was: direct always preferred, HLS only as a last resort.
+- **The picker no longer double-lists HLS formats.** `MediaFormatMenu` was
+  emitting a plain-download row for every progressive/video-only format
+  regardless of `delivery`; a Twitch quality thus appeared both as a
+  "streamed" row and as a bogus direct row whose URL was the `.m3u8`.
 Supersedes: nothing. Extends
 `docs/superpowers/specs/2026-09-02-phase-5-youtube-resolver-design.md` (the
 resolver seam) and closes `todo.md` item **#2 (HLS/DASH wholesale fallback)**.

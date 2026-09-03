@@ -105,7 +105,7 @@ else
   echo "Skipping version bump."
 fi
 
-rm -rf build
+#rm -rf build
 
 xcodebuild \
   -project "$PROJECT" \
@@ -132,7 +132,7 @@ fi
 echo "Installing to $DEST_DIR/$APP_NAME"
 cp -R "$BUILT_APP" "$DEST_DIR/$APP_NAME"
 
-rm -rf build
+#rm -rf build
 
 FINAL_MV="$(read_marketing_version)"
 if [[ "$MV_UPDATED" == true ]]; then

@@ -35,7 +35,7 @@ public enum MediaFormatMenu {
         for video in media.formats where video.kind == .progressive && video.isDirect {
             let matches =
                 (video.height ?? 0) <= preferences.maxHeight
-                && video.vcodec.map { preferences.videoCodecs.contains($0) } == true
+                && (video.vcodec == nil || preferences.videoCodecs.contains(video.vcodec!))
                 && preferences.containers.contains(video.container)
             options.append(
                 option(video: video, audio: nil, matches: matches))
@@ -44,7 +44,7 @@ public enum MediaFormatMenu {
         for video in media.formats where video.kind == .videoOnly && video.isDirect {
             let videoMatches =
                 (video.height ?? 0) <= preferences.maxHeight
-                && video.vcodec.map { preferences.videoCodecs.contains($0) } == true
+                && (video.vcodec == nil || preferences.videoCodecs.contains(video.vcodec!))
                 && preferences.containers.contains(video.container)
             let audio = bestEligibleAudio ?? bestAnyAudio
             guard let audio else { continue }
@@ -108,7 +108,13 @@ public enum MediaFormatMenu {
         video: MediaFormat, audio: MediaFormat?, container: MediaContainer, estimated: Int64?
     ) -> String {
         var parts: [String] = []
-        if let height = video.height { parts.append("\(height)p") }
+        if let height = video.height {
+            parts.append("\(height)p")
+        } else {
+            // No resolution metadata (e.g. xnxx `low` / `high`) — show the
+            // format id so the row is still identifiable.
+            parts.append(video.id)
+        }
         if let vcodec = video.vcodec { parts.append(describe(vcodec)) }
         parts.append(container.fileExtension)
         let approximate =

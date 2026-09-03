@@ -54,6 +54,20 @@ import Testing
     #expect(!media.formats.contains { $0.id == "233" })
 }
 
+@Test func codecLessTubeFormatsAreNotRejected() throws {
+    // xnxx / xvideos omit vcodec/acodec even for downloadable muxed streams.
+    let media = try YtDlpParser.resolvedMedia(from: fixtureDump("video_tube_no_codecs"))
+    #expect(media.formats.count == 5)
+    // `low` / `high`: no height, ext mp4, direct → progressive direct.
+    let low = try #require(media.formats.first { $0.id == "low" })
+    #expect(low.kind == .progressive)
+    #expect(low.delivery == .direct)
+    // hls-1080p: has height, m3u8 → progressive hls.
+    let hd = try #require(media.formats.first { $0.id == "hls-1080p" })
+    #expect(hd.kind == .progressive)
+    #expect(hd.delivery == .hls)
+}
+
 @Test func directDumpTagsEveryFormatDirect() throws {
     let media = try YtDlpParser.resolvedMedia(from: fixtureDump("video_direct_vimeo"))
     #expect(media.formats.allSatisfy { $0.delivery == .direct })

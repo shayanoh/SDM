@@ -36,9 +36,19 @@ private func hls(_ id: String, _ h: Int, tbr: Double = 0) -> MediaFormat {
         url: URL(string: "https://x/\(id).m3u8")!, delivery: .hls)
 }
 
-@Test func directFormatsWinOverHls() {
+@Test func highestQualityWinsRegardlessOfDelivery() {
+    // A 1080p HLS variant beats a 720p direct one within the 1080 ceiling.
     let m = media([
         vf("137", 720, .h264, .mp4), af("140", .aac, .m4a), hls("270", 1080),
+    ])
+    let choice = FormatSelector.pick(m, .default)
+    #expect(choice?.isWholesale == true)
+    #expect(choice?.video?.id == "270")
+}
+
+@Test func directWinsOverHlsAtEqualResolution() {
+    let m = media([
+        vf("137", 1080, .h264, .mp4), af("140", .aac, .m4a), hls("270", 1080),
     ])
     let choice = FormatSelector.pick(m, .default)
     #expect(choice?.isWholesale == false)
@@ -62,6 +72,37 @@ private func hls(_ id: String, _ h: Int, tbr: Double = 0) -> MediaFormat {
 
 @Test func nothingUsableYieldsNil() {
     #expect(FormatSelector.pick(media([]), .default) == nil)
+}
+
+// Codec-less tube-site formats (xnxx / xvideos): low/high direct MP4 with no
+// height, plus HLS variants that do carry height.
+private func nc(
+    _ id: String, height: Int? = nil, tbr: Double? = nil, hls: Bool = false
+) -> MediaFormat {
+    MediaFormat(
+        id: id, kind: .progressive, height: height, width: nil, vcodec: nil, acodec: nil,
+        container: .mp4, filesize: nil, filesizeApprox: nil, tbr: tbr,
+        url: URL(string: "https://x/\(id)\(hls ? "/i.m3u8" : ".mp4")")!,
+        delivery: hls ? .hls : .direct)
+}
+
+@Test func codecLessHlsWinsOverHeightlessDirect() {
+    let m = media([
+        nc("low"), nc("high"),
+        nc("hls-480", height: 480, tbr: 764, hls: true),
+        nc("hls-1080", height: 1080, tbr: 2760, hls: true),
+    ])
+    let choice = FormatSelector.pick(m, .default)
+    #expect(choice?.isWholesale == true)
+    #expect(choice?.video?.id == "hls-1080")
+}
+
+@Test func codecLessDirectProgressiveIsChosenDirectlyWhenBest() {
+    let m = media([nc("mp4-720", height: 720, tbr: 1500)])
+    let choice = FormatSelector.pick(m, .default)
+    #expect(choice?.isWholesale == false)
+    #expect(choice?.video?.id == "mp4-720")
+    #expect(choice?.audio == nil)
 }
 
 @Test func picksHighestResolutionThenCodecThenContainer() {
