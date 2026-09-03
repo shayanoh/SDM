@@ -21,14 +21,18 @@ public enum MediaFormatMenu {
     public static func options(
         for media: ResolvedMedia, preferences: QualityPreferences
     ) -> [MediaFormatOption] {
-        let audioOnly = media.formats.filter { $0.kind == .audioOnly }
+        let audioOnly = media.formats.filter { $0.kind == .audioOnly && $0.isDirect }
         let bestEligibleAudio = FormatSelector.rankedAudioFormats(media, preferences).first
         let bestAnyAudio =
             audioOnly.sorted { ($0.tbr ?? 0) > ($1.tbr ?? 0) }.first
 
         var options: [MediaFormatOption] = []
 
-        for video in media.formats where video.kind == .progressive {
+        // Only `.direct` formats get a plain-download row. HLS/DASH
+        // progressive / video-only formats are handled by the `streamed`
+        // section below — a "normal" row for one would point the engine at
+        // an `.m3u8` playlist and save it verbatim as `.mp4`.
+        for video in media.formats where video.kind == .progressive && video.isDirect {
             let matches =
                 (video.height ?? 0) <= preferences.maxHeight
                 && video.vcodec.map { preferences.videoCodecs.contains($0) } == true
@@ -37,7 +41,7 @@ public enum MediaFormatMenu {
                 option(video: video, audio: nil, matches: matches))
         }
 
-        for video in media.formats where video.kind == .videoOnly {
+        for video in media.formats where video.kind == .videoOnly && video.isDirect {
             let videoMatches =
                 (video.height ?? 0) <= preferences.maxHeight
                 && video.vcodec.map { preferences.videoCodecs.contains($0) } == true

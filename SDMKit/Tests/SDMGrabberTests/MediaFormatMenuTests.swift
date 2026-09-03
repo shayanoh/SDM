@@ -43,6 +43,25 @@ private func media(_ formats: [MediaFormat]) -> ResolvedMedia {
     #expect(opts[0].choice.audio?.id == "aac140")
 }
 
+@Test func hlsProgressiveFormatsAreOnlyStreamedRowsNeverDirect() {
+    // Twitch: every quality is a progressive `m3u8_native` format. None of
+    // them may show up as a direct-download row whose URL is the .m3u8.
+    func hlsProg(_ id: String, _ h: Int) -> MediaFormat {
+        MediaFormat(
+            id: id, kind: .progressive, height: h, width: nil, vcodec: .h264,
+            acodec: .aac, container: .mp4, filesize: nil, filesizeApprox: nil, tbr: Double(h),
+            url: URL(string: "https://x/\(id)/index.m3u8")!, delivery: .hls)
+    }
+    let m = media([hlsProg("1080p60", 1080), hlsProg("480p", 480), hlsProg("160p", 160)])
+    let opts = MediaFormatMenu.options(for: m, preferences: .default)
+
+    #expect(opts.count == 3)
+    #expect(opts.allSatisfy { $0.isWholesale })
+    #expect(opts.allSatisfy { $0.choice.wholesaleSelector != nil })
+    // The selector is yt-dlp's format id, not a URL.
+    #expect(opts.contains { $0.choice.wholesaleSelector == "1080p60" })
+}
+
 @Test func hlsVariantsAppearAsStreamedOptionsAfterDirectOnes() {
     let hls1080 = MediaFormat(
         id: "270", kind: .videoOnly, height: 1080, width: nil, vcodec: .h264, acodec: nil,
