@@ -28,18 +28,29 @@ public struct FormatChoice: Sendable, Codable, Equatable {
     public var audio: MediaFormat?
     public var outputContainer: MediaContainer
     public var estimatedBytes: Int64?
+    /// Non-nil ⇒ this choice is a wholesale (yt-dlp-as-downloader) job for
+    /// an HLS/DASH-only stream. The string is a yt-dlp `-f` selector.
+    /// `video`/`audio` stay populated for the picker label; the engine
+    /// ignores them for a wholesale component. Parent spec §6.2.
+    public var wholesaleSelector: String?
 
     public init(
         video: MediaFormat?, audio: MediaFormat?,
-        outputContainer: MediaContainer, estimatedBytes: Int64?
+        outputContainer: MediaContainer, estimatedBytes: Int64?,
+        wholesaleSelector: String? = nil
     ) {
         self.video = video
         self.audio = audio
         self.outputContainer = outputContainer
         self.estimatedBytes = estimatedBytes
+        self.wholesaleSelector = wholesaleSelector
     }
 
-    public var requiresMux: Bool { video != nil && audio != nil }
+    public var isWholesale: Bool { wholesaleSelector != nil }
+
+    public var requiresMux: Bool {
+        video != nil && audio != nil && wholesaleSelector == nil
+    }
 
     public var formatIDs: [String] {
         [video?.id, audio?.id].compactMap { $0 }
