@@ -50,6 +50,35 @@ import Testing
     await #expect(throws: (any Error).self) { try await task.value }
 }
 
+final class LineBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _all: [String] = []
+    var all: [String] { lock.withLock { _all } }
+    func append(_ s: String) { lock.withLock { _all.append(s) } }
+}
+
+@Test func runStreamingForwardsLinesAndExitCode() async throws {
+    let runner = SystemProcessRunner()
+    let lines = LineBox()
+    let code = try await runner.runStreaming(
+        executable: URL(fileURLWithPath: "/bin/sh"),
+        arguments: ["-c", "echo one; echo two; echo err 1>&2; exit 3"],
+        timeout: .seconds(5), onLine: { lines.append($0) })
+    #expect(code == 3)
+    #expect(lines.all.contains("one"))
+    #expect(lines.all.contains("two"))
+    #expect(lines.all.contains("err"))
+}
+
+@Test func runStreamingTimesOut() async {
+    let runner = SystemProcessRunner()
+    await #expect(throws: ProcessRunError.timedOut) {
+        try await runner.runStreaming(
+            executable: URL(fileURLWithPath: "/bin/sleep"),
+            arguments: ["10"], timeout: .milliseconds(200), onLine: { _ in })
+    }
+}
+
 @Test func childEnvironmentPrependsToolDirsAndGuaranteesHome() {
     let env = SystemProcessRunner.childEnvironment(
         for: URL(fileURLWithPath: "/opt/custom/bin/yt-dlp"))
