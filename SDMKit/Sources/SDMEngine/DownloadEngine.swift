@@ -1571,8 +1571,20 @@ public actor DownloadEngine {
         case (.userStopped, _):
             state = nil
         case (.none, .some(let error)):
-            let progressed =
-                completedRanges(of: itemID).totalBytes > (attemptStartBytes[itemID] ?? 0)
+            // Ask the *live* runners how far this attempt got — `item.completed`
+            // is not written back until `finishItem()` below, so reading it here
+            // only ever sees the previous attempt's bytes (i.e.
+            // `attemptStartBytes`), and a resumable download that downloaded
+            // real bytes this attempt before dropping would never clear its
+            // failure counter. That let five interrupted-but-progressing
+            // attempts add up to a terminal `.failed`.
+            var attemptCompleted: Int64 = 0
+            if let live = runners[itemID]?.components {
+                for componentRun in live {
+                    attemptCompleted += await componentRun.completedRanges.totalBytes
+                }
+            }
+            let progressed = attemptCompleted > (attemptStartBytes[itemID] ?? 0)
             state = failureState(for: error, itemID: itemID, madeProgress: progressed)
         case (.none, .none):
             state = await assemble(itemID: itemID)

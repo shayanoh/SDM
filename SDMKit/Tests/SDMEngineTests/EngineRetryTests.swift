@@ -131,6 +131,43 @@ private func itemSnapshot(_ id: UUID, in engine: DownloadEngine) async -> ItemSn
     await engine.snapshot().packages.flatMap(\.items).first { $0.id == id }
 }
 
+/// The attempt cap counts *consecutive* failures. An attempt that moved real
+/// bytes before it dropped clears the counter, so a download that keeps
+/// truncating but keeps progressing must finish rather than exhaust a budget
+/// meant for one that cannot advance at all. Regression: `madeProgress` was
+/// derived from `item.completed`, which is not written back until after the
+/// failure is classified, so it was always `false` and every interruption
+/// counted — five truncations in a row went terminal even though each one
+/// downloaded more of the file.
+@Test func attemptsThatMakeProgressDoNotCountTowardTheCap() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let payload = testPayload(2000)
+
+    var behavior = FakeOrigin.Behavior()
+    behavior.truncateAfterBytes = 400
+    behavior.chunkSize = 100
+    let origin = FakeOrigin(payload: payload, behavior: behavior)
+    let engine = makeEngine(
+        transport: origin,
+        folder: dir,
+        retryPolicy: RetryPolicy(maxAttempts: 3, baseDelay: .seconds(2))
+    )
+
+    let package = onePackage()
+    let itemID = package.items[0].id
+    await engine.add(package)
+    try await engine.runUntilIdle()
+
+    // Five truncations at 400 bytes each to cover a 2000-byte file — well past
+    // the maxAttempts: 3 cap. The item must still complete.
+    try await pump(engine, ticks: 60 * AppTiming.ticksPerSecond)
+
+    #expect(await stateOf(itemID, in: engine) == .completed)
+    let destination = dir.appendingPathComponent("Batch").appendingPathComponent("a.bin")
+    #expect(try Data(contentsOf: destination) == payload)
+}
+
 /// A transient failure that returns the item to `.queued` must not look
 /// identical to a fresh queue: the snapshot carries the last error, the
 /// consecutive-attempt count, and how long the backoff hold has left — and

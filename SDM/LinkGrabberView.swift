@@ -479,7 +479,7 @@ private struct MediaLinkRow: View {
 
     private var formatSummary: String {
         guard let choice = row.choice else { return "resolved" }
-        var parts: [String] = []
+        var parts: [String] = [choice.isWholesale ? "Streaming" : "Direct"]
         if let h = choice.video?.height { parts.append("\(h)p") }
         if let v = choice.video?.vcodec { parts.append("\(v)") }
         parts.append(choice.outputContainer.fileExtension)
