@@ -4,6 +4,13 @@ public enum MediaKind: String, Sendable, Codable, Equatable {
     case progressive, videoOnly, audioOnly
 }
 
+/// How a format's bytes are delivered. `.direct` is a single
+/// `Range`-capable http(s) URL the engine downloads itself; `.hls` / `.dash`
+/// are segmented manifests with no single URL, handed to yt-dlp wholesale.
+public enum MediaDelivery: String, Sendable, Codable, Equatable {
+    case direct, hls, dash
+}
+
 public enum VideoCodec: Sendable, Codable, Equatable, Hashable {
     case av1, vp9, h264
     case other(String)
@@ -68,11 +75,13 @@ public struct MediaFormat: Sendable, Codable, Equatable, Identifiable {
     public var filesizeApprox: Int64?
     public var tbr: Double?
     public var url: URL
+    public var delivery: MediaDelivery
 
     public init(
         id: String, kind: MediaKind, height: Int?, width: Int?,
         vcodec: VideoCodec?, acodec: AudioCodec?, container: MediaContainer,
-        filesize: Int64?, filesizeApprox: Int64?, tbr: Double?, url: URL
+        filesize: Int64?, filesizeApprox: Int64?, tbr: Double?, url: URL,
+        delivery: MediaDelivery = .direct
     ) {
         self.id = id
         self.kind = kind
@@ -85,8 +94,11 @@ public struct MediaFormat: Sendable, Codable, Equatable, Identifiable {
         self.filesizeApprox = filesizeApprox
         self.tbr = tbr
         self.url = url
+        self.delivery = delivery
     }
 
     public var filesizeEffective: Int64? { filesize ?? filesizeApprox }
     public var isApproximateSize: Bool { filesize == nil }
+    /// A single `Range`-capable URL the engine downloads itself.
+    public var isDirect: Bool { delivery == .direct }
 }

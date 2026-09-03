@@ -3,17 +3,17 @@
   "id": "PLtest",
   "title": "My Test Playlist",
   "entries": [
-    { "_type": "url", "id": "vid01", "title": "Episode 1", "ie_key": "Youtube" },
-    { "_type": "url", "id": "vid02", "title": "Episode 2", "ie_key": "Youtube" },
-    { "_type": "url", "id": "vid03", "title": "Episode 3", "ie_key": "Youtube" },
-    { "_type": "url", "id": "vid04", "title": "Episode 4", "ie_key": "Youtube" },
-    { "_type": "url", "id": "vid05", "title": "Episode 5", "ie_key": "Youtube" },
-    { "_type": "url", "id": "vid06", "title": "Episode 6", "ie_key": "Youtube" },
-    { "_type": "url", "id": "vid07", "title": "Episode 7", "ie_key": "Youtube" },
-    { "_type": "url", "id": "vid08", "title": "Episode 8", "ie_key": "Youtube" },
-    { "_type": "url", "id": "vid09", "title": "Episode 9", "ie_key": "Youtube" },
-    { "_type": "url", "id": "vid10", "title": "Episode 10", "ie_key": "Youtube" },
-    { "_type": "url", "id": "vid11", "title": "Episode 11", "ie_key": "Youtube" },
-    { "_type": "url", "id": "vid12", "title": "Episode 12", "ie_key": "Youtube" }
+    { "_type": "url", "id": "vid01", "title": "Episode 1", "url": "https://www.youtube.com/watch?v=vid01", "ie_key": "Youtube" },
+    { "_type": "url", "id": "vid02", "title": "Episode 2", "url": "https://www.youtube.com/watch?v=vid02", "ie_key": "Youtube" },
+    { "_type": "url", "id": "vid03", "title": "Episode 3", "url": "https://www.youtube.com/watch?v=vid03", "ie_key": "Youtube" },
+    { "_type": "url", "id": "vid04", "title": "Episode 4", "url": "https://www.youtube.com/watch?v=vid04", "ie_key": "Youtube" },
+    { "_type": "url", "id": "vid05", "title": "Episode 5", "url": "https://www.youtube.com/watch?v=vid05", "ie_key": "Youtube" },
+    { "_type": "url", "id": "vid06", "title": "Episode 6", "url": "https://www.youtube.com/watch?v=vid06", "ie_key": "Youtube" },
+    { "_type": "url", "id": "vid07", "title": "Episode 7", "url": "https://www.youtube.com/watch?v=vid07", "ie_key": "Youtube" },
+    { "_type": "url", "id": "vid08", "title": "Episode 8", "url": "https://www.youtube.com/watch?v=vid08", "ie_key": "Youtube" },
+    { "_type": "url", "id": "vid09", "title": "Episode 9", "url": "https://www.youtube.com/watch?v=vid09", "ie_key": "Youtube" },
+    { "_type": "url", "id": "vid10", "title": "Episode 10", "url": "https://www.youtube.com/watch?v=vid10", "ie_key": "Youtube" },
+    { "_type": "url", "id": "vid11", "title": "Episode 11", "url": "https://www.youtube.com/watch?v=vid11", "ie_key": "Youtube" },
+    { "_type": "url", "id": "vid12", "title": "Episode 12", "url": "https://www.youtube.com/watch?v=vid12", "ie_key": "Youtube" }
   ]
 }

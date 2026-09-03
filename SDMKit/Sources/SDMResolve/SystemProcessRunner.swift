@@ -104,6 +104,109 @@ public struct SystemProcessRunner: ProcessRunner {
             stdout: stdout.snapshot(), stderr: stderr.snapshot(),
             exitCode: process.terminationStatus)
     }
+
+    public func runStreaming(
+        executable: URL, arguments: [String], timeout: Duration,
+        onLine: @Sendable @escaping (String) -> Void
+    ) async throws -> Int32 {
+        let process = Process()
+        process.executableURL = executable
+        process.arguments = arguments
+        process.environment = Self.childEnvironment(for: executable)
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+
+        let streamer = LineStreamer(onLine: onLine)
+        stdoutPipe.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            if chunk.isEmpty { handle.readabilityHandler = nil } else { streamer.feed(chunk) }
+        }
+        stderrPipe.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            if chunk.isEmpty { handle.readabilityHandler = nil } else { streamer.feed(chunk) }
+        }
+
+        let exited = ExitSignal()
+        process.terminationHandler = { _ in exited.fire() }
+
+        do {
+            try process.run()
+        } catch {
+            stdoutPipe.fileHandleForReading.readabilityHandler = nil
+            stderrPipe.fileHandleForReading.readabilityHandler = nil
+            throw ProcessRunError.launchFailed(error.localizedDescription)
+        }
+
+        let timedOut = await withTaskCancellationHandler {
+            await withThrowingTaskGroup(of: Bool.self) { group -> Bool in
+                group.addTask {
+                    await exited.wait()
+                    return false
+                }
+                group.addTask {
+                    try? await Task.sleep(for: timeout)
+                    return true
+                }
+                let first = (try? await group.next()) ?? true
+                group.cancelAll()
+                return first
+            }
+        } onCancel: {
+            process.terminate()
+        }
+
+        if timedOut {
+            process.terminate()
+            await exited.wait()
+            throw ProcessRunError.timedOut
+        }
+        if Task.isCancelled {
+            throw CancellationError()
+        }
+
+        try? stdoutPipe.fileHandleForReading.close()
+        try? stderrPipe.fileHandleForReading.close()
+        streamer.flush()
+        return process.terminationStatus
+    }
+}
+
+/// Splits a byte stream into `\n`-delimited lines, emitting each completed
+/// line via `onLine`. Thread-safe for the pipe readability handlers.
+private final class LineStreamer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var buffer = Data()
+    private let onLine: @Sendable (String) -> Void
+
+    init(onLine: @escaping @Sendable (String) -> Void) { self.onLine = onLine }
+
+    func feed(_ chunk: Data) {
+        let lines: [String] = lock.withLock {
+            buffer.append(chunk)
+            var completed: [String] = []
+            while let newline = buffer.firstIndex(of: 0x0A) {
+                let lineData = buffer[buffer.startIndex..<newline]
+                completed.append(
+                    String(decoding: lineData, as: UTF8.self)
+                        .trimmingCharacters(in: CharacterSet(charactersIn: "\r")))
+                buffer.removeSubrange(buffer.startIndex...newline)
+            }
+            return completed
+        }
+        for line in lines { onLine(line) }
+    }
+
+    func flush() {
+        let trailing: String? = lock.withLock {
+            guard !buffer.isEmpty else { return nil }
+            let s = String(decoding: buffer, as: UTF8.self)
+            buffer.removeAll()
+            return s
+        }
+        if let trailing, !trailing.isEmpty { onLine(trailing) }
+    }
 }
 
 /// One-shot termination signal, safe to fire before or after a waiter

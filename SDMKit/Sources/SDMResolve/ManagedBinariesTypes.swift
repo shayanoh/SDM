@@ -77,7 +77,7 @@ public struct BinariesManifest: Codable, Sendable, Equatable {
 
     func version(for assetName: String) -> String? {
         switch assetName {
-        case "ffmpeg": ffmpegVersion
+        case "ffmpeg", "ffprobe": ffmpegVersion
         case "qjs": qjsVersion
         default: nil
         }

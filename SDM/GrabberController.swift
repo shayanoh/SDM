@@ -34,11 +34,11 @@ final class GrabberController {
             ),
             resolver: YtDlpResolver(
                 runner: processRunner, locator: binaryLocator,
-                cookieSource: { YouTubeSettingsStore.cookieSource },
-                maxPlaylistVideos: { YouTubeSettingsStore.maxPlaylistVideos },
+                cookieSource: { MediaSitesSettingsStore.cookieSource },
+                maxPlaylistVideos: { MediaSitesSettingsStore.maxPlaylistVideos },
                 extraArguments: { ManagedBinariesController.ytDlpExtraArguments }
             ),
-            qualityPreferences: { YouTubeSettingsStore.qualityPreferences },
+            qualityPreferences: { MediaSitesSettingsStore.qualityPreferences },
             ffmpegAvailable: { GrabberController.ffmpegOnDisk }
         )
         startAutoClearLoop()

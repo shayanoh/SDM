@@ -39,6 +39,26 @@ private func makeManaged(
     #expect(try Data(contentsOf: ff) == Data("touched".utf8))
 }
 
+@Test func inflatesBundledFfprobeUnderTheFfmpegVersion() async throws {
+    let tmp = URL.tmp()
+    defer { try? FileManager.default.removeItem(at: tmp) }
+    let bin = tmp.appendingPathComponent("bin")
+    let blob = tmp.appendingPathComponent("ffprobe.lzfse")
+    try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+    let payload = Data("#!/bin/sh\necho fp\n".utf8)
+    try LZFSE.compress(payload).write(to: blob)
+
+    let mb = makeManaged(
+        bin: bin,
+        assets: { [VendorAsset(name: "ffprobe", compressedURL: blob, version: "7.1")] })
+    await mb.provisionBundledIfNeeded()
+
+    let fp = bin.appendingPathComponent("ffprobe")
+    #expect(FileManager.default.isExecutableFile(atPath: fp.path))
+    #expect(try Data(contentsOf: fp) == payload)
+    #expect(await mb.manifestForTesting.ffmpegVersion == "7.1")
+}
+
 @Test func reinflatesWhenBundledVersionBumps() async throws {
     let tmp = URL.tmp()
     defer { try? FileManager.default.removeItem(at: tmp) }

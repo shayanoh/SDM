@@ -93,14 +93,100 @@ public actor DownloadEngine {
     /// closed, and it issues no further requests. What is bounded at all
     /// times is the number of items in state `.running`, since preemption
     /// sets `.queued` synchronously.
-    /// One component of an in-flight item: a `DownloadTask` writing one file.
-    /// A generic HTTP item has one; a muxed YouTube item has two. Parent
-    /// spec §7.1.
+    /// One component of an in-flight item. A generic HTTP item has one; a
+    /// muxed YouTube item has two; an HLS/DASH item has one `.wholesale`
+    /// worker. Parent spec §7.1 / `2026-09-03-multi-site-resolver-design.md` §6.7.
+    private enum ComponentWorker {
+        case segmented(DownloadTask)
+        case wholesale(WholesaleComponentTask)
+    }
+
     private struct ComponentRun {
         /// Index into `DownloadItem.components` — stable across the run.
         let componentIndex: Int
-        var task: DownloadTask
+        var worker: ComponentWorker
         let destinationURL: URL
+
+        /// The `DownloadTask`, when this is a segmented component (the
+        /// `403`-refresh path only applies there).
+        var segmentedTask: DownloadTask? {
+            if case .segmented(let task) = worker { return task }
+            return nil
+        }
+
+        func start() async throws -> URL {
+            switch worker {
+            case .segmented(let task): return try await task.start()
+            case .wholesale(let task): return try await task.start()
+            }
+        }
+
+        func pause() async {
+            switch worker {
+            case .segmented(let task): await task.pause()
+            case .wholesale(let task): await task.pause()
+            }
+        }
+
+        var completedRanges: RangeSet {
+            get async {
+                switch worker {
+                case .segmented(let task): return await task.completedRanges
+                case .wholesale(let task): return await task.completedRanges
+                }
+            }
+        }
+
+        var expectedTotalBytes: Int64? {
+            get async {
+                switch worker {
+                case .segmented(let task): return await task.expectedTotalBytes
+                case .wholesale(let task): return await task.expectedTotalBytes
+                }
+            }
+        }
+
+        var activeWorkerCount: Int {
+            get async {
+                switch worker {
+                case .segmented(let task): return await task.activeWorkerCount
+                case .wholesale(let task): return await task.activeWorkerCount
+                }
+            }
+        }
+
+        var probedSupportsRanges: Bool? {
+            get async {
+                switch worker {
+                case .segmented(let task): return await task.probedSupportsRanges
+                case .wholesale(let task): return await task.probedSupportsRanges
+                }
+            }
+        }
+
+        var lastCheckpointFailure: String? {
+            get async {
+                switch worker {
+                case .segmented(let task): return await task.lastCheckpointFailure
+                case .wholesale(let task): return await task.lastCheckpointFailure
+                }
+            }
+        }
+
+        var isAssembling: Bool {
+            get async {
+                if case .wholesale(let task) = worker { return await task.isAssembling }
+                return false
+            }
+        }
+
+        func checkpointTick() async {
+            if case .segmented(let task) = worker { await task.checkpointTick() }
+        }
+
+        func setWorkerCount(_ count: Int) async {
+            if case .segmented(let task) = worker { await task.setWorkerCount(count) }
+        }
     }
 
     /// One in-flight item: every component's task plus the single job
@@ -113,8 +199,11 @@ public actor DownloadEngine {
         let runID: UUID
         var retireIntent: RetireIntent = .none
 
-        var allTasks: [DownloadTask] { components.map(\.task) }
         var allDestinations: [URL] { components.map(\.destinationURL) }
+
+        func pauseAllComponents() async {
+            for component in components { await component.pause() }
+        }
     }
 
     /// Why a runner is being torn down, decided at the moment it is marked
@@ -134,6 +223,7 @@ public actor DownloadEngine {
     private let stateStore: any StateStore
     private let resolver: (any LinkResolver)?
     private let muxer: (any Muxer)?
+    private let wholesaleDownloader: (any WholesaleDownloader)?
     private var settings: EngineSettings
     /// Items currently in the `ffmpeg` assembly step. Their `state` stays
     /// `.running`; the snapshot exposes this as `isAssembling`.
@@ -193,7 +283,8 @@ public actor DownloadEngine {
         settings: EngineSettings,
         retryPolicy: RetryPolicy = RetryPolicy(),
         resolver: (any LinkResolver)? = nil,
-        muxer: (any Muxer)? = nil
+        muxer: (any Muxer)? = nil,
+        wholesaleDownloader: (any WholesaleDownloader)? = nil
     ) {
         self.transport = transport
         self.stateStore = stateStore
@@ -201,6 +292,7 @@ public actor DownloadEngine {
         self.retryPolicy = retryPolicy
         self.resolver = resolver
         self.muxer = muxer
+        self.wholesaleDownloader = wholesaleDownloader
     }
 
     // MARK: - Mutations
@@ -744,7 +836,7 @@ public actor DownloadEngine {
         guard let runner = runners[itemID] else { return }
         runners[itemID]?.retireIntent = .preempted
         runner.job.cancel()
-        for task in runner.allTasks { await task.pause() }
+        await runner.pauseAllComponents()
         _ = await runner.job.value
     }
 
@@ -767,8 +859,8 @@ public actor DownloadEngine {
         guard let runner = runners[itemID], runner.retireIntent == .none else { return }
         runners[itemID]?.retireIntent = .userStopped
         runner.job.cancel()
-        let tasks = runner.allTasks
-        Task { for task in tasks { await task.pause() } }
+        let components = runner.components
+        Task { for component in components { await component.pause() } }
     }
 
     /// Every on-disk artefact an item can leave in its package folder: the
@@ -822,7 +914,7 @@ public actor DownloadEngine {
         if let runner = runners[itemID], runner.retireIntent == .none {
             let perComponent = Swift.max(1, count / runner.components.count)
             for componentRun in runner.components {
-                await componentRun.task.setWorkerCount(perComponent)
+                await componentRun.setWorkerCount(perComponent)
             }
         }
     }
@@ -871,12 +963,12 @@ public actor DownloadEngine {
         for (itemID, runner) in runners where runner.retireIntent == .none {
             var transferred: Int64 = 0
             for componentRun in runner.components {
-                transferred += await componentRun.task.completedRanges.totalBytes
+                transferred += await componentRun.completedRanges.totalBytes
                 // Spec §4.3: "every ~8 MB per worker or every 5 s, whichever
                 // comes first". `DownloadTask.record` implements the byte
                 // half; this is the only caller of the wall-clock half.
-                await componentRun.task.checkpointTick()
-                if let failure = await componentRun.task.lastCheckpointFailure {
+                await componentRun.checkpointTick()
+                if let failure = await componentRun.lastCheckpointFailure {
                     checkpointFailures[itemID] = failure
                 }
             }
@@ -959,6 +1051,7 @@ public actor DownloadEngine {
                 var totalBytes = item.totalBytes
                 var active = 0
                 var checkpointFailure = checkpointFailures[item.id]
+                var wholesalePostProcessing = false
                 if let runner = runners[item.id] {
                     // Per-component sizes: a running component's live probed
                     // size when it has one, the stored size otherwise. Bases
@@ -970,14 +1063,15 @@ public actor DownloadEngine {
                     for componentRun in runner.components {
                         let index = componentRun.componentIndex
                         guard index < sizes.count else { continue }
-                        if let live = await componentRun.task.expectedTotalBytes {
+                        if let live = await componentRun.expectedTotalBytes {
                             sizes[index] = live
                         }
-                        liveRanges[index] = await componentRun.task.completedRanges
-                        active += await componentRun.task.activeWorkerCount
-                        if let failure = await componentRun.task.lastCheckpointFailure {
+                        liveRanges[index] = await componentRun.completedRanges
+                        active += await componentRun.activeWorkerCount
+                        if let failure = await componentRun.lastCheckpointFailure {
                             checkpointFailure = failure
                         }
+                        if await componentRun.isAssembling { wholesalePostProcessing = true }
                     }
 
                     if sizes.allSatisfy({ $0 != nil }) {
@@ -1056,7 +1150,7 @@ public actor DownloadEngine {
                                     / AppTiming.ticksPerSecond)
                         },
                         fileMissing: fileMissing,
-                        isAssembling: assembling.contains(item.id),
+                        isAssembling: assembling.contains(item.id) || wholesalePostProcessing,
                         assembly: item.assembly,
                         partFilenames: item.components.map(\.partFilename)
                     )
@@ -1095,7 +1189,7 @@ public actor DownloadEngine {
         isShutDown = true
         let live = runners.values.map { $0 }
         for runner in live { runner.job.cancel() }
-        for runner in live { for task in runner.allTasks { await task.pause() } }
+        for runner in live { await runner.pauseAllComponents() }
         for runner in live { _ = await runner.job.value }
         await persist()
         ticksSincePendingChange = nil
@@ -1170,12 +1264,12 @@ public actor DownloadEngine {
         )
 
         var changed = false
-        var retiring: [DownloadTask] = []
+        var retiring: [ComponentRun] = []
         for (itemID, runner) in runners
         where !desired.contains(itemID) && runner.retireIntent == .none {
             runners[itemID]?.retireIntent = .preempted
             runner.job.cancel()
-            retiring.append(contentsOf: runner.allTasks)
+            retiring.append(contentsOf: runner.components)
             mutateItem(itemID) { $0.state = .queued }
             changed = true
         }
@@ -1218,20 +1312,35 @@ public actor DownloadEngine {
 
             let totalSegments = allocatedSegments[itemID] ?? runContext.segments
             let perComponent = Swift.max(1, totalSegments / runContext.contexts.count)
+            let itemPageURL = itemSourceURL(itemID: itemID)
             let componentRuns: [ComponentRun] = runContext.contexts.map { componentContext in
-                let task = DownloadTask(
-                    id: itemID,
-                    sourceURL: componentContext.sourceURL,
-                    destinationURL: componentContext.destinationURL,
-                    transport: transport,
-                    configuration: DownloadTask.Configuration(
-                        workerCount: perComponent,
-                        minChunk: settings.minSegmentSizeBytes,
-                        checkpointInterval: settings.checkpointIntervalBytes,
-                        cachedCompleted: componentContext.cachedCompleted,
-                        refreshableFormatID: componentContext.refreshableFormatID))
+                let worker: ComponentWorker
+                if case .wholesale(let selector) = componentContext.origin,
+                    let wholesaleDownloader
+                {
+                    worker = .wholesale(
+                        WholesaleComponentTask(
+                            itemID: itemID,
+                            pageURL: itemPageURL ?? componentContext.sourceURL,
+                            formatSelector: selector,
+                            destinationURL: componentContext.destinationURL,
+                            downloader: wholesaleDownloader))
+                } else {
+                    worker = .segmented(
+                        DownloadTask(
+                            id: itemID,
+                            sourceURL: componentContext.sourceURL,
+                            destinationURL: componentContext.destinationURL,
+                            transport: transport,
+                            configuration: DownloadTask.Configuration(
+                                workerCount: perComponent,
+                                minChunk: settings.minSegmentSizeBytes,
+                                checkpointInterval: settings.checkpointIntervalBytes,
+                                cachedCompleted: componentContext.cachedCompleted,
+                                refreshableFormatID: componentContext.refreshableFormatID)))
+                }
                 return ComponentRun(
-                    componentIndex: componentContext.componentIndex, task: task,
+                    componentIndex: componentContext.componentIndex, worker: worker,
                     destinationURL: componentContext.destinationURL)
             }
             let runID = UUID()
@@ -1251,7 +1360,7 @@ public actor DownloadEngine {
             if let allocated = allocatedSegments[itemID] {
                 let perComponent = Swift.max(1, allocated / runner.components.count)
                 for componentRun in runner.components {
-                    await componentRun.task.setWorkerCount(perComponent)
+                    await componentRun.setWorkerCount(perComponent)
                 }
             }
         }
@@ -1316,7 +1425,7 @@ public actor DownloadEngine {
     private func refreshResumability() async {
         for (itemID, runner) in runners where runner.retireIntent == .none {
             for componentRun in runner.components {
-                guard let supportsRanges = await componentRun.task.probedSupportsRanges
+                guard let supportsRanges = await componentRun.probedSupportsRanges
                 else { continue }
                 mutateItem(itemID) { item in
                     if componentRun.componentIndex < item.components.count {
@@ -1333,6 +1442,7 @@ public actor DownloadEngine {
         let destinationURL: URL
         let cachedCompleted: RangeSet
         let refreshableFormatID: String?
+        let origin: ComponentOrigin
     }
 
     private struct ItemRunContext: Sendable {
@@ -1366,13 +1476,22 @@ public actor DownloadEngine {
                 } else {
                     formatID = nil
                 }
+                // A wholesale component never resumes — it re-runs yt-dlp
+                // from zero — so its cached progress is always discarded.
+                let cached: RangeSet
+                if case .wholesale = component.origin {
+                    cached = RangeSet()
+                } else {
+                    cached = component.completed
+                }
                 contexts.append(
                     ComponentContext(
                         componentIndex: index,
                         sourceURL: component.url,
                         destinationURL: folder.appendingPathComponent(component.partFilename),
-                        cachedCompleted: component.completed,
-                        refreshableFormatID: formatID))
+                        cachedCompleted: cached,
+                        refreshableFormatID: formatID,
+                        origin: component.origin))
             }
             // Every component already complete → still hand back one context
             // for component 0 so the run finalizes/assembles rather than
@@ -1386,7 +1505,8 @@ public actor DownloadEngine {
                         destinationURL: folder.appendingPathComponent(
                             item.components[0].partFilename),
                         cachedCompleted: item.components[0].completed,
-                        refreshableFormatID: nil))
+                        refreshableFormatID: nil,
+                        origin: item.components[0].origin))
             }
             return ItemRunContext(contexts: contexts, segments: segmentCount(for: itemID))
         }
@@ -1415,7 +1535,7 @@ public actor DownloadEngine {
                     firstError = error
                     // Stop the siblings — their partial bytes stay on disk.
                     if let live = runners[itemID]?.components {
-                        for sibling in live { await sibling.task.pause() }
+                        for sibling in live { await sibling.pause() }
                     }
                 }
             }
@@ -1452,11 +1572,26 @@ public actor DownloadEngine {
     private func runComponent(
         itemID: UUID, runID: UUID, componentRun: ComponentRun
     ) async -> (any Error)? {
-        var task = componentRun.task
         let index = componentRun.componentIndex
+
+        // A wholesale component re-resolves internally on every run — the
+        // `403` → refresh loop below does not apply. `.cancelled` reaches
+        // `runItem` as the pause/stop signal via the retire-intent branch.
+        guard let task = componentRun.segmentedTask else {
+            do {
+                _ = try await componentRun.start()
+                return nil
+            } catch WholesaleError.cancelled {
+                return CancellationError()
+            } catch {
+                return error
+            }
+        }
+
+        var runningTask = task
         while true {
             do {
-                _ = try await task.start()
+                _ = try await runningTask.start()
                 return nil
             } catch let DownloadError.urlExpired(formatID) {
                 guard let resolver,
@@ -1506,9 +1641,9 @@ public actor DownloadEngine {
                 if let slot = runners[itemID]?.components.firstIndex(where: {
                     $0.componentIndex == index
                 }) {
-                    runners[itemID]?.components[slot].task = newTask
+                    runners[itemID]?.components[slot].worker = .segmented(newTask)
                 }
-                task = newTask
+                runningTask = newTask
                 continue
             } catch {
                 return error
@@ -1627,10 +1762,10 @@ public actor DownloadEngine {
             [(index: Int, completed: RangeSet, totalBytes: Int64?, isResumable: Bool?)] =
                 []
         for componentRun in runner.components {
-            let completed = await componentRun.task.completedRanges
-            let totalBytes = await componentRun.task.expectedTotalBytes
-            let isResumable = await componentRun.task.probedSupportsRanges
-            if let failure = await componentRun.task.lastCheckpointFailure {
+            let completed = await componentRun.completedRanges
+            let totalBytes = await componentRun.expectedTotalBytes
+            let isResumable = await componentRun.probedSupportsRanges
+            if let failure = await componentRun.lastCheckpointFailure {
                 checkpointFailures[itemID] = failure
             }
             totalCompleted += completed.totalBytes

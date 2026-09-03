@@ -8,7 +8,8 @@ private func playlistResolver(title: String, count: Int, totalAvailable: Int) ->
     let entries = (1...count).map {
         ResolvedMedia(
             extractor: "youtube", videoID: "vid\($0)", title: "Episode \($0)",
-            durationSeconds: nil, formats: [])
+            durationSeconds: nil, formats: [],
+            sourceURL: URL(string: "https://www.youtube.com/watch?v=vid\($0)"))
     }
     return FakeLinkResolver { url in
         if url.absoluteString.contains("list=") || url.path.hasPrefix("/playlist") {
@@ -40,6 +41,35 @@ private func session(_ resolver: FakeLinkResolver) -> GrabberSession {
     #expect(snap.packages[0].note == "5 of 12 videos")
     #expect(snap.packages[0].linkIDs.count == 5)
     #expect(snap.mediaRows.allSatisfy { $0.state == .resolved })
+}
+
+@Test func playlistEntryRowsUseTheirOwnSourceURL() async {
+    let entries = [
+        ResolvedMedia(
+            extractor: "", videoID: "t1", title: "Track 1", durationSeconds: nil, formats: [],
+            sourceURL: URL(string: "https://soundcloud.com/artist/track-1")),
+        ResolvedMedia(
+            extractor: "", videoID: "t2", title: "Track 2", durationSeconds: nil, formats: [],
+            sourceURL: URL(string: "https://soundcloud.com/artist/track-2")),
+    ]
+    let resolver = FakeLinkResolver { url in
+        if url.path.contains("/sets/") {
+            return .playlist(title: "Set", entries: entries, totalAvailable: 2)
+        }
+        return singleMedia(
+            videoID: url.lastPathComponent, title: url.lastPathComponent,
+            formats: [vf("137", 720, .h264, .mp4), af("140", .aac, .m4a)])
+    }
+    resolver.handledHosts = ["soundcloud.com"]
+    let s = session(resolver)
+    await s.ingest(urls: [URL(string: "https://soundcloud.com/artist/sets/mix")!])
+    let rows = await s.snapshot().mediaRows
+    #expect(rows.count == 2)
+    #expect(
+        Set(rows.map(\.sourceURL)) == [
+            URL(string: "https://soundcloud.com/artist/track-1")!,
+            URL(string: "https://soundcloud.com/artist/track-2")!,
+        ])
 }
 
 @Test func aFullyListedPlaylistHasNoTruncationNote() async {
@@ -91,7 +121,7 @@ private final class ConcurrencyTrackingResolver: LinkResolver, @unchecked Sendab
     let entries = (1...20).map {
         ResolvedMedia(
             extractor: "youtube", videoID: "vid\($0)", title: "E\($0)", durationSeconds: nil,
-            formats: [])
+            formats: [], sourceURL: URL(string: "https://www.youtube.com/watch?v=vid\($0)"))
     }
     let resolver = ConcurrencyTrackingResolver(entries: entries)
     let session = GrabberSession(
@@ -134,7 +164,7 @@ private final class GatedPlaylistResolver: LinkResolver, @unchecked Sendable {
         entries = (1...count).map {
             ResolvedMedia(
                 extractor: "youtube", videoID: "vid\($0)", title: "E\($0)", durationSeconds: nil,
-                formats: [])
+                formats: [], sourceURL: URL(string: "https://www.youtube.com/watch?v=vid\($0)"))
         }
     }
 

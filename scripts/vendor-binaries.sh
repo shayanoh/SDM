@@ -53,6 +53,16 @@ fetch_ffmpeg() {  # $1 = arch(arm64|x86_64)  $2 = site arch(amd64|arm64)  $3 = o
   chmod +x "$TMP/ff-$arch/ffmpeg"
   "$TMP/lzfse-pack" compress "$TMP/ff-$arch/ffmpeg" "$OUT/$out"
   echo "$build" > "$TMP/ffbuild-$arch"
+
+  # ffprobe from the same build — yt-dlp's HLS/DASH fixup needs it.
+  local probeurl="$MR/download/macos/$sitearch/$build/ffprobe.zip"
+  curl -fsSL "$probeurl" -o "$TMP/fp-$arch.zip"
+  want="$(curl -fsSL "$probeurl.sha256" | awk '{print $1}')"
+  got="$(shasum -a256 "$TMP/fp-$arch.zip" | awk '{print $1}')"
+  [ "$want" = "$got" ] || { echo "!! sha256 mismatch for $probeurl" >&2; exit 1; }
+  ( cd "$TMP" && unzip -o "fp-$arch.zip" ffprobe -d "fp-$arch" >/dev/null )
+  chmod +x "$TMP/fp-$arch/ffprobe"
+  "$TMP/lzfse-pack" compress "$TMP/fp-$arch/ffprobe" "$OUT/ffprobe-$arch.lzfse"
 }
 
 fetch_ffmpeg arm64  arm64 "ffmpeg-arm64.lzfse"  "$FFMPEG_BUILD_ARM64"

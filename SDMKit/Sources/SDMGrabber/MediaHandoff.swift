@@ -29,6 +29,27 @@ public enum MediaHandoff {
             let output = row.displayFilename
             let stem = MediaRow.sanitize(media.title) + " [\(media.videoID)]"
             var components: [FileComponent] = []
+
+            // HLS/DASH-only: one non-resumable component that yt-dlp
+            // downloads wholesale against the page URL. Spec §6.4.
+            if let selector = choice.wholesaleSelector {
+                components = [
+                    FileComponent(
+                        url: row.sourceURL,
+                        partFilename:
+                            "\(stem).\(choice.outputContainer.fileExtension)",
+                        totalBytes: choice.estimatedBytes,
+                        origin: .wholesale(formatSelector: selector),
+                        isResumable: false)
+                ]
+                components[0].partFilename = output
+                items.append(
+                    DownloadItem(
+                        components: components, outputFilename: output,
+                        sourceURL: row.sourceURL, assembly: .none, state: .queued))
+                continue
+            }
+
             if let video = choice.video {
                 components.append(
                     FileComponent(

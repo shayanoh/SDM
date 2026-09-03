@@ -36,8 +36,26 @@ import Testing
     #expect(media.formats[0].kind == .progressive)
 }
 
-@Test func hlsOnlyDumpThrowsUnsupported() throws {
-    #expect(throws: ResolveError.unsupported) {
-        try YtDlpParser.resolvedMedia(from: fixtureDump("video_hls_only"))
-    }
+@Test func deliveryTagging() {
+    #expect(YtDlpParser.deliveryFor(proto: "https") == .direct)
+    #expect(YtDlpParser.deliveryFor(proto: nil) == .direct)
+    #expect(YtDlpParser.deliveryFor(proto: "https_native") == .direct)
+    #expect(YtDlpParser.deliveryFor(proto: "m3u8_native") == .hls)
+    #expect(YtDlpParser.deliveryFor(proto: "m3u8") == .hls)
+    #expect(YtDlpParser.deliveryFor(proto: "http_dash_segments") == .dash)
+    #expect(YtDlpParser.deliveryFor(proto: "rtmp") == nil)
+    #expect(YtDlpParser.deliveryFor(proto: "ism") == nil)
+}
+
+@Test func hlsOnlyDumpMapsHlsFormatsInsteadOfRejecting() throws {
+    let media = try YtDlpParser.resolvedMedia(from: fixtureDump("video_hls_only"))
+    #expect(media.formats.contains { $0.id == "270" && $0.delivery == .hls })
+    // The audio+video "none/none" manifest entry is still rejected.
+    #expect(!media.formats.contains { $0.id == "233" })
+}
+
+@Test func directDumpTagsEveryFormatDirect() throws {
+    let media = try YtDlpParser.resolvedMedia(from: fixtureDump("video_direct_vimeo"))
+    #expect(media.formats.allSatisfy { $0.delivery == .direct })
+    #expect(media.formats.count == 3)
 }

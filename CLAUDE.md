@@ -10,9 +10,11 @@ macOS download manager. Segmented transfers, resume, clipboard link grabbing, Yo
 
 `SDMKit/` is a local SPM package with **four library targets** — `SDMCore`, `SDMEngine`, `SDMGrabber`, `SDMResolve` — linked into the `SDM` app target. The engine, scheduler, persistence, linkgrabber, menu bar, notifications, theming, activation-policy modes, and the yt-dlp/YouTube feature (multi-component downloads, `ffmpeg` muxing, silent 403 URL refresh, playlists, format picker, YouTube Settings tab) all work end to end.
 
-**What's still open lives in `todo.md` at the repo root** — a handful of consciously-deferred Phase 5 items (HLS/DASH wholesale download, proactive URL refresh, per-component details panel) and the small Phase 1 follow-ups owed since before Phase 3. Nothing in the design specs or plan docs is an open backlog; they carry "IMPLEMENTED" / "SUPERSEDED" status banners.
+**What's still open lives in `todo.md` at the repo root** — a couple of consciously-deferred Phase 5 items (proactive URL refresh, per-component details panel) and the small Phase 1 follow-ups owed since before Phase 3. Nothing in the design specs or plan docs is an open backlog; they carry "IMPLEMENTED" / "SUPERSEDED" status banners.
 
-**Managed binaries (2026-09-03):** `yt-dlp` / `ffmpeg` / `qjs` (QuickJS-ng) are provisioned into `~/Library/Application Support/SDM/bin/` — ffmpeg/qjs bundled as LZFSE blobs and inflated on launch, yt-dlp downloaded + SHA-256-verified + self-updated by `SDMResolve/ManagedBinaries.swift`. No `brew install` required. Spec: `docs/superpowers/specs/2026-09-03-managed-binaries-design.md`.
+**Managed binaries (2026-09-03):** `yt-dlp` / `ffmpeg` / `ffprobe` / `qjs` (QuickJS-ng) are provisioned into `~/Library/Application Support/SDM/bin/` — ffmpeg/ffprobe/qjs bundled as LZFSE blobs and inflated on launch, yt-dlp downloaded + SHA-256-verified + self-updated by `SDMResolve/ManagedBinaries.swift`. No `brew install` required. Spec: `docs/superpowers/specs/2026-09-03-managed-binaries-design.md`.
+
+**Multi-site resolver + HLS/DASH wholesale (2026-09-03):** the yt-dlp gate is a curated ~50-site `SiteRegistry` (`SDMResolve`), not just YouTube — Vimeo, Twitch, TikTok, SoundCloud, Reddit, Aparat, the major adult tubes, etc. HLS/DASH-only videos (no single `Range`-capable URL) download via `YtDlpWholesaleDownloader` (yt-dlp as a downloader) driven by `WholesaleComponentTask` in the engine; that path is non-resumable and its progress is a synthesized `RangeSet`. Spec: `docs/superpowers/specs/2026-09-03-multi-site-resolver-design.md`.
 
 ## Fixed decisions
 
@@ -22,7 +24,7 @@ Do not relitigate these without asking; they were settled during design.
 - **macOS 15.0 baseline**, macOS 26 enhancements behind `if #available`.
 - **Swift 6 language mode**, strict concurrency.
 - **No SwiftData, no database.** Atomic JSON snapshot for durable state, per-download sidecar for resume state, memory only for live progress.
-- **yt-dlp is user-installed and used as a metadata extractor only** — SDM downloads the direct URLs itself. Not bundled (for now), not used as the downloader.
+- **yt-dlp is a metadata extractor** — SDM downloads the direct URLs itself. It is auto-provisioned (not user-installed). The one exception is the HLS/DASH wholesale path (`WholesaleComponentTask` / `YtDlpWholesaleDownloader`), where yt-dlp *is* the downloader because there is no single direct URL to hand the engine.
 
 ## Architecture
 
@@ -33,7 +35,7 @@ Local SPM package, **five targets** (the spec's original four plus `SDMResolve`,
 | `SDMCore` | Domain models (`DownloadItem`/`FileComponent`, `RangeSet`, `MediaFormat`, `QualityPreferences`, `LinkResolver` protocol), value types, no I/O |
 | `SDMEngine` | Worker pools, resume, checkpointing, scheduler, telemetry, per-component parallel download, `ffmpeg` muxing (`Muxer`), 403 URL refresh |
 | `SDMGrabber` | URL extraction, probing, verdict rules, package clustering, YouTube media-row routing, playlist expansion, format-picker list |
-| `SDMResolve` | yt-dlp process invocation (`ProcessRunner`), binary discovery (`BinaryLocator`), `-J` parsing, `FormatSelector`, `YtDlpResolver` |
+| `SDMResolve` | yt-dlp process invocation (`ProcessRunner`), binary discovery (`BinaryLocator`), `-J` parsing, `FormatSelector`, `YtDlpResolver`, `SiteRegistry`, `YtDlpWholesaleDownloader` |
 | `SDMApp` (Xcode target) | SwiftUI views, menu bar, notifications, clipboard, theming, Settings |
 
 ### The one idea everything rests on
@@ -77,7 +79,7 @@ The two properties that must never regress:
 
 - Format Swift with `swift-format` before committing.
 - Add packages via Xcode or `Package.swift` through SPM tooling — never hand-edit `Package.resolved`.
-- Vendored `ffmpeg`/`qjs` blobs (`SDM/Resources/vendor/*.lzfse`) are Git LFS; regenerate with `scripts/vendor-binaries.sh` and commit the results.
+- Vendored `ffmpeg`/`ffprobe`/`qjs` blobs (`SDM/Resources/vendor/*.lzfse`) are Git LFS; regenerate with `scripts/vendor-binaries.sh` and commit the results.
 - Verify library APIs against current documentation (Context7) rather than from memory; SwiftUI, SwiftData, and macOS 26 APIs have all moved recently.
 
 ## Git

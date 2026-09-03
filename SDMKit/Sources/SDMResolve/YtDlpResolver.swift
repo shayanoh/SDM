@@ -9,11 +9,6 @@ let resolveLog = Logger(subsystem: "com.sdm.SDMResolve", category: "yt-dlp")
 /// yt-dlp as a metadata extractor only — never as a downloader. Parent
 /// spec §4.4. All subprocess access goes through the injected `ProcessRunner`.
 public struct YtDlpResolver: LinkResolver {
-    public static let handledHosts: Set<String> = [
-        "youtube.com", "www.youtube.com", "m.youtube.com",
-        "music.youtube.com", "youtu.be",
-    ]
-
     private let runner: any ProcessRunner
     private let locator: BinaryLocator
     private let cookieSource: @Sendable () -> CookieSource
@@ -44,14 +39,18 @@ public struct YtDlpResolver: LinkResolver {
     }
 
     public func canHandle(_ url: URL) -> Bool {
-        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
-            let host = url.host?.lowercased()
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https"
         else { return false }
-        return YtDlpResolver.handledHosts.contains(host)
+        return SiteRegistry.match(url) != nil
+    }
+
+    /// yt-dlp tokens this site needs on every invocation (usually none).
+    private func perSiteArguments(for url: URL) -> [String] {
+        SiteRegistry.match(url)?.extraArgs ?? []
     }
 
     public func resolve(_ url: URL) async throws -> ResolvedTarget {
-        isPlaylistURL(url) ? try await resolvePlaylist(url) : try await resolveSingle(url)
+        looksLikePlaylist(url) ? try await resolvePlaylist(url) : try await resolveSingle(url)
     }
 
     public func refresh(sourceURL: URL, formatID: String) async throws -> RefreshedFormat {
@@ -61,7 +60,8 @@ public struct YtDlpResolver: LinkResolver {
         // one video; yt-dlp normalizes youtu.be / shorts / tracking params.
         let args =
             ["-J", "--no-warnings", "--no-playlist"]
-            + cookieSource().ytDlpArguments + [sourceURL.absoluteString]
+            + cookieSource().ytDlpArguments + perSiteArguments(for: sourceURL)
+            + [sourceURL.absoluteString]
         let out = try await runYtDlp(ytdlp, args, timeout: resolveTimeout)
         let dump = try decodeDump(out.stdout, context: "-J")
         guard let raw = (dump.formats ?? []).first(where: { $0.formatID == formatID }),
@@ -73,13 +73,22 @@ public struct YtDlpResolver: LinkResolver {
 
     // MARK: - Playlist detection
 
-    func isPlaylistURL(_ url: URL) -> Bool {
+    /// A cheap heuristic that only chooses which yt-dlp invocation to *try
+    /// first*. The parser then keys on yt-dlp's own `_type`, so a wrong
+    /// guess self-corrects (spec §5.2).
+    func looksLikePlaylist(_ url: URL) -> Bool {
         if let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
             items.contains(where: { $0.name == "list" })
         {
             return true
         }
-        return isChannelURL(url) || url.path.lowercased().hasPrefix("/playlist")
+        if isChannelURL(url) { return true }
+        let path = url.path.lowercased()
+        if path.hasPrefix("/playlist") || path.contains("/sets/") { return true }
+        // Hints are matched anywhere in the path — a set / album / channel
+        // segment (`/sets/`, `/album/`, `/r/`) usually sits mid-path.
+        return SiteRegistry.match(url)?.playlistPathHints
+            .contains(where: { path.contains($0) }) ?? false
     }
 
     private func isChannelURL(_ url: URL) -> Bool {
@@ -94,9 +103,13 @@ public struct YtDlpResolver: LinkResolver {
         let ytdlp = try await requireYtDlp()
         let args =
             ["-J", "--no-warnings", "--no-playlist"]
-            + cookieSource().ytDlpArguments + [url.absoluteString]
+            + cookieSource().ytDlpArguments + perSiteArguments(for: url) + [url.absoluteString]
         let out = try await runYtDlp(ytdlp, args, timeout: resolveTimeout)
         let dump = try decodeDump(out.stdout, context: "-J")
+        // Some sites ignore `--no-playlist` and hand back a playlist anyway.
+        if dump.type == "playlist" {
+            return try playlistTarget(from: dump, url: url)
+        }
         return .single(try YtDlpParser.resolvedMedia(from: dump))
     }
 
@@ -104,17 +117,25 @@ public struct YtDlpResolver: LinkResolver {
         let ytdlp = try await requireYtDlp()
         let args =
             ["-J", "--flat-playlist", "--no-warnings"]
-            + cookieSource().ytDlpArguments + [url.absoluteString]
+            + cookieSource().ytDlpArguments + perSiteArguments(for: url) + [url.absoluteString]
         let out = try await runYtDlp(ytdlp, args, timeout: playlistTimeout)
         let dump = try decodeDump(out.stdout, context: "--flat-playlist")
-        let all = YtDlpParser.flatEntries(from: dump)
+        // The guess was wrong and this is actually a single video.
+        if (dump.entries ?? []).isEmpty, let formats = dump.formats, !formats.isEmpty {
+            return .single(try YtDlpParser.resolvedMedia(from: dump))
+        }
+        return try playlistTarget(from: dump, url: url)
+    }
+
+    private func playlistTarget(from dump: YtDlpDump, url: URL) throws -> ResolvedTarget {
+        let all = YtDlpParser.flatEntries(from: dump, relativeTo: url)
         guard !all.isEmpty else { throw ResolveError.unavailable }
         let cap = max(10, min(200, maxPlaylistVideos()))
         let kept = isChannelURL(url) ? Array(all.prefix(cap)) : Array(all.suffix(cap))
         let entries = kept.map {
             ResolvedMedia(
-                extractor: "youtube", videoID: $0.videoID, title: $0.title,
-                durationSeconds: nil, formats: [])
+                extractor: "", videoID: $0.videoID, title: $0.title,
+                durationSeconds: nil, formats: [], sourceURL: $0.sourceURL)
         }
         return .playlist(
             title: dump.title ?? "Playlist", entries: entries, totalAvailable: all.count)
@@ -179,9 +200,23 @@ public struct YtDlpResolver: LinkResolver {
                 return .authRequired
             }
             if lower.contains("private video") { return .privateVideo }
+            if lower.contains("drm") { return .drmProtected }
+            // Generic sign-in walls across sites (Vimeo, Twitter, members-only).
+            if lower.contains("requires you to log in")
+                || lower.contains("log in to")
+                || lower.contains("login required")
+                || lower.contains("requires authentication")
+                || lower.contains("this content isn't available")
+            {
+                return .authRequired
+            }
             if lower.contains("video unavailable")
                 || lower.contains("this video is not available")
                 || lower.contains("has been removed")
+                || lower.contains("available in your country")
+                || lower.contains("available in your location")
+                || lower.contains("geo-restricted")
+                || lower.contains("geo restricted")
             {
                 return .unavailable
             }

@@ -9,7 +9,7 @@ import SDMResolve
 /// `@Sendable` provider closures read this off the main actor, and
 /// `UserDefaults` is thread-safe. Mirrors `EngineSettingsStore`'s
 /// direct-`UserDefaults` pattern.
-nonisolated enum YouTubeSettingsStore {
+nonisolated enum MediaSitesSettingsStore {
     private static let d = UserDefaults.standard
 
     private enum Key {

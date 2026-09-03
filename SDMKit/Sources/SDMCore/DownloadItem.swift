@@ -111,8 +111,18 @@ public struct DownloadItem: Identifiable, Equatable, Sendable {
         set { for index in components.indices { components[index].validator = newValue } }
     }
 
+    /// A wholesale (yt-dlp-as-downloader) component makes the whole item
+    /// non-resumable and its scheduler slot reserved. Parent spec
+    /// `2026-09-03-multi-site-resolver-design.md` §6.7.
+    public var hasWholesaleComponent: Bool {
+        components.contains {
+            if case .wholesale = $0.origin { return true } else { return false }
+        }
+    }
+
     public var isResumable: Bool? {
         get {
+            if hasWholesaleComponent { return false }
             if components.contains(where: { $0.isResumable == false }) { return false }
             if components.contains(where: { $0.isResumable == nil }) { return nil }
             return true

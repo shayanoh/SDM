@@ -19,13 +19,14 @@ private let privateStderr =
 
 // MARK: - canHandle
 
-@Test func canHandleYouTubeHostsOnly() {
+@Test func canHandleUsesSiteRegistry() {
     let r = YtDlpResolver(runner: FakeProcessRunner(), locator: makeLocator())
     #expect(r.canHandle(u("https://www.youtube.com/watch?v=abc")))
     #expect(r.canHandle(u("https://youtu.be/abc")))
     #expect(r.canHandle(u("https://music.youtube.com/watch?v=abc")))
-    #expect(r.canHandle(u("https://m.youtube.com/watch?v=abc")))
-    #expect(!r.canHandle(u("https://vimeo.com/12345")))
+    #expect(r.canHandle(u("https://vimeo.com/12345")))
+    #expect(r.canHandle(u("https://www.tiktok.com/@a/video/1")))
+    #expect(r.canHandle(u("https://www.xvideos.com/video1/x")))
     #expect(!r.canHandle(u("https://example.com/video.mp4")))
     #expect(!r.canHandle(u("ftp://youtube.com/x")))
 }
@@ -64,6 +65,37 @@ private let privateStderr =
     }
 }
 
+@Test func genericLoginStderrIsAuthRequired() async {
+    let runner = FakeProcessRunner()
+    runner.responses = [
+        ("-J", fail("ERROR: [vimeo] 1: This video requires you to log in."))
+    ]
+    let r = YtDlpResolver(runner: runner, locator: makeLocator())
+    await #expect(throws: ResolveError.authRequired) {
+        try await r.resolve(u("https://vimeo.com/1"))
+    }
+}
+
+@Test func geoRestrictionStderrIsUnavailable() async {
+    let runner = FakeProcessRunner()
+    runner.responses = [
+        ("-J", fail("ERROR: The uploader has not made this video available in your country."))
+    ]
+    let r = YtDlpResolver(runner: runner, locator: makeLocator())
+    await #expect(throws: ResolveError.unavailable) {
+        try await r.resolve(u("https://vimeo.com/1"))
+    }
+}
+
+@Test func drmStderrIsDrmProtected() async {
+    let runner = FakeProcessRunner()
+    runner.responses = [("-J", fail("ERROR: [generic] x: This video is DRM protected."))]
+    let r = YtDlpResolver(runner: runner, locator: makeLocator())
+    await #expect(throws: ResolveError.drmProtected) {
+        try await r.resolve(u("https://x.com/1"))
+    }
+}
+
 @Test func privateVideoThrowsPrivateVideo() async {
     let runner = FakeProcessRunner()
     runner.responses = [("-J", fail(privateStderr))]
@@ -73,13 +105,57 @@ private let privateStderr =
     }
 }
 
-@Test func hlsOnlyVideoThrowsUnsupported() async throws {
+@Test func hlsOnlyVideoResolvesWithHlsFormats() async throws {
     let runner = FakeProcessRunner()
     runner.responses = [("-J", ok(try fixtureData("video_hls_only")))]
     let r = YtDlpResolver(runner: runner, locator: makeLocator())
-    await #expect(throws: ResolveError.unsupported) {
-        try await r.resolve(u("https://youtu.be/hls"))
+    let target = try await r.resolve(u("https://youtu.be/hls"))
+    guard case .single(let media) = target else {
+        Issue.record("expected .single")
+        return
     }
+    #expect(media.formats.contains { $0.delivery == .hls })
+}
+
+@Test func directNonYouTubeSiteResolves() async throws {
+    let runner = FakeProcessRunner()
+    runner.responses = [("-J", ok(try fixtureData("video_direct_vimeo")))]
+    let r = YtDlpResolver(runner: runner, locator: makeLocator())
+    let target = try await r.resolve(u("https://vimeo.com/12345"))
+    guard case .single(let media) = target else {
+        Issue.record("expected .single")
+        return
+    }
+    #expect(media.formats.allSatisfy { $0.delivery == .direct })
+    #expect(media.extractor == "vimeo")
+}
+
+@Test func flatPlaylistEntriesCarryTheirOwnSourceURL() async throws {
+    let runner = FakeProcessRunner()
+    runner.responses = [("--flat-playlist", ok(try fixtureData("playlist_soundcloud")))]
+    let r = YtDlpResolver(runner: runner, locator: makeLocator())
+    let target = try await r.resolve(u("https://soundcloud.com/artist/sets/mix"))
+    guard case .playlist(let title, let entries, _) = target else {
+        Issue.record("expected .playlist")
+        return
+    }
+    #expect(title == "Summer Mix")
+    #expect(entries.first?.sourceURL == u("https://soundcloud.com/artist/track-1"))
+    #expect(entries.count == 3)
+}
+
+@Test func singleResolveThatIsActuallyAPlaylistRoutesToPlaylist() async throws {
+    let runner = FakeProcessRunner()
+    runner.responses = [("-J", ok(try fixtureData("single_but_type_playlist")))]
+    let r = YtDlpResolver(runner: runner, locator: makeLocator())
+    // A plain single-video URL — the resolver only learns it is a playlist
+    // from the dump's `_type`.
+    let target = try await r.resolve(u("https://vimeo.com/999999"))
+    guard case .playlist(_, let entries, _) = target else {
+        Issue.record("expected .playlist")
+        return
+    }
+    #expect(entries.first?.sourceURL == u("https://vimeo.com/111111"))
 }
 
 @Test func cookieSourceAddsArguments() async throws {
@@ -105,12 +181,12 @@ private let privateStderr =
 
 @Test func detectsPlaylistAndChannelURLs() {
     let r = YtDlpResolver(runner: FakeProcessRunner(), locator: makeLocator())
-    #expect(r.isPlaylistURL(u("https://www.youtube.com/playlist?list=PLabc")))
-    #expect(r.isPlaylistURL(u("https://www.youtube.com/watch?v=abc&list=PLabc")))
-    #expect(r.isPlaylistURL(u("https://www.youtube.com/@SomeCreator")))
-    #expect(r.isPlaylistURL(u("https://www.youtube.com/channel/UCxyz/videos")))
-    #expect(!r.isPlaylistURL(u("https://www.youtube.com/watch?v=abc")))
-    #expect(!r.isPlaylistURL(u("https://youtu.be/abc")))
+    #expect(r.looksLikePlaylist(u("https://www.youtube.com/playlist?list=PLabc")))
+    #expect(r.looksLikePlaylist(u("https://www.youtube.com/watch?v=abc&list=PLabc")))
+    #expect(r.looksLikePlaylist(u("https://www.youtube.com/@SomeCreator")))
+    #expect(r.looksLikePlaylist(u("https://www.youtube.com/channel/UCxyz/videos")))
+    #expect(!r.looksLikePlaylist(u("https://www.youtube.com/watch?v=abc")))
+    #expect(!r.looksLikePlaylist(u("https://youtu.be/abc")))
 }
 
 @Test func resolvePlaylistReturnsCappedNewestEntries() async throws {
@@ -186,10 +262,10 @@ private let privateStderr =
     }
 }
 
-@Test func refreshRejectsANonYouTubeSourceURL() async {
+@Test func refreshRejectsAnUnsupportedSourceURL() async {
     let r = YtDlpResolver(runner: FakeProcessRunner(), locator: makeLocator())
     await #expect(throws: ResolveError.unsupported) {
-        try await r.refresh(sourceURL: u("https://vimeo.com/12345"), formatID: "1")
+        try await r.refresh(sourceURL: u("https://example.com/12345"), formatID: "1")
     }
 }
 

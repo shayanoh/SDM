@@ -64,7 +64,7 @@ public actor ManagedBinaries {
                 let binary = try LZFSE.decompress(blob)
                 try writeExecutable(binary, to: target)
                 switch asset.name {
-                case "ffmpeg": manifest.ffmpegVersion = asset.version
+                case "ffmpeg", "ffprobe": manifest.ffmpegVersion = asset.version
                 case "qjs": manifest.qjsVersion = asset.version
                 default: break
                 }

@@ -29,6 +29,41 @@ private func media(_ formats: [MediaFormat]) -> ResolvedMedia {
         extractor: "youtube", videoID: "abc", title: "T", durationSeconds: 10, formats: formats)
 }
 
+private func hls(_ id: String, _ h: Int, tbr: Double = 0) -> MediaFormat {
+    MediaFormat(
+        id: id, kind: .videoOnly, height: h, width: nil, vcodec: .h264, acodec: nil,
+        container: .mp4, filesize: nil, filesizeApprox: nil, tbr: tbr == 0 ? Double(h) : tbr,
+        url: URL(string: "https://x/\(id).m3u8")!, delivery: .hls)
+}
+
+@Test func directFormatsWinOverHls() {
+    let m = media([
+        vf("137", 720, .h264, .mp4), af("140", .aac, .m4a), hls("270", 1080),
+    ])
+    let choice = FormatSelector.pick(m, .default)
+    #expect(choice?.isWholesale == false)
+    #expect(choice?.video?.id == "137")
+}
+
+@Test func hlsOnlyMediaYieldsWholesaleChoice() {
+    let m = media([hls("270", 1080), hls("232", 720)])
+    let choice = FormatSelector.pick(m, .default)
+    #expect(choice?.isWholesale == true)
+    #expect(choice?.wholesaleSelector?.contains("height<=1080") == true)
+    #expect(choice?.outputContainer == .mp4)
+    #expect(choice?.video?.id == "270")
+}
+
+@Test func hlsAboveTheCapStillDownloads() {
+    let m = media([hls("2160", 2160)])
+    let choice = FormatSelector.pick(m, .default)
+    #expect(choice?.isWholesale == true)
+}
+
+@Test func nothingUsableYieldsNil() {
+    #expect(FormatSelector.pick(media([]), .default) == nil)
+}
+
 @Test func picksHighestResolutionThenCodecThenContainer() {
     let m = media([
         vf("v720av1", 720, .av1, .webm),

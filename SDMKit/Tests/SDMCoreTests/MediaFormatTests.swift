@@ -40,6 +40,24 @@ import Testing
     #expect(unknown.filesizeEffective == nil)
 }
 
+@Test func mediaFormatDefaultsToDirectDelivery() {
+    let f = MediaFormat(
+        id: "1", kind: .progressive, height: 720, width: 1280, vcodec: .h264,
+        acodec: .aac, container: .mp4, filesize: 100, filesizeApprox: nil, tbr: nil,
+        url: URL(string: "https://x/y")!)
+    #expect(f.delivery == .direct)
+    #expect(f.isDirect)
+}
+
+@Test func mediaFormatCarriesExplicitDelivery() {
+    let f = MediaFormat(
+        id: "2", kind: .videoOnly, height: 1080, width: 1920, vcodec: .h264,
+        acodec: nil, container: .mp4, filesize: nil, filesizeApprox: nil, tbr: nil,
+        url: URL(string: "https://x/m.m3u8")!, delivery: .hls)
+    #expect(f.delivery == .hls)
+    #expect(!f.isDirect)
+}
+
 @Test func mediaContainerFileExtension() {
     #expect(MediaContainer.mp4.fileExtension == "mp4")
     #expect(MediaContainer.other("mkv").fileExtension == "mkv")

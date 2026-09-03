@@ -1,0 +1,11 @@
+{
+  "_type": "playlist",
+  "id": "mix-set",
+  "title": "Summer Mix",
+  "extractor": "soundcloud:set",
+  "entries": [
+    { "_type": "url", "id": "t1", "title": "Track 1", "url": "https://soundcloud.com/artist/track-1", "ie_key": "Soundcloud" },
+    { "_type": "url", "id": "t2", "title": "Track 2", "url": "https://soundcloud.com/artist/track-2", "ie_key": "Soundcloud" },
+    { "_type": "url", "id": "t3", "title": "Track 3", "url": "https://soundcloud.com/artist/track-3", "ie_key": "Soundcloud" }
+  ]
+}
