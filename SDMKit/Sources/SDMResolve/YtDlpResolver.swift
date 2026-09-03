@@ -9,11 +9,6 @@ let resolveLog = Logger(subsystem: "com.sdm.SDMResolve", category: "yt-dlp")
 /// yt-dlp as a metadata extractor only — never as a downloader. Parent
 /// spec §4.4. All subprocess access goes through the injected `ProcessRunner`.
 public struct YtDlpResolver: LinkResolver {
-    public static let handledHosts: Set<String> = [
-        "youtube.com", "www.youtube.com", "m.youtube.com",
-        "music.youtube.com", "youtu.be",
-    ]
-
     private let runner: any ProcessRunner
     private let locator: BinaryLocator
     private let cookieSource: @Sendable () -> CookieSource
@@ -44,14 +39,18 @@ public struct YtDlpResolver: LinkResolver {
     }
 
     public func canHandle(_ url: URL) -> Bool {
-        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
-            let host = url.host?.lowercased()
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https"
         else { return false }
-        return YtDlpResolver.handledHosts.contains(host)
+        return SiteRegistry.match(url) != nil
+    }
+
+    /// yt-dlp tokens this site needs on every invocation (usually none).
+    private func perSiteArguments(for url: URL) -> [String] {
+        SiteRegistry.match(url)?.extraArgs ?? []
     }
 
     public func resolve(_ url: URL) async throws -> ResolvedTarget {
-        isPlaylistURL(url) ? try await resolvePlaylist(url) : try await resolveSingle(url)
+        looksLikePlaylist(url) ? try await resolvePlaylist(url) : try await resolveSingle(url)
     }
 
     public func refresh(sourceURL: URL, formatID: String) async throws -> RefreshedFormat {
@@ -61,7 +60,8 @@ public struct YtDlpResolver: LinkResolver {
         // one video; yt-dlp normalizes youtu.be / shorts / tracking params.
         let args =
             ["-J", "--no-warnings", "--no-playlist"]
-            + cookieSource().ytDlpArguments + [sourceURL.absoluteString]
+            + cookieSource().ytDlpArguments + perSiteArguments(for: sourceURL)
+            + [sourceURL.absoluteString]
         let out = try await runYtDlp(ytdlp, args, timeout: resolveTimeout)
         let dump = try decodeDump(out.stdout, context: "-J")
         guard let raw = (dump.formats ?? []).first(where: { $0.formatID == formatID }),
@@ -73,13 +73,20 @@ public struct YtDlpResolver: LinkResolver {
 
     // MARK: - Playlist detection
 
-    func isPlaylistURL(_ url: URL) -> Bool {
+    /// A cheap heuristic that only chooses which yt-dlp invocation to *try
+    /// first*. The parser then keys on yt-dlp's own `_type`, so a wrong
+    /// guess self-corrects (spec §5.2).
+    func looksLikePlaylist(_ url: URL) -> Bool {
         if let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
             items.contains(where: { $0.name == "list" })
         {
             return true
         }
-        return isChannelURL(url) || url.path.lowercased().hasPrefix("/playlist")
+        if isChannelURL(url) { return true }
+        let path = url.path.lowercased()
+        if path.hasPrefix("/playlist") || path.hasPrefix("/sets/") { return true }
+        return SiteRegistry.match(url)?.playlistPathHints
+            .contains(where: { path.hasPrefix($0) }) ?? false
     }
 
     private func isChannelURL(_ url: URL) -> Bool {
@@ -94,7 +101,7 @@ public struct YtDlpResolver: LinkResolver {
         let ytdlp = try await requireYtDlp()
         let args =
             ["-J", "--no-warnings", "--no-playlist"]
-            + cookieSource().ytDlpArguments + [url.absoluteString]
+            + cookieSource().ytDlpArguments + perSiteArguments(for: url) + [url.absoluteString]
         let out = try await runYtDlp(ytdlp, args, timeout: resolveTimeout)
         let dump = try decodeDump(out.stdout, context: "-J")
         return .single(try YtDlpParser.resolvedMedia(from: dump))
@@ -104,7 +111,7 @@ public struct YtDlpResolver: LinkResolver {
         let ytdlp = try await requireYtDlp()
         let args =
             ["-J", "--flat-playlist", "--no-warnings"]
-            + cookieSource().ytDlpArguments + [url.absoluteString]
+            + cookieSource().ytDlpArguments + perSiteArguments(for: url) + [url.absoluteString]
         let out = try await runYtDlp(ytdlp, args, timeout: playlistTimeout)
         let dump = try decodeDump(out.stdout, context: "--flat-playlist")
         let all = YtDlpParser.flatEntries(from: dump)

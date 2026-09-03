@@ -19,13 +19,14 @@ private let privateStderr =
 
 // MARK: - canHandle
 
-@Test func canHandleYouTubeHostsOnly() {
+@Test func canHandleUsesSiteRegistry() {
     let r = YtDlpResolver(runner: FakeProcessRunner(), locator: makeLocator())
     #expect(r.canHandle(u("https://www.youtube.com/watch?v=abc")))
     #expect(r.canHandle(u("https://youtu.be/abc")))
     #expect(r.canHandle(u("https://music.youtube.com/watch?v=abc")))
-    #expect(r.canHandle(u("https://m.youtube.com/watch?v=abc")))
-    #expect(!r.canHandle(u("https://vimeo.com/12345")))
+    #expect(r.canHandle(u("https://vimeo.com/12345")))
+    #expect(r.canHandle(u("https://www.tiktok.com/@a/video/1")))
+    #expect(r.canHandle(u("https://www.xvideos.com/video1/x")))
     #expect(!r.canHandle(u("https://example.com/video.mp4")))
     #expect(!r.canHandle(u("ftp://youtube.com/x")))
 }
@@ -105,12 +106,12 @@ private let privateStderr =
 
 @Test func detectsPlaylistAndChannelURLs() {
     let r = YtDlpResolver(runner: FakeProcessRunner(), locator: makeLocator())
-    #expect(r.isPlaylistURL(u("https://www.youtube.com/playlist?list=PLabc")))
-    #expect(r.isPlaylistURL(u("https://www.youtube.com/watch?v=abc&list=PLabc")))
-    #expect(r.isPlaylistURL(u("https://www.youtube.com/@SomeCreator")))
-    #expect(r.isPlaylistURL(u("https://www.youtube.com/channel/UCxyz/videos")))
-    #expect(!r.isPlaylistURL(u("https://www.youtube.com/watch?v=abc")))
-    #expect(!r.isPlaylistURL(u("https://youtu.be/abc")))
+    #expect(r.looksLikePlaylist(u("https://www.youtube.com/playlist?list=PLabc")))
+    #expect(r.looksLikePlaylist(u("https://www.youtube.com/watch?v=abc&list=PLabc")))
+    #expect(r.looksLikePlaylist(u("https://www.youtube.com/@SomeCreator")))
+    #expect(r.looksLikePlaylist(u("https://www.youtube.com/channel/UCxyz/videos")))
+    #expect(!r.looksLikePlaylist(u("https://www.youtube.com/watch?v=abc")))
+    #expect(!r.looksLikePlaylist(u("https://youtu.be/abc")))
 }
 
 @Test func resolvePlaylistReturnsCappedNewestEntries() async throws {
@@ -186,10 +187,10 @@ private let privateStderr =
     }
 }
 
-@Test func refreshRejectsANonYouTubeSourceURL() async {
+@Test func refreshRejectsAnUnsupportedSourceURL() async {
     let r = YtDlpResolver(runner: FakeProcessRunner(), locator: makeLocator())
     await #expect(throws: ResolveError.unsupported) {
-        try await r.refresh(sourceURL: u("https://vimeo.com/12345"), formatID: "1")
+        try await r.refresh(sourceURL: u("https://example.com/12345"), formatID: "1")
     }
 }
 
