@@ -55,6 +55,18 @@ private func hls(_ id: String, _ h: Int, tbr: Double = 0) -> MediaFormat {
     #expect(choice?.video?.id == "137")
 }
 
+@Test func directWinsOverHlsAtEqualResolutionEvenWithAWorseCodec() {
+    // Direct H.264 1080p vs streaming AV1 1080p → the resumable one wins.
+    let hlsAv1 = MediaFormat(
+        id: "av1hls", kind: .videoOnly, height: 1080, width: 1920, vcodec: .av1, acodec: nil,
+        container: .mp4, filesize: nil, filesizeApprox: nil, tbr: 2000,
+        url: URL(string: "https://x/av1.m3u8")!, delivery: .hls)
+    let m = media([vf("137", 1080, .h264, .mp4), af("140", .aac, .m4a), hlsAv1])
+    let choice = FormatSelector.pick(m, .default)
+    #expect(choice?.isWholesale == false)
+    #expect(choice?.video?.id == "137")
+}
+
 @Test func hlsOnlyMediaYieldsWholesaleChoice() {
     let m = media([hls("270", 1080), hls("232", 720)])
     let choice = FormatSelector.pick(m, .default)

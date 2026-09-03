@@ -234,6 +234,16 @@ struct LinkGrabberView: View {
                 statPill(label: "Offline", count: snapshot.offlineCount, color: theme.offlineColor)
                 statPill(
                     label: "Check failed", count: snapshot.failedCount, color: theme.failedColor)
+                Button("Add all to downloads") {
+                    addAllToDownloads(startImmediately: false)
+                }
+                .controlSize(.small)
+                .disabled(snapshot.packages.isEmpty)
+                Button("Add all and start") {
+                    addAllToDownloads(startImmediately: true)
+                }
+                .controlSize(.small)
+                .disabled(snapshot.packages.isEmpty)
                 if snapshot.isChecking {
                     Button("Cancel Checks", role: .destructive) {
                         Task { await controller.cancelChecks() }
@@ -304,6 +314,45 @@ struct LinkGrabberView: View {
                 name: name, note: note, items: items, startImmediately: startImmediately)
             for linkID in linkIDs {
                 await controller.removeLink(linkID)
+            }
+        }
+    }
+
+    /// The header's "Add all …" — hands every package off in one pass. Each
+    /// package's items and handoff ids are resolved up front so removing one
+    /// package's links (which reclusters) cannot disturb the packages still
+    /// pending in the loop.
+    private func addAllToDownloads(startImmediately: Bool) {
+        struct Plan {
+            let name: String
+            let note: String?
+            let items: [DownloadItem]
+            let linkIDs: [UUID]
+        }
+        var plans: [Plan] = []
+        var totalHeldBack = 0
+        for package in controller.snapshot.packages {
+            let (items, heldBack) = controller.downloadItems(inPackage: package.id)
+            totalHeldBack += heldBack
+            guard !items.isEmpty else { continue }
+            plans.append(
+                Plan(
+                    name: package.name, note: package.note, items: items,
+                    linkIDs: controller.handoffLinkIDs(inPackage: package.id)))
+        }
+        heldBackMessage =
+            totalHeldBack > 0
+            ? "\(totalHeldBack) item\(totalHeldBack == 1 ? "" : "s") held back — choose a format first"
+            : nil
+        guard !plans.isEmpty else { return }
+        Task {
+            for plan in plans {
+                await engineController.addItems(
+                    name: plan.name, note: plan.note, items: plan.items,
+                    startImmediately: startImmediately)
+                for linkID in plan.linkIDs {
+                    await controller.removeLink(linkID)
+                }
             }
         }
     }

@@ -113,11 +113,12 @@ public enum FormatSelector {
     /// auto-pick is always the first matching row in the list.
     public static func videoRankLess(_ a: MediaFormat, _ b: MediaFormat) -> Bool {
         if (a.height ?? 0) != (b.height ?? 0) { return (a.height ?? 0) > (b.height ?? 0) }
+        // At the same resolution a direct (resumable, no yt-dlp) stream wins
+        // — even over a fancier-codec HLS/DASH one.
+        if a.isDirect != b.isDirect { return a.isDirect }
         let ca = a.vcodec?.rank ?? Int.max
         let cb = b.vcodec?.rank ?? Int.max
         if ca != cb { return ca < cb }
-        // A direct (resumable) stream beats an equivalent HLS/DASH one.
-        if a.isDirect != b.isDirect { return a.isDirect }
         if a.container.rank != b.container.rank { return a.container.rank < b.container.rank }
         return (a.tbr ?? 0) > (b.tbr ?? 0)
     }
