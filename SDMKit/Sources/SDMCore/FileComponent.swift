@@ -10,11 +10,18 @@ import Foundation
 public enum ComponentOrigin: Equatable, Sendable, Hashable {
     case http
     case resolved(formatID: String)
+    /// A stream with no single `Range`-capable URL (HLS/DASH). The engine
+    /// hands `DownloadItem.sourceURL` to yt-dlp as a downloader with this
+    /// `-f` selector; the component is always non-resumable. Parent spec
+    /// `2026-09-03-multi-site-resolver-design.md` §6.4.
+    case wholesale(formatSelector: String)
 }
 
 extension ComponentOrigin: Codable {
-    private enum Kind: String, Codable { case http, resolved }
+    private enum Kind: String, Codable { case http, resolved, wholesale }
     private enum CodingKeys: String, CodingKey {
+        // `formatID` carries the yt-dlp format id for `.resolved` and the
+        // `-f` selector string for `.wholesale`.
         case kind, formatID
         // legacy: pre-slim `.resolved(extractor:videoID:formatID:)`
         case resolved
@@ -23,11 +30,17 @@ extension ComponentOrigin: Codable {
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         // Current shape: {"kind":"resolved","formatID":"137"} / {"kind":"http"}.
-        if let kind = try container.decodeIfPresent(Kind.self, forKey: .kind) {
+        // An unrecognized `kind` value (forward-compat) falls through to `.http`.
+        if let rawKind = try container.decodeIfPresent(String.self, forKey: .kind),
+            let kind = Kind(rawValue: rawKind)
+        {
             switch kind {
             case .http: self = .http
             case .resolved:
                 self = .resolved(formatID: try container.decode(String.self, forKey: .formatID))
+            case .wholesale:
+                self = .wholesale(
+                    formatSelector: try container.decode(String.self, forKey: .formatID))
             }
             return
         }
@@ -52,6 +65,9 @@ extension ComponentOrigin: Codable {
         case .resolved(let formatID):
             try container.encode(Kind.resolved, forKey: .kind)
             try container.encode(formatID, forKey: .formatID)
+        case .wholesale(let formatSelector):
+            try container.encode(Kind.wholesale, forKey: .kind)
+            try container.encode(formatSelector, forKey: .formatID)
         }
     }
 }

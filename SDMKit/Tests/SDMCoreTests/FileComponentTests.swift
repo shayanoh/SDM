@@ -22,10 +22,18 @@ private func url(_ s: String) -> URL { URL(string: s)! }
 }
 
 @Test func componentOriginRoundTripsThroughCodable() throws {
-    for origin in [ComponentOrigin.http, .resolved(formatID: "137")] {
+    for origin in [
+        ComponentOrigin.http, .resolved(formatID: "137"),
+        .wholesale(formatSelector: "bv*+ba/b"),
+    ] {
         let data = try JSONEncoder().encode(origin)
         #expect(try JSONDecoder().decode(ComponentOrigin.self, from: data) == origin)
     }
+}
+
+@Test func unknownOriginKindDecodesToHttp() throws {
+    let data = Data(#"{"kind":"martian"}"#.utf8)
+    #expect(try JSONDecoder().decode(ComponentOrigin.self, from: data) == .http)
 }
 
 @Test func legacyResolvedOriginDropsExtractorAndVideoIdKeepsFormatId() throws {
