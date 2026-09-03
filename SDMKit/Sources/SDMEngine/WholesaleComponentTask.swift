@@ -54,9 +54,13 @@ actor WholesaleComponentTask {
             throw error
         }
         guard FileManager.default.fileExists(atPath: destinationURL.path) else {
+            cleanupPartialOutput()
             state.reset()
             throw WholesaleError.failed(stderrTail: "yt-dlp produced no output file")
         }
+        // Success — remove any fragment / metadata siblings yt-dlp left, but
+        // keep the finished output file itself.
+        cleanupScratchOnly()
         return destinationURL
     }
 
@@ -91,11 +95,26 @@ actor WholesaleComponentTask {
 
     private func cleanupPartialOutput() {
         let fm = FileManager.default
-        try? fm.removeItem(at: destinationURL)
-        try? fm.removeItem(at: destinationURL.appendingPathExtension("part"))
-        let ytdlpTemp = destinationURL.deletingLastPathComponent()
-            .appendingPathComponent(destinationURL.lastPathComponent + ".ytdl")
-        try? fm.removeItem(at: ytdlpTemp)
+        let folder = destinationURL.deletingLastPathComponent()
+        // `destinationURL` for a wholesale component is the item's final
+        // output path, so sweep the output plus every yt-dlp scratch sibling
+        // (`.ytdl`, `.part*`, `.fragN`, `Clip.fNNN.*`, `Clip.temp.*`).
+        for url in YtDlpArtifacts.allFiles(
+            in: folder, outputFilename: destinationURL.lastPathComponent)
+        {
+            try? fm.removeItem(at: url)
+        }
+    }
+
+    /// Scratch siblings only — the finished output file stays.
+    private func cleanupScratchOnly() {
+        let fm = FileManager.default
+        let folder = destinationURL.deletingLastPathComponent()
+        for url in YtDlpArtifacts.scratchFiles(
+            in: folder, outputFilename: destinationURL.lastPathComponent)
+        {
+            try? fm.removeItem(at: url)
+        }
     }
 }
 
@@ -111,11 +130,30 @@ private final class ProgressState: @unchecked Sendable {
         lock.withLock {
             active = true
             phaseValue = progress.phase
-            if let t = progress.totalBytes { total = t }
+
             if let d = progress.downloadedBytes {
                 downloaded = max(downloaded, d)
-            } else if let fraction = progress.fraction, let t = total {
-                downloaded = max(downloaded, Int64(fraction * Double(t)))
+            }
+
+            // Total, re-derived on every report so the UI tracks yt-dlp's
+            // moving estimate. For a fragmented (HLS/DASH) download there is
+            // no real `total_bytes`; the reliable signal is the fragment
+            // ratio, so `downloaded / fraction` is used — this makes the
+            // synthesized progress bar exactly track yt-dlp's monotonic
+            // fragment progress. `progress.totalBytes` (a real size, or
+            // yt-dlp's float estimate before enough fragments exist) is the
+            // fallback. Parent spec §6.7.
+            if let fraction = progress.fraction, fraction >= 0.005, downloaded > 0 {
+                total = Int64(Double(downloaded) / fraction)
+            } else if let reported = progress.totalBytes {
+                total = reported
+            }
+
+            // A byte-less report that still carries a fraction (rare).
+            if progress.downloadedBytes == nil,
+                let fraction = progress.fraction, let total
+            {
+                downloaded = max(downloaded, Int64(fraction * Double(total)))
             }
         }
     }

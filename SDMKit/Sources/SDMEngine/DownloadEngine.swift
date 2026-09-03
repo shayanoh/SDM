@@ -880,6 +880,13 @@ public actor DownloadEngine {
             urls.append(SparseFile.incompleteURL(for: base))
             urls.append(ResumeSidecar.url(for: base))
         }
+        // A wholesale (yt-dlp-as-downloader) item can leave `.ytdl` / `.fragN`
+        // / pre-merge stream files a killed yt-dlp did not clean up.
+        if item.hasWholesaleComponent {
+            urls.append(
+                contentsOf: YtDlpArtifacts.scratchFiles(
+                    in: folder, outputFilename: item.outputFilename))
+        }
         return urls
     }
 

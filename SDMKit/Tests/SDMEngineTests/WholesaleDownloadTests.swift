@@ -56,6 +56,37 @@ private func wholesaleEngine(
     #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("P/Clip.mp4").path))
 }
 
+@Test func hlsFragmentProgressYieldsAMovingTotalAndMonotonicBar() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let fake = FakeWholesaleDownloader()
+    let engine = wholesaleEngine(dir: dir, downloader: fake)
+    let item = wholesaleItem()
+    await engine.add(DownloadPackage(name: "P", items: [item]))
+    await fake.waitUntilStarted()
+
+    // HLS: no real total_bytes; fraction comes from fragment index/count.
+    // total is derived as downloaded / fraction and moves each report.
+    fake.emit(WholesaleProgress(downloadedBytes: 1_000_000, fraction: 0.10))
+    var snap = await snapshotItem(item.id, in: engine)
+    let total1 = snap?.totalBytes
+    let frac1 = Double(snap?.completed.totalBytes ?? 0) / Double(total1 ?? 1)
+    #expect(total1 == 10_000_000)
+    #expect(abs(frac1 - 0.10) < 0.001)
+
+    fake.emit(WholesaleProgress(downloadedBytes: 3_000_000, fraction: 0.25))
+    snap = await snapshotItem(item.id, in: engine)
+    let total2 = snap?.totalBytes
+    let frac2 = Double(snap?.completed.totalBytes ?? 0) / Double(total2 ?? 1)
+    #expect(total2 == 12_000_000)  // estimate changed
+    #expect(total2 != total1)
+    #expect(frac2 > frac1)  // bar advanced
+
+    fake.finishSuccess()
+    try await engine.runUntilIdle()
+    #expect(await snapshotItem(item.id, in: engine)?.state == .completed)
+}
+
 @Test func pausingAWholesaleDownloadDiscardsPartialAndRestartsFromZero() async throws {
     let dir = try makeScratchDirectory()
     defer { try? FileManager.default.removeItem(at: dir) }

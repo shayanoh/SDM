@@ -4,15 +4,18 @@ import SDMCore
 /// Parses one line of `yt-dlp` output (as a wholesale downloader) into a
 /// `WholesaleProgress`, or `nil` for lines that carry no progress signal.
 ///
-/// The download lines come from
-/// `--progress-template "sdm:%(progress.status)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress._percent_str)s"`.
-/// Post-processing (merge / fixup / extract-audio) is detected by yt-dlp's
-/// own bracketed prefixes. Parent spec
+/// Download lines come from
+/// `--progress-template "sdm:%(progress.status)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.fragment_index)s|%(progress.fragment_count)s"`.
+///
+/// For HLS/DASH downloads `total_bytes` is `NA`, `total_bytes_estimate` is a
+/// float string, and the reliable progress signal is
+/// `fragment_index / fragment_count`. Post-processing (merge / fixup /
+/// extract-audio) is detected by yt-dlp's bracketed prefixes. Parent spec
 /// `2026-09-03-multi-site-resolver-design.md` §6.6.
 public enum WholesaleProgressParser {
     private static let postProcessMarkers = [
         "[merger]", "merging formats", "[extractaudio]", "[fixupm3u8]",
-        "[fixupm3u8]", "[videoconvertor]", "[fixup", "[videoremuxer]",
+        "[videoconvertor]", "[fixup", "[videoremuxer]",
     ]
 
     public static func parse(_ line: String) -> WholesaleProgress? {
@@ -31,12 +34,18 @@ public enum WholesaleProgressParser {
         let fields = body.split(separator: "|", omittingEmptySubsequences: false).map {
             String($0).trimmingCharacters(in: .whitespaces)
         }
-        guard fields.count >= 5 else { return nil }
+        guard fields.count >= 4 else { return nil }
 
-        let downloaded = int(fields[1])
-        let total = int(fields[2])
-        let estimate = int(fields[3])
-        let fraction = percent(fields[4])
+        let downloaded = number(fields[1])
+        let total = number(fields[2])
+        let estimate = number(fields[3])
+
+        var fraction: Double?
+        if fields.count >= 6,
+            let index = number(fields[4]), let count = number(fields[5]), count > 0
+        {
+            fraction = min(1, max(0, Double(index) / Double(count)))
+        }
 
         return WholesaleProgress(
             downloadedBytes: downloaded,
@@ -45,18 +54,17 @@ public enum WholesaleProgressParser {
             phase: .downloading)
     }
 
-    private static func int(_ raw: String) -> Int64? {
+    /// yt-dlp numbers arrive as integers, comma-grouped, or — for
+    /// `total_bytes_estimate` on fragmented downloads — floats (`"1.3e10"` /
+    /// `"13161769424.0"`). `NA` / `None` / empty → nil.
+    private static func number(_ raw: String) -> Int64? {
         let cleaned = raw.replacingOccurrences(of: ",", with: "")
-        guard !cleaned.isEmpty, cleaned.uppercased() != "NA", cleaned != "None",
-            let value = Int64(cleaned), value >= 0
+        guard !cleaned.isEmpty, cleaned.uppercased() != "NA", cleaned != "None"
         else { return nil }
-        return value
-    }
-
-    private static func percent(_ raw: String) -> Double? {
-        let cleaned = raw.replacingOccurrences(of: "%", with: "")
-            .trimmingCharacters(in: .whitespaces)
-        guard let value = Double(cleaned), value.isFinite, value >= 0 else { return nil }
-        return value / 100
+        if let value = Int64(cleaned), value >= 0 { return value }
+        if let value = Double(cleaned), value.isFinite, value >= 0 {
+            return Int64(value.rounded())
+        }
+        return nil
     }
 }

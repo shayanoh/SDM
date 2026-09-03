@@ -50,7 +50,8 @@ public struct YtDlpWholesaleDownloader: WholesaleDownloader {
                 "--no-warnings",
                 "--progress-template",
                 "sdm:%(progress.status)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s"
-                    + "|%(progress.total_bytes_estimate)s|%(progress._percent_str)s",
+                    + "|%(progress.total_bytes_estimate)s|%(progress.fragment_index)s"
+                    + "|%(progress.fragment_count)s",
                 "--merge-output-format", container,
                 "--ffmpeg-location", ffmpegDir,
                 "-o", destination.path,

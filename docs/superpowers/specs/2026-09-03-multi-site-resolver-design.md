@@ -3,8 +3,22 @@
 Date: 2026-09-03
 Status: **IMPLEMENTED — merged to `main` 2026-09-03 on branch
 `feat/multi-site-resolver`.** Plan:
-`docs/superpowers/plans/2026-09-03-multi-site-resolver.md`. ~489 package
-tests, app target builds. Manual real-network testing still owed.
+`docs/superpowers/plans/2026-09-03-multi-site-resolver.md`. ~496 package
+tests, app target builds.
+
+**Post-merge fixes (2026-09-03, from real Twitch-VOD testing):**
+- Wholesale progress template now emits `fragment_index` / `fragment_count`
+  instead of `_percent_str`; `WholesaleProgressParser` parses yt-dlp's
+  **float**-formatted `total_bytes_estimate` (it was silently dropped, so
+  HLS downloads showed total 0 / progress stuck at 0%).
+  `WholesaleComponentTask` derives the item total as `downloaded / fraction`
+  from the fragment ratio (re-evaluated every report, so the UI tracks
+  yt-dlp's moving estimate) and falls back to the reported estimate before
+  the first fragment.
+- `YtDlpArtifacts` sweeps the scratch files a killed yt-dlp leaves
+  (`Clip.mp4.ytdl`, `Clip.mp4-FragN`, `Clip.fNNN.*`, `Clip.temp.mp4`) on
+  pause / failure / item removal — the old cleanup only knew `.part` and
+  `.ytdl`.
 Supersedes: nothing. Extends
 `docs/superpowers/specs/2026-09-02-phase-5-youtube-resolver-design.md` (the
 resolver seam) and closes `todo.md` item **#2 (HLS/DASH wholesale fallback)**.
