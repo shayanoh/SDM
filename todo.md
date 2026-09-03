@@ -21,13 +21,14 @@ self-reviews under `docs/superpowers/plans/`. Each was either kept as-is
   line. Needs an engine `snapshot()` addition. *(Spec §5.3 / §9.3; deferred
   through Parts 3–5.)*
 
-- [ ] **2. HLS/DASH wholesale fallback.** A video that exposes only segmented
-  `.m3u8` / DASH manifests with no single `Range`-capable URL is currently
-  marked `unsupported` in the grabber and not handed off (live-stream VODs,
-  some brand-new uploads). Add the yt-dlp-as-downloader path: hand the URL to
-  yt-dlp to download wholesale, parse progress from its stdout text.
-  Non-resumable, degraded path. *(Spec §2; the `unsupported` state + its test
-  already exist.)*
+- [x] **2. HLS/DASH wholesale fallback.** DONE 2026-09-03 — see
+  `docs/superpowers/specs/2026-09-03-multi-site-resolver-design.md` §6 and its
+  plan. `FormatSelector` returns a wholesale `FormatChoice` when no direct
+  format fits; `WholesaleComponentTask` (engine) drives an injected
+  `YtDlpWholesaleDownloader` (resolve) with progress parsed from yt-dlp
+  stdout, progress kept as a synthesized contiguous `RangeSet`. Non-resumable;
+  the scheduler reserves the slot. Delivered alongside the multi-site
+  registry (`SiteRegistry`, ~50 sites) and generalized playlist handling.
 
 - [ ] **3. Proactive URL refresh.** `googlevideo` URLs expire after a few
   hours. Refresh reactively-on-403 already works (`URLRefreshTests`). Add:

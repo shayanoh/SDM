@@ -29,17 +29,17 @@ struct SettingsView: View {
     @State private var autoAddAndStartOnGrab = GrabberSettings.autoAddAndStartOnGrab
     @State private var deepSniffEnabled = GrabberSettings.deepSniffEnabled
     @State private var autoClearInterval = GrabberSettings.autoClearGrabbedLinksAfter
-    @State private var ytMaxHeight = YouTubeSettingsStore.maxHeight
-    @State private var ytAllowAV1 = YouTubeSettingsStore.allowAV1
-    @State private var ytAllowVP9 = YouTubeSettingsStore.allowVP9
-    @State private var ytAllowH264 = YouTubeSettingsStore.allowH264
-    @State private var ytAllowMP4 = YouTubeSettingsStore.allowMP4
-    @State private var ytAllowWebM = YouTubeSettingsStore.allowWebM
-    @State private var ytAllowOpus = YouTubeSettingsStore.allowOpus
-    @State private var ytAllowAAC = YouTubeSettingsStore.allowAAC
-    @State private var ytMaxPlaylistVideos = YouTubeSettingsStore.maxPlaylistVideos
-    @State private var ytCookieSource = YouTubeSettingsStore.cookieSource
-    @State private var ytDlpChannel = YouTubeSettingsStore.ytDlpChannel
+    @State private var ytMaxHeight = MediaSitesSettingsStore.maxHeight
+    @State private var ytAllowAV1 = MediaSitesSettingsStore.allowAV1
+    @State private var ytAllowVP9 = MediaSitesSettingsStore.allowVP9
+    @State private var ytAllowH264 = MediaSitesSettingsStore.allowH264
+    @State private var ytAllowMP4 = MediaSitesSettingsStore.allowMP4
+    @State private var ytAllowWebM = MediaSitesSettingsStore.allowWebM
+    @State private var ytAllowOpus = MediaSitesSettingsStore.allowOpus
+    @State private var ytAllowAAC = MediaSitesSettingsStore.allowAAC
+    @State private var ytMaxPlaylistVideos = MediaSitesSettingsStore.maxPlaylistVideos
+    @State private var ytCookieSource = MediaSitesSettingsStore.cookieSource
+    @State private var ytDlpChannel = MediaSitesSettingsStore.ytDlpChannel
     @State private var downloadFinishedEnabled = NotificationSettings.downloadFinishedEnabled
     @State private var packageFinishedEnabled = NotificationSettings.packageFinishedEnabled
     @State private var downloadFailedEnabled = NotificationSettings.downloadFailedEnabled
@@ -70,8 +70,8 @@ struct SettingsView: View {
                 appearanceTab.tabItem { Label("Appearance", systemImage: "paintbrush") }
                 downloadsTab.tabItem { Label("Downloads", systemImage: "arrow.down.circle") }
                 linkgrabberTab.tabItem { Label("Linkgrabber", systemImage: "link") }
-                youtubeTab.tabItem {
-                    Label("YouTube", systemImage: "play.rectangle.on.rectangle")
+                mediaSitesTab.tabItem {
+                    Label("Media Sites", systemImage: "film.stack")
                 }
                 notificationsTab.tabItem { Label("Notifications", systemImage: "bell") }
             }
@@ -209,7 +209,7 @@ struct SettingsView: View {
         .background(theme.surfacePrimaryColor)
     }
 
-    private var youtubeTab: some View {
+    private var mediaSitesTab: some View {
         // Only one codec/container/audio may be the last one left checked —
         // `FormatSelector` must never get an empty allowlist (spec §9.4).
         let videoCount = [ytAllowAV1, ytAllowVP9, ytAllowH264].filter { $0 }.count
@@ -221,7 +221,7 @@ struct SettingsView: View {
                     Text("Maximum resolution")
                     Spacer()
                     Picker("", selection: $ytMaxHeight) {
-                        ForEach(YouTubeSettingsStore.resolutionChoices, id: \.self) { h in
+                        ForEach(MediaSitesSettingsStore.resolutionChoices, id: \.self) { h in
                             Text("\(h)p").tag(h)
                         }
                     }
@@ -234,18 +234,24 @@ struct SettingsView: View {
                         range: 10...200)
                 }
             }
-            SettingsSection(title: "Video codecs", theme: theme) {
-                Toggle("AV1", isOn: $ytAllowAV1).disabled(ytAllowAV1 && videoCount == 1)
-                Toggle("VP9", isOn: $ytAllowVP9).disabled(ytAllowVP9 && videoCount == 1)
-                Toggle("H.264", isOn: $ytAllowH264).disabled(ytAllowH264 && videoCount == 1)
-            }
-            SettingsSection(title: "Containers", theme: theme) {
-                Toggle("MP4", isOn: $ytAllowMP4).disabled(ytAllowMP4 && containerCount == 1)
-                Toggle("WebM", isOn: $ytAllowWebM).disabled(ytAllowWebM && containerCount == 1)
-            }
-            SettingsSection(title: "Audio codecs", theme: theme) {
-                Toggle("Opus", isOn: $ytAllowOpus).disabled(ytAllowOpus && audioCount == 1)
-                Toggle("AAC", isOn: $ytAllowAAC).disabled(ytAllowAAC && audioCount == 1)
+            HStack(alignment: .top, spacing: 16) {
+                SettingsSection(title: "Video codecs", theme: theme) {
+                    Toggle("AV1", isOn: $ytAllowAV1).disabled(ytAllowAV1 && videoCount == 1)
+                    Toggle("VP9", isOn: $ytAllowVP9).disabled(ytAllowVP9 && videoCount == 1)
+                    Toggle("H.264", isOn: $ytAllowH264).disabled(ytAllowH264 && videoCount == 1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                SettingsSection(title: "Containers", theme: theme) {
+                    Toggle("MP4", isOn: $ytAllowMP4).disabled(ytAllowMP4 && containerCount == 1)
+                    Toggle("WebM", isOn: $ytAllowWebM)
+                        .disabled(ytAllowWebM && containerCount == 1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                SettingsSection(title: "Audio codecs", theme: theme) {
+                    Toggle("Opus", isOn: $ytAllowOpus).disabled(ytAllowOpus && audioCount == 1)
+                    Toggle("AAC", isOn: $ytAllowAAC).disabled(ytAllowAAC && audioCount == 1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             SettingsSection(title: "Authentication", theme: theme) {
                 HStack {
@@ -292,7 +298,7 @@ struct SettingsView: View {
                 .labelsHidden()
                 .frame(width: 120)
                 .onChange(of: ytDlpChannel) { _, new in
-                    YouTubeSettingsStore.ytDlpChannel = new
+                    MediaSitesSettingsStore.ytDlpChannel = new
                     Task { await managedBinaries.checkNow() }
                 }
             }
@@ -306,6 +312,11 @@ struct SettingsView: View {
             Divider()
             HStack {
                 Text("ffmpeg")
+                Spacer()
+                Text("\(status.ffmpegVersion ?? "—")  (bundled)").foregroundStyle(.secondary)
+            }
+            HStack {
+                Text("ffprobe")
                 Spacer()
                 Text("\(status.ffmpegVersion ?? "—")  (bundled)").foregroundStyle(.secondary)
             }
@@ -372,16 +383,16 @@ struct SettingsView: View {
         GrabberSettings.autoAddAndStartOnGrab = autoAddAndStartOnGrab
         GrabberSettings.deepSniffEnabled = deepSniffEnabled
         GrabberSettings.autoClearGrabbedLinksAfter = autoClearInterval
-        YouTubeSettingsStore.maxHeight = ytMaxHeight
-        YouTubeSettingsStore.allowAV1 = ytAllowAV1
-        YouTubeSettingsStore.allowVP9 = ytAllowVP9
-        YouTubeSettingsStore.allowH264 = ytAllowH264
-        YouTubeSettingsStore.allowMP4 = ytAllowMP4
-        YouTubeSettingsStore.allowWebM = ytAllowWebM
-        YouTubeSettingsStore.allowOpus = ytAllowOpus
-        YouTubeSettingsStore.allowAAC = ytAllowAAC
-        YouTubeSettingsStore.maxPlaylistVideos = ytMaxPlaylistVideos
-        YouTubeSettingsStore.cookieSource = ytCookieSource
+        MediaSitesSettingsStore.maxHeight = ytMaxHeight
+        MediaSitesSettingsStore.allowAV1 = ytAllowAV1
+        MediaSitesSettingsStore.allowVP9 = ytAllowVP9
+        MediaSitesSettingsStore.allowH264 = ytAllowH264
+        MediaSitesSettingsStore.allowMP4 = ytAllowMP4
+        MediaSitesSettingsStore.allowWebM = ytAllowWebM
+        MediaSitesSettingsStore.allowOpus = ytAllowOpus
+        MediaSitesSettingsStore.allowAAC = ytAllowAAC
+        MediaSitesSettingsStore.maxPlaylistVideos = ytMaxPlaylistVideos
+        MediaSitesSettingsStore.cookieSource = ytCookieSource
         NotificationSettings.downloadFinishedEnabled = downloadFinishedEnabled
         NotificationSettings.packageFinishedEnabled = packageFinishedEnabled
         NotificationSettings.downloadFailedEnabled = downloadFailedEnabled

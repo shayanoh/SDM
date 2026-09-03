@@ -27,6 +27,7 @@ import Testing
     m.ffmpegVersion = "7.1"
     m.qjsVersion = "0.10.0"
     #expect(m.version(for: "ffmpeg") == "7.1")
+    #expect(m.version(for: "ffprobe") == "7.1")
     #expect(m.version(for: "qjs") == "0.10.0")
     #expect(m.version(for: "yt-dlp") == nil)
 }

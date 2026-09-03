@@ -104,11 +104,16 @@ final class EngineController {
             ),
             resolver: YtDlpResolver(
                 runner: processRunner, locator: binaryLocator,
-                cookieSource: { YouTubeSettingsStore.cookieSource },
-                maxPlaylistVideos: { YouTubeSettingsStore.maxPlaylistVideos },
+                cookieSource: { MediaSitesSettingsStore.cookieSource },
+                maxPlaylistVideos: { MediaSitesSettingsStore.maxPlaylistVideos },
                 extraArguments: { ManagedBinariesController.ytDlpExtraArguments }
             ),
-            muxer: FFmpegMuxer(runner: processRunner, locator: binaryLocator)
+            muxer: FFmpegMuxer(runner: processRunner, locator: binaryLocator),
+            wholesaleDownloader: YtDlpWholesaleDownloader(
+                runner: processRunner, locator: binaryLocator,
+                cookieSource: { MediaSitesSettingsStore.cookieSource },
+                extraArguments: { ManagedBinariesController.ytDlpExtraArguments }
+            )
         )
     }
 

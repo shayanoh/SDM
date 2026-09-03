@@ -41,7 +41,7 @@ final class ManagedBinariesController {
             fetcher: URLSessionBinaryFetcher(),
             runner: SystemProcessRunner(),
             vendorAssets: { Self.bundledVendorAssets() },
-            channel: { YouTubeSettingsStore.ytDlpChannel },
+            channel: { MediaSitesSettingsStore.ytDlpChannel },
             onBinariesChanged: { await locator.invalidate() },
             notify: notify)
     }
@@ -89,16 +89,21 @@ final class ManagedBinariesController {
         else { return [] }
 
         #if arch(arm64)
-            let ffmpegBlob = "ffmpeg-arm64"
+            let arch = "arm64"
         #else
-            let ffmpegBlob = "ffmpeg-x86_64"
+            let arch = "x86_64"
         #endif
 
         var assets: [VendorAsset] = []
-        if let v = versions["ffmpegVersion"], v != "0",
-            let url = Bundle.main.url(forResource: ffmpegBlob, withExtension: "lzfse")
-        {
-            assets.append(VendorAsset(name: "ffmpeg", compressedURL: url, version: v))
+        if let v = versions["ffmpegVersion"], v != "0" {
+            if let url = Bundle.main.url(forResource: "ffmpeg-\(arch)", withExtension: "lzfse") {
+                assets.append(VendorAsset(name: "ffmpeg", compressedURL: url, version: v))
+            }
+            // ffprobe ships from the same build; yt-dlp's HLS/DASH fixup
+            // postprocessors need it.
+            if let url = Bundle.main.url(forResource: "ffprobe-\(arch)", withExtension: "lzfse") {
+                assets.append(VendorAsset(name: "ffprobe", compressedURL: url, version: v))
+            }
         }
         if let v = versions["qjsVersion"], v != "0",
             let url = Bundle.main.url(forResource: "qjs", withExtension: "lzfse")

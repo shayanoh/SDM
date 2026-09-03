@@ -364,7 +364,7 @@ private struct MediaLinkRow: View {
     @ViewBuilder
     private func formatPicker(_ media: SDMCore.ResolvedMedia) -> some View {
         let options = MediaFormatMenu.options(
-            for: media, preferences: YouTubeSettingsStore.qualityPreferences)
+            for: media, preferences: MediaSitesSettingsStore.qualityPreferences)
         let matching = options.filter(\.matchesPreferences)
         let nonMatching = options.filter { !$0.matchesPreferences }
         Menu {

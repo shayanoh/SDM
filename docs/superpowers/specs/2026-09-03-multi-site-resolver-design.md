@@ -1,8 +1,10 @@
 # SDM — Multi-Site Resolver & HLS/DASH Wholesale Fallback: Design
 
 Date: 2026-09-03
-Status: **DESIGN — approved 2026-09-03, implementation in progress on
-`feat/multi-site-resolver`.**
+Status: **IMPLEMENTED — merged to `main` 2026-09-03 on branch
+`feat/multi-site-resolver`.** Plan:
+`docs/superpowers/plans/2026-09-03-multi-site-resolver.md`. ~489 package
+tests, app target builds. Manual real-network testing still owed.
 Supersedes: nothing. Extends
 `docs/superpowers/specs/2026-09-02-phase-5-youtube-resolver-design.md` (the
 resolver seam) and closes `todo.md` item **#2 (HLS/DASH wholesale fallback)**.
