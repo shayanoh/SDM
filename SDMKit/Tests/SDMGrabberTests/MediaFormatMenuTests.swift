@@ -43,6 +43,19 @@ private func media(_ formats: [MediaFormat]) -> ResolvedMedia {
     #expect(opts[0].choice.audio?.id == "aac140")
 }
 
+@Test func hlsVariantsAppearAsStreamedOptionsAfterDirectOnes() {
+    let hls1080 = MediaFormat(
+        id: "270", kind: .videoOnly, height: 1080, width: nil, vcodec: .h264, acodec: nil,
+        container: .mp4, filesize: nil, filesizeApprox: nil, tbr: 3000,
+        url: URL(string: "https://x/270.m3u8")!, delivery: .hls)
+    let m = media([vf("v", 720, .h264, .mp4), af("a", .aac, .m4a), hls1080])
+    let opts = MediaFormatMenu.options(for: m, preferences: .default)
+    #expect(opts.first?.isWholesale == false)
+    #expect(opts.last?.isWholesale == true)
+    #expect(opts.last?.choice.wholesaleSelector == "270+ba/b")
+    #expect(opts.last?.label.contains("streamed") == true)
+}
+
 @Test func labelMarksApproximateSizes() {
     let v = MediaFormat(
         id: "v", kind: .videoOnly, height: 1080, width: 1920, vcodec: .av1, acodec: nil,

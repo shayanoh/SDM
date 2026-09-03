@@ -8,6 +8,9 @@ public struct MediaFormatOption: Identifiable, Sendable, Equatable {
     public var label: String
     public var choice: FormatChoice
     public var matchesPreferences: Bool
+    /// This option is an HLS/DASH stream that yt-dlp downloads wholesale
+    /// (non-resumable). The picker badges it "streamed".
+    public var isWholesale: Bool = false
 }
 
 /// Pure builder of the flat, match-first format-picker list. Matching
@@ -52,7 +55,29 @@ public enum MediaFormatMenu {
             guard let lv = lhs.choice.video, let rv = rhs.choice.video else { return false }
             return FormatSelector.videoRankLess(lv, rv)
         }
-        return ranked
+
+        // HLS/DASH variants land after every direct option, tallest first.
+        let streamed =
+            media.formats
+            .filter { !$0.isDirect && ($0.kind == .videoOnly || $0.kind == .progressive) }
+            .sorted { ($0.height ?? 0) > ($1.height ?? 0) }
+            .map { wholesaleOption(for: $0) }
+
+        return ranked + streamed
+    }
+
+    private static func wholesaleOption(for format: MediaFormat) -> MediaFormatOption {
+        let selector =
+            format.kind == .progressive ? format.id : format.id + "+ba/b"
+        let height = format.height.map { "\($0)p" } ?? "auto"
+        return MediaFormatOption(
+            id: "w:\(format.id)",
+            label: "\(height) · streamed",
+            choice: FormatChoice(
+                video: format, audio: nil, outputContainer: .mp4,
+                estimatedBytes: format.filesizeEffective, wholesaleSelector: selector),
+            matchesPreferences: false,
+            isWholesale: true)
     }
 
     private static func option(
