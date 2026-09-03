@@ -84,9 +84,11 @@ public struct YtDlpResolver: LinkResolver {
         }
         if isChannelURL(url) { return true }
         let path = url.path.lowercased()
-        if path.hasPrefix("/playlist") || path.hasPrefix("/sets/") { return true }
+        if path.hasPrefix("/playlist") || path.contains("/sets/") { return true }
+        // Hints are matched anywhere in the path — a set / album / channel
+        // segment (`/sets/`, `/album/`, `/r/`) usually sits mid-path.
         return SiteRegistry.match(url)?.playlistPathHints
-            .contains(where: { path.hasPrefix($0) }) ?? false
+            .contains(where: { path.contains($0) }) ?? false
     }
 
     private func isChannelURL(_ url: URL) -> Bool {
@@ -104,6 +106,10 @@ public struct YtDlpResolver: LinkResolver {
             + cookieSource().ytDlpArguments + perSiteArguments(for: url) + [url.absoluteString]
         let out = try await runYtDlp(ytdlp, args, timeout: resolveTimeout)
         let dump = try decodeDump(out.stdout, context: "-J")
+        // Some sites ignore `--no-playlist` and hand back a playlist anyway.
+        if dump.type == "playlist" {
+            return try playlistTarget(from: dump, url: url)
+        }
         return .single(try YtDlpParser.resolvedMedia(from: dump))
     }
 
@@ -114,14 +120,22 @@ public struct YtDlpResolver: LinkResolver {
             + cookieSource().ytDlpArguments + perSiteArguments(for: url) + [url.absoluteString]
         let out = try await runYtDlp(ytdlp, args, timeout: playlistTimeout)
         let dump = try decodeDump(out.stdout, context: "--flat-playlist")
-        let all = YtDlpParser.flatEntries(from: dump)
+        // The guess was wrong and this is actually a single video.
+        if (dump.entries ?? []).isEmpty, let formats = dump.formats, !formats.isEmpty {
+            return .single(try YtDlpParser.resolvedMedia(from: dump))
+        }
+        return try playlistTarget(from: dump, url: url)
+    }
+
+    private func playlistTarget(from dump: YtDlpDump, url: URL) throws -> ResolvedTarget {
+        let all = YtDlpParser.flatEntries(from: dump, relativeTo: url)
         guard !all.isEmpty else { throw ResolveError.unavailable }
         let cap = max(10, min(200, maxPlaylistVideos()))
         let kept = isChannelURL(url) ? Array(all.prefix(cap)) : Array(all.suffix(cap))
         let entries = kept.map {
             ResolvedMedia(
-                extractor: "youtube", videoID: $0.videoID, title: $0.title,
-                durationSeconds: nil, formats: [])
+                extractor: "", videoID: $0.videoID, title: $0.title,
+                durationSeconds: nil, formats: [], sourceURL: $0.sourceURL)
         }
         return .playlist(
             title: dump.title ?? "Playlist", entries: entries, totalAvailable: all.count)

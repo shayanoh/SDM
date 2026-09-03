@@ -6,9 +6,14 @@ struct YtDlpDump: Decodable {
     var title: String?
     var duration: Double?
     var extractor: String?
-    var _type: String?
+    var type: String?
     var formats: [YtDlpFormat]?
     var entries: [YtDlpEntry]?
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, duration, extractor, formats, entries
+        case type = "_type"
+    }
 }
 
 struct YtDlpFormat: Decodable {
@@ -37,10 +42,12 @@ struct YtDlpEntry: Decodable {
     var id: String?
     var title: String?
     var url: String?
+    var webpageURL: String?
     var ieKey: String?
 
     enum CodingKeys: String, CodingKey {
         case id, title, url
+        case webpageURL = "webpage_url"
         case ieKey = "ie_key"
     }
 }
@@ -73,18 +80,22 @@ enum YtDlpParser {
         }
     }
 
-    static func hasDirectURL(_ f: YtDlpFormat) -> Bool {
-        guard let url = f.url, !url.isEmpty else { return false }
-        switch f.proto {
-        case nil, "https", "http", "https_native": return true
-        default: return false
+    /// yt-dlp `protocol` → how the engine must fetch it. `nil` ⇒ this
+    /// format is not usable (rtmp, ism, mss, …). Parent spec §6.1.
+    static func deliveryFor(proto raw: String?) -> MediaDelivery? {
+        switch (raw ?? "").lowercased() {
+        case "", "https", "http", "https_native": return .direct
+        case "m3u8", "m3u8_native": return .hls
+        case "http_dash_segments": return .dash
+        default: return nil
         }
     }
 
     static func mediaFormat(from f: YtDlpFormat) -> MediaFormat? {
-        guard let id = f.formatID, hasDirectURL(f),
-            let urlString = f.url, let url = URL(string: urlString),
-            (f.ext ?? "") != "mhtml"
+        guard let id = f.formatID,
+            let urlString = f.url, !urlString.isEmpty, let url = URL(string: urlString),
+            (f.ext ?? "") != "mhtml",
+            let delivery = deliveryFor(proto: f.proto)
         else { return nil }
 
         let vcodec = codecFor(vcodec: f.vcodec)
@@ -100,7 +111,8 @@ enum YtDlpParser {
         return MediaFormat(
             id: id, kind: kind, height: f.height, width: f.width,
             vcodec: vcodec, acodec: acodec, container: container(ext: f.ext),
-            filesize: f.filesize, filesizeApprox: f.filesizeApprox, tbr: f.tbr, url: url)
+            filesize: f.filesize, filesizeApprox: f.filesizeApprox, tbr: f.tbr, url: url,
+            delivery: delivery)
     }
 
     static func resolvedMedia(from dump: YtDlpDump) throws -> ResolvedMedia {
@@ -117,10 +129,20 @@ enum YtDlpParser {
             formats: formats)
     }
 
-    static func flatEntries(from dump: YtDlpDump) -> [(videoID: String, title: String)] {
+    /// Playlist / channel entries with their own page URL. `entry.url` (the
+    /// `--flat-playlist` field) is preferred, then `webpage_url` (present in
+    /// a full `-J` playlist dump); relative values are resolved against the
+    /// playlist URL. Entries with no usable URL are dropped. Parent spec §5.3.
+    static func flatEntries(
+        from dump: YtDlpDump, relativeTo base: URL
+    ) -> [(sourceURL: URL, videoID: String, title: String)] {
         (dump.entries ?? []).compactMap { entry in
-            guard let id = entry.id else { return nil }
-            return (id, entry.title ?? id)
+            let raw = entry.url ?? entry.webpageURL
+            guard let raw, !raw.isEmpty,
+                let resolved = URL(string: raw, relativeTo: base)?.absoluteURL
+            else { return nil }
+            let id = entry.id ?? resolved.lastPathComponent
+            return (resolved, id, entry.title ?? id)
         }
     }
 }

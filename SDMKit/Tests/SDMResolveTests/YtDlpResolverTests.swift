@@ -74,13 +74,57 @@ private let privateStderr =
     }
 }
 
-@Test func hlsOnlyVideoThrowsUnsupported() async throws {
+@Test func hlsOnlyVideoResolvesWithHlsFormats() async throws {
     let runner = FakeProcessRunner()
     runner.responses = [("-J", ok(try fixtureData("video_hls_only")))]
     let r = YtDlpResolver(runner: runner, locator: makeLocator())
-    await #expect(throws: ResolveError.unsupported) {
-        try await r.resolve(u("https://youtu.be/hls"))
+    let target = try await r.resolve(u("https://youtu.be/hls"))
+    guard case .single(let media) = target else {
+        Issue.record("expected .single")
+        return
     }
+    #expect(media.formats.contains { $0.delivery == .hls })
+}
+
+@Test func directNonYouTubeSiteResolves() async throws {
+    let runner = FakeProcessRunner()
+    runner.responses = [("-J", ok(try fixtureData("video_direct_vimeo")))]
+    let r = YtDlpResolver(runner: runner, locator: makeLocator())
+    let target = try await r.resolve(u("https://vimeo.com/12345"))
+    guard case .single(let media) = target else {
+        Issue.record("expected .single")
+        return
+    }
+    #expect(media.formats.allSatisfy { $0.delivery == .direct })
+    #expect(media.extractor == "vimeo")
+}
+
+@Test func flatPlaylistEntriesCarryTheirOwnSourceURL() async throws {
+    let runner = FakeProcessRunner()
+    runner.responses = [("--flat-playlist", ok(try fixtureData("playlist_soundcloud")))]
+    let r = YtDlpResolver(runner: runner, locator: makeLocator())
+    let target = try await r.resolve(u("https://soundcloud.com/artist/sets/mix"))
+    guard case .playlist(let title, let entries, _) = target else {
+        Issue.record("expected .playlist")
+        return
+    }
+    #expect(title == "Summer Mix")
+    #expect(entries.first?.sourceURL == u("https://soundcloud.com/artist/track-1"))
+    #expect(entries.count == 3)
+}
+
+@Test func singleResolveThatIsActuallyAPlaylistRoutesToPlaylist() async throws {
+    let runner = FakeProcessRunner()
+    runner.responses = [("-J", ok(try fixtureData("single_but_type_playlist")))]
+    let r = YtDlpResolver(runner: runner, locator: makeLocator())
+    // A plain single-video URL — the resolver only learns it is a playlist
+    // from the dump's `_type`.
+    let target = try await r.resolve(u("https://vimeo.com/999999"))
+    guard case .playlist(_, let entries, _) = target else {
+        Issue.record("expected .playlist")
+        return
+    }
+    #expect(entries.first?.sourceURL == u("https://vimeo.com/111111"))
 }
 
 @Test func cookieSourceAddsArguments() async throws {

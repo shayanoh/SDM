@@ -1,0 +1,39 @@
+{
+  "id": "v123",
+  "title": "A Vimeo Clip",
+  "extractor": "vimeo",
+  "duration": 42.0,
+  "formats": [
+    {
+      "format_id": "http-360p",
+      "ext": "mp4",
+      "vcodec": "avc1.4d401e",
+      "acodec": "mp4a.40.2",
+      "height": 360,
+      "width": 640,
+      "filesize": 4000000,
+      "protocol": "https",
+      "url": "https://vod.vimeo.com/v123-360p.mp4"
+    },
+    {
+      "format_id": "http-1080p",
+      "ext": "mp4",
+      "vcodec": "avc1.640028",
+      "acodec": "none",
+      "height": 1080,
+      "width": 1920,
+      "filesize": 20000000,
+      "protocol": "https",
+      "url": "https://vod.vimeo.com/v123-1080p.mp4"
+    },
+    {
+      "format_id": "http-audio",
+      "ext": "m4a",
+      "vcodec": "none",
+      "acodec": "mp4a.40.2",
+      "filesize": 1200000,
+      "protocol": "https",
+      "url": "https://vod.vimeo.com/v123-audio.m4a"
+    }
+  ]
+}
