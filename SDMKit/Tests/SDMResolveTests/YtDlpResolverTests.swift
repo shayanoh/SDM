@@ -65,6 +65,37 @@ private let privateStderr =
     }
 }
 
+@Test func genericLoginStderrIsAuthRequired() async {
+    let runner = FakeProcessRunner()
+    runner.responses = [
+        ("-J", fail("ERROR: [vimeo] 1: This video requires you to log in."))
+    ]
+    let r = YtDlpResolver(runner: runner, locator: makeLocator())
+    await #expect(throws: ResolveError.authRequired) {
+        try await r.resolve(u("https://vimeo.com/1"))
+    }
+}
+
+@Test func geoRestrictionStderrIsUnavailable() async {
+    let runner = FakeProcessRunner()
+    runner.responses = [
+        ("-J", fail("ERROR: The uploader has not made this video available in your country."))
+    ]
+    let r = YtDlpResolver(runner: runner, locator: makeLocator())
+    await #expect(throws: ResolveError.unavailable) {
+        try await r.resolve(u("https://vimeo.com/1"))
+    }
+}
+
+@Test func drmStderrIsDrmProtected() async {
+    let runner = FakeProcessRunner()
+    runner.responses = [("-J", fail("ERROR: [generic] x: This video is DRM protected."))]
+    let r = YtDlpResolver(runner: runner, locator: makeLocator())
+    await #expect(throws: ResolveError.drmProtected) {
+        try await r.resolve(u("https://x.com/1"))
+    }
+}
+
 @Test func privateVideoThrowsPrivateVideo() async {
     let runner = FakeProcessRunner()
     runner.responses = [("-J", fail(privateStderr))]

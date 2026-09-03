@@ -19,6 +19,9 @@ public enum ResolveError: Error, Equatable, Sendable {
     case authRequired
     case privateVideo
     case unavailable
+    /// The stream is DRM-protected — yt-dlp can see it but only yields
+    /// encrypted output. Terminal; the grabber shows it as unsupported.
+    case drmProtected
     case timeout
     case ytDlpFailed(stderrTail: String)
 }

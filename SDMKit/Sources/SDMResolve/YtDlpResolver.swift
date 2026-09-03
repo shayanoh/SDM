@@ -200,9 +200,23 @@ public struct YtDlpResolver: LinkResolver {
                 return .authRequired
             }
             if lower.contains("private video") { return .privateVideo }
+            if lower.contains("drm") { return .drmProtected }
+            // Generic sign-in walls across sites (Vimeo, Twitter, members-only).
+            if lower.contains("requires you to log in")
+                || lower.contains("log in to")
+                || lower.contains("login required")
+                || lower.contains("requires authentication")
+                || lower.contains("this content isn't available")
+            {
+                return .authRequired
+            }
             if lower.contains("video unavailable")
                 || lower.contains("this video is not available")
                 || lower.contains("has been removed")
+                || lower.contains("available in your country")
+                || lower.contains("available in your location")
+                || lower.contains("geo-restricted")
+                || lower.contains("geo restricted")
             {
                 return .unavailable
             }
