@@ -74,6 +74,23 @@ private func resolvedRow(mux: Bool) -> MediaRow {
     }
 }
 
+@Test func mediaItemsCarryAMediaInfoString() {
+    let (items, _) = MediaHandoff.build(httpLinks: [], mediaRows: [resolvedRow(mux: true)])
+    #expect(items[0].metadata?.hasPrefix("Direct · 1080p · h264 · aac · mp4") == true)
+}
+
+@Test func httpItemsCarryReleaseTagsFromTheirFilename() {
+    let tagged = ProbedLink(
+        originalURL: URL(string: "https://x/The.Show.S01E01.1080p.WEB-DL.H.264-GRP.mkv")!,
+        stage: .done, statusCode: 200, contentLength: 5000, verdict: .online)
+    let plain = ProbedLink(
+        originalURL: URL(string: "https://x/archive.zip")!, stage: .done, statusCode: 200,
+        contentLength: 100, verdict: .online)
+    let (items, _) = MediaHandoff.build(httpLinks: [tagged, plain], mediaRows: [])
+    #expect(items[0].metadata == "1080p · WEB-DL · H.264")
+    #expect(items[1].metadata == nil)
+}
+
 @Test func unselectedRowsAreHeldBackButHttpSiblingsGoThrough() {
     var unselected = MediaRow(sourceURL: URL(string: "https://youtu.be/x")!)
     unselected.state = .unselected

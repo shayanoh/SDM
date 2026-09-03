@@ -57,6 +57,10 @@ public struct ItemSnapshot: Sendable, Equatable, Identifiable {
     /// "reveal in Finder" need the real on-disk names, not just the output
     /// filename.
     public let partFilenames: [String]
+    /// A one-line media description shown in the details panel — delivery /
+    /// resolution / codecs for a resolver-backed item, release tags mined
+    /// from the filename for a plain HTTP one. `nil` / empty ⇒ show a dash.
+    public let metadata: String?
 
     public init(
         id: UUID,
@@ -79,8 +83,10 @@ public struct ItemSnapshot: Sendable, Equatable, Identifiable {
         fileMissing: Bool = false,
         isAssembling: Bool = false,
         assembly: Assembly = .none,
-        partFilenames: [String] = []
+        partFilenames: [String] = [],
+        metadata: String? = nil
     ) {
+        self.metadata = metadata
         self.checkpointFailure = checkpointFailure
         self.remainingAttempts = remainingAttempts
         self.failedAttemptCount = failedAttemptCount

@@ -1159,7 +1159,8 @@ public actor DownloadEngine {
                         fileMissing: fileMissing,
                         isAssembling: assembling.contains(item.id) || wholesalePostProcessing,
                         assembly: item.assembly,
-                        partFilenames: item.components.map(\.partFilename)
+                        partFilenames: item.components.map(\.partFilename),
+                        metadata: item.metadata
                     )
                 )
             }

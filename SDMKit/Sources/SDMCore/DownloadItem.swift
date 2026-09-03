@@ -20,6 +20,12 @@ public struct DownloadItem: Identifiable, Equatable, Sendable {
     public var priority: Priority?
     /// Position within the owning package. Lower sorts earlier.
     public var position: Int
+    /// A human-readable one-liner describing the media: for a resolver-backed
+    /// item its delivery / resolution / codecs / container / site; for a
+    /// plain HTTP item the release tags mined from its filename (`1080p ·
+    /// WEB-DL · H.264`). `nil` / empty ⇒ the UI shows a dash. Filled once at
+    /// grab time by `MediaHandoff`.
+    public var metadata: String?
 
     public init(
         id: UUID = UUID(),
@@ -30,7 +36,8 @@ public struct DownloadItem: Identifiable, Equatable, Sendable {
         state: ItemState = .queued,
         isEnabled: Bool = true,
         priority: Priority? = nil,
-        position: Int = 0
+        position: Int = 0,
+        metadata: String? = nil
     ) {
         precondition(!components.isEmpty, "a DownloadItem needs at least one component")
         precondition(!outputFilename.isEmpty, "outputFilename must not be empty")
@@ -38,7 +45,7 @@ public struct DownloadItem: Identifiable, Equatable, Sendable {
             unchecked: id, components: components, outputFilename: outputFilename,
             sourceURL: sourceURL ?? components[0].url,
             assembly: assembly, state: state, isEnabled: isEnabled, priority: priority,
-            position: position)
+            position: position, metadata: metadata)
     }
 
     /// Non-validating path used only by `init(from:)`. Matches
@@ -55,7 +62,8 @@ public struct DownloadItem: Identifiable, Equatable, Sendable {
         state: ItemState,
         isEnabled: Bool,
         priority: Priority?,
-        position: Int
+        position: Int,
+        metadata: String? = nil
     ) {
         self.id = id
         self.components = components
@@ -66,6 +74,7 @@ public struct DownloadItem: Identifiable, Equatable, Sendable {
         self.isEnabled = isEnabled
         self.priority = priority
         self.position = position
+        self.metadata = metadata
     }
 
     /// The pre-Part-5 signature. Wraps a single URL into a one-component
@@ -81,7 +90,8 @@ public struct DownloadItem: Identifiable, Equatable, Sendable {
         isResumable: Bool? = nil,
         priority: Priority? = nil,
         position: Int = 0,
-        validator: String? = nil
+        validator: String? = nil,
+        metadata: String? = nil
     ) {
         self.init(
             id: id,
@@ -96,7 +106,8 @@ public struct DownloadItem: Identifiable, Equatable, Sendable {
             state: state,
             isEnabled: isEnabled,
             priority: priority,
-            position: position)
+            position: position,
+            metadata: metadata)
     }
 
     // MARK: - Concatenated accessors (one-component: identical to before)
@@ -192,7 +203,7 @@ public struct DownloadItem: Identifiable, Equatable, Sendable {
 extension DownloadItem: Codable {
     private enum CodingKeys: String, CodingKey {
         case id, components, outputFilename, sourceURL, assembly, state, isEnabled, priority,
-            position
+            position, metadata
         // legacy-only keys
         case url, filename, totalBytes, completed, isResumable, validator
     }
@@ -204,6 +215,7 @@ extension DownloadItem: Codable {
         let isEnabled = try container.decodeIfPresent(Bool.self, forKey: .isEnabled) ?? true
         let priority = try container.decodeIfPresent(Priority.self, forKey: .priority)
         let position = try container.decodeIfPresent(Int.self, forKey: .position) ?? 0
+        let metadata = try container.decodeIfPresent(String.self, forKey: .metadata)
 
         let components: [FileComponent]
         let outputFilename: String
@@ -238,7 +250,7 @@ extension DownloadItem: Codable {
             unchecked: id, components: components, outputFilename: outputFilename,
             sourceURL: sourceURL ?? components[0].url,
             assembly: assembly, state: state, isEnabled: isEnabled, priority: priority,
-            position: position)
+            position: position, metadata: metadata)
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -252,5 +264,6 @@ extension DownloadItem: Codable {
         try container.encode(isEnabled, forKey: .isEnabled)
         try container.encodeIfPresent(priority, forKey: .priority)
         try container.encode(position, forKey: .position)
+        try container.encodeIfPresent(metadata, forKey: .metadata)
     }
 }

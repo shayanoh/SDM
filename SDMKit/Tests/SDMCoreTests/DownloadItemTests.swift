@@ -68,9 +68,19 @@ private func u(_ s: String) -> URL { URL(string: s)! }
             FileComponent(
                 url: u("https://gv/a"), partFilename: "t.f251.webm", totalBytes: 20,
                 origin: .resolved(formatID: "251")),
-        ], outputFilename: "t.mp4", assembly: .mux, state: .stopped)
+        ], outputFilename: "t.mp4", assembly: .mux, state: .stopped,
+        metadata: "Streaming · 1080p · h264 · mp4 · twitch")
     let data = try JSONEncoder().encode(item)
-    #expect(try JSONDecoder().decode(DownloadItem.self, from: data) == item)
+    let decoded = try JSONDecoder().decode(DownloadItem.self, from: data)
+    #expect(decoded == item)
+    #expect(decoded.metadata == "Streaming · 1080p · h264 · mp4 · twitch")
+}
+
+@Test func metadataDefaultsToNilAndSurvivesAbsence() throws {
+    let item = DownloadItem(url: u("https://x/f.bin"), filename: "f.bin")
+    #expect(item.metadata == nil)
+    let data = try JSONEncoder().encode(item)
+    #expect(try JSONDecoder().decode(DownloadItem.self, from: data).metadata == nil)
 }
 
 @Test func legacyFlatCodableDecodesToOneComponentItem() throws {

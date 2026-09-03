@@ -774,6 +774,16 @@ struct BottomPanel: View {
                 }
             }
             GridRow {
+                Text("Media Info")
+                Text(
+                    (downloadItem.metadata?.isEmpty == false)
+                        ? downloadItem.metadata! : "—"
+                )
+                .foregroundStyle(theme.textSecondaryColor)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            GridRow {
                 // All three read from the same live telemetry (or its
                 // fallback) — using `downloadItem.fractionCompleted` for the
                 // percent while the bytes came from telemetry left the

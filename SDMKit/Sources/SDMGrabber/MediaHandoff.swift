@@ -18,7 +18,8 @@ public enum MediaHandoff {
             items.append(
                 DownloadItem(
                     url: link.originalURL, filename: filename,
-                    totalBytes: link.contentLength.flatMap { $0 > 0 ? $0 : nil }))
+                    totalBytes: link.contentLength.flatMap { $0 > 0 ? $0 : nil },
+                    metadata: ReleaseTags.extract(from: filename)))
         }
 
         for row in mediaRows {
@@ -28,6 +29,7 @@ public enum MediaHandoff {
             }
             let output = row.displayFilename
             let stem = MediaRow.sanitize(media.title) + " [\(media.videoID)]"
+            let mediaInfo = MediaMetadata.describe(choice: choice, media: media)
             var components: [FileComponent] = []
 
             // HLS/DASH-only: one non-resumable component that yt-dlp
@@ -46,7 +48,8 @@ public enum MediaHandoff {
                 items.append(
                     DownloadItem(
                         components: components, outputFilename: output,
-                        sourceURL: row.sourceURL, assembly: .none, state: .queued))
+                        sourceURL: row.sourceURL, assembly: .none, state: .queued,
+                        metadata: mediaInfo))
                 continue
             }
 
@@ -83,7 +86,8 @@ public enum MediaHandoff {
                     // The grabbed YouTube URL, not the googlevideo stream —
                     // this is what the details panel shows.
                     sourceURL: row.sourceURL,
-                    assembly: components.count == 2 ? .mux : .none, state: .queued))
+                    assembly: components.count == 2 ? .mux : .none, state: .queued,
+                    metadata: mediaInfo))
         }
 
         return (items, heldBack)
