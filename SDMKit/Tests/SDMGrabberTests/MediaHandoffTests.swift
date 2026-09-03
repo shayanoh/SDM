@@ -46,6 +46,34 @@ private func resolvedRow(mux: Bool) -> MediaRow {
     #expect(items[0].outputFilename == "Clip [abc].mp4")
 }
 
+@Test func aWholesaleRowBecomesOneNonResumableComponent() {
+    let hlsFmt = MediaFormat(
+        id: "270", kind: .videoOnly, height: 1080, width: nil, vcodec: .h264, acodec: nil,
+        container: .mp4, filesize: nil, filesizeApprox: nil, tbr: nil,
+        url: URL(string: "https://x/m.m3u8")!, delivery: .hls)
+    var row = MediaRow(sourceURL: URL(string: "https://www.tiktok.com/@a/video/1")!)
+    row.media = ResolvedMedia(
+        extractor: "tiktok", videoID: "1", title: "Clip", durationSeconds: 10, formats: [hlsFmt])
+    row.choice = FormatChoice(
+        video: hlsFmt, audio: nil, outputContainer: .mp4, estimatedBytes: nil,
+        wholesaleSelector: "bv*+ba/b")
+    row.state = .resolved
+
+    let (items, held) = MediaHandoff.build(httpLinks: [], mediaRows: [row])
+    #expect(held == 0)
+    #expect(items.count == 1)
+    #expect(items[0].components.count == 1)
+    #expect(items[0].assembly == .none)
+    #expect(items[0].components[0].isResumable == false)
+    #expect(items[0].components[0].partFilename == items[0].outputFilename)
+    #expect(items[0].url == URL(string: "https://www.tiktok.com/@a/video/1")!)
+    if case .wholesale(let sel) = items[0].components[0].origin {
+        #expect(sel == "bv*+ba/b")
+    } else {
+        Issue.record("expected .wholesale origin")
+    }
+}
+
 @Test func unselectedRowsAreHeldBackButHttpSiblingsGoThrough() {
     var unselected = MediaRow(sourceURL: URL(string: "https://youtu.be/x")!)
     unselected.state = .unselected

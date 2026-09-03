@@ -141,11 +141,11 @@ public actor GrabberSession {
     private static func rowState(for error: any Error) -> MediaRowState {
         switch error {
         case ResolveError.binaryMissing: return .needsYtDlp
-        case ResolveError.unsupported: return .unsupported
+        case ResolveError.unsupported, ResolveError.drmProtected: return .unsupported
         case ResolveError.authRequired:
             return .failed(
-                "YouTube blocked the request (anti-bot / sign-in). Set \"Cookies from browser\" "
-                    + "in Settings → YouTube, or update yt-dlp.")
+                "The site blocked the request (sign-in / anti-bot). Set \"Cookies from browser\" "
+                    + "in Settings → Media Sites, or update yt-dlp.")
         case ResolveError.privateVideo: return .failed("Private video.")
         case ResolveError.unavailable: return .failed("Video unavailable.")
         case ResolveError.timeout: return .failed("yt-dlp timed out.")
@@ -199,7 +199,9 @@ public actor GrabberSession {
         var entryIDs: [UUID] = []
         for entry in entries {
             let entryID = UUID()
-            let watchURL = URL(string: "https://www.youtube.com/watch?v=\(entry.videoID)")!
+            // The entry's own page URL (any site), not a synthesized YouTube
+            // watch URL. Parent spec §5.3.
+            guard let watchURL = entry.sourceURL else { continue }
             guard seenURLs.insert(watchURL).inserted else { continue }
             addedAt[entryID] = addedTime
             mediaRows[entryID] = MediaRow(
@@ -558,7 +560,7 @@ public actor GrabberSession {
             if let row = mediaRows[id] {
                 return ClusterableLink(
                     id: id, filename: row.displayFilename,
-                    host: row.sourceURL.host ?? "youtube.com", directoryPath: "/watch")
+                    host: row.sourceURL.host ?? "media", directoryPath: "/watch")
             }
             return nil
         }
