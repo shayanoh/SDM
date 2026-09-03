@@ -26,9 +26,12 @@ self-reviews under `docs/superpowers/plans/`. Each was either kept as-is
   plan. `FormatSelector` returns a wholesale `FormatChoice` when no direct
   format fits; `WholesaleComponentTask` (engine) drives an injected
   `YtDlpWholesaleDownloader` (resolve) with progress parsed from yt-dlp
-  stdout, progress kept as a synthesized contiguous `RangeSet`. Non-resumable;
-  the scheduler reserves the slot. Delivered alongside the multi-site
-  registry (`SiteRegistry`, ~50 sites) and generalized playlist handling.
+  stdout, progress kept as a synthesized contiguous `RangeSet`. Delivered
+  alongside the multi-site registry (`SiteRegistry`, ~50 sites) and
+  generalized playlist handling. **Update 2026-09-03:** wholesale downloads
+  are now resumable via yt-dlp's fragment-level `--continue` and become
+  preemptible once fragmented progress confirms the native downloader is in
+  use — see `docs/superpowers/specs/2026-09-03-wholesale-resume-design.md`.
 
 - [ ] **3. Proactive URL refresh.** `googlevideo` URLs expire after a few
   hours. Refresh reactively-on-403 already works (`URLRefreshTests`). Add:

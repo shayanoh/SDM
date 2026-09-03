@@ -45,8 +45,13 @@ public struct YtDlpWholesaleDownloader: WholesaleDownloader {
                 "-f", formatSelector,
                 "--no-playlist",
                 "--newline",
-                "--no-part",
-                "--no-continue",
+                // Resume support: keep the `.part` / `.ytdl` scratch and
+                // resume from the last completed fragment on the next run.
+                // `--hls-prefer-native` forces yt-dlp's own fragment
+                // downloader (the resumable one) over ffmpeg-as-downloader.
+                // See `2026-09-03-wholesale-resume-design.md`.
+                "--continue",
+                "--hls-prefer-native",
                 "--no-warnings",
                 "--progress-template",
                 "sdm:%(progress.status)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s"

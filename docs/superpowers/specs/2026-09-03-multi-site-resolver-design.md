@@ -6,6 +6,13 @@ Status: **IMPLEMENTED — merged to `main` 2026-09-03 on branch
 `docs/superpowers/plans/2026-09-03-multi-site-resolver.md`. ~496 package
 tests, app target builds.
 
+**Superseded (2026-09-03):** §6.7's "a `.wholesale` component's
+`isResumable` is always `false` … next start re-runs yt-dlp from zero" no
+longer holds. Wholesale downloads now resume via yt-dlp's fragment-level
+`--continue` and become preemptible once a fragmented progress report
+confirms the native downloader is in use. See
+`2026-09-03-wholesale-resume-design.md`.
+
 **Post-merge fixes (2026-09-03, from real Twitch-VOD testing):**
 - Wholesale progress template now emits `fragment_index` / `fragment_count`
   instead of `_percent_str`; `WholesaleProgressParser` parses yt-dlp's

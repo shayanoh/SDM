@@ -3,10 +3,17 @@ import SDMCore
 
 /// Drives a `WholesaleDownloader` (yt-dlp as a downloader) for one
 /// HLS/DASH-only component, exposing the slice of `DownloadTask`'s
-/// interface the engine's `Runner` touches. Non-resumable: progress is a
-/// *synthesized* contiguous `RangeSet` derived from the downloader's
-/// reports, and any failure or pause discards the partial output. Parent
-/// spec `2026-09-03-multi-site-resolver-design.md` §6.7.
+/// interface the engine's `Runner` touches. Progress is a *synthesized*
+/// contiguous `RangeSet` derived from the downloader's reports.
+///
+/// Resume: a pause / preempt keeps the yt-dlp scratch (`.part` / `.ytdl`
+/// / fragments) on disk so the next run's `--continue` picks up from the
+/// last completed fragment. A hard (non-cancellation) failure sweeps the
+/// scratch so the next attempt starts clean. The component only reports
+/// itself resumable once it has seen a *fragmented* progress report —
+/// confirmation that yt-dlp's native (resumable) downloader is in use.
+/// Parent specs `2026-09-03-multi-site-resolver-design.md` §6.7 and
+/// `2026-09-03-wholesale-resume-design.md`.
 actor WholesaleComponentTask {
     let destinationURL: URL
 
@@ -48,9 +55,13 @@ actor WholesaleComponentTask {
         do {
             try await job.value
         } catch {
+            // Cancellation is a pause / preempt: keep every scratch file and
+            // the synthesized progress so the next run resumes via
+            // `--continue`. A real failure sweeps the scratch so the retry
+            // starts clean.
+            if error is CancellationError { throw WholesaleError.cancelled }
             cleanupPartialOutput()
             state.reset()
-            if error is CancellationError { throw WholesaleError.cancelled }
             throw error
         }
         guard FileManager.default.fileExists(atPath: destinationURL.path) else {
@@ -67,8 +78,8 @@ actor WholesaleComponentTask {
     func pause() {
         isCancelled = true
         job?.cancel()
-        cleanupPartialOutput()
-        state.reset()
+        // Deliberately keeps the yt-dlp scratch and the synthesized progress:
+        // the next run resumes from the last completed fragment.
     }
 
     /// Synthesized `[0, downloadedBytes)` — the one place a `RangeSet` is
@@ -83,8 +94,12 @@ actor WholesaleComponentTask {
     var expectedTotalBytes: Int64? { state.totalBytes }
     var activeWorkerCount: Int { state.isActive ? 1 : 0 }
     var peakWorkerCount: Int { 1 }
-    /// Never resumable — the scheduler must reserve this item's slot.
-    var probedSupportsRanges: Bool? { false }
+    /// `false` until a fragmented progress report confirms yt-dlp's native
+    /// (resumable) downloader is in use — so the scheduler reserves this
+    /// item's slot and never preempts it until resume is known to work.
+    /// `true` afterward: the item is preemptible like any resumable
+    /// download, and a pause / preempt keeps its fragments for `--continue`.
+    var probedSupportsRanges: Bool? { state.sawFragmentedProgress ? true : false }
     var lastCheckpointFailure: String? { nil }
     var isAssembling: Bool { state.phase == .postProcessing }
 
@@ -125,11 +140,13 @@ private final class ProgressState: @unchecked Sendable {
     private var total: Int64?
     private var phaseValue: WholesaleProgress.Phase = .downloading
     private var active = false
+    private var sawFragmented = false
 
     func apply(_ progress: WholesaleProgress) {
         lock.withLock {
             active = true
             phaseValue = progress.phase
+            if progress.isFragmented { sawFragmented = true }
 
             if let d = progress.downloadedBytes {
                 downloaded = max(downloaded, d)
@@ -164,6 +181,7 @@ private final class ProgressState: @unchecked Sendable {
             total = nil
             phaseValue = .downloading
             active = false
+            sawFragmented = false
         }
     }
 
@@ -174,6 +192,7 @@ private final class ProgressState: @unchecked Sendable {
         }
     }
     var totalBytes: Int64? { lock.withLock { total } }
+    var sawFragmentedProgress: Bool { lock.withLock { sawFragmented } }
     var phase: WholesaleProgress.Phase { lock.withLock { phaseValue } }
     var isActive: Bool { lock.withLock { active } }
 }

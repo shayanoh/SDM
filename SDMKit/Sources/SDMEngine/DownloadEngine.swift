@@ -360,7 +360,21 @@ public actor DownloadEngine {
                 case .running, .queued: restored[packageIndex].items[itemIndex].state = .stopped
                 case .stopped, .completed, .failed: break
                 }
-                restored[packageIndex].items[itemIndex].isResumable = nil
+                // A wholesale component stays `false` (slot reserved) until a
+                // run confirms yt-dlp's native downloader is in use, exactly
+                // as a freshly grabbed one does — see `MediaHandoff`. Every
+                // other component resets to `nil` (unprobed, preemptible).
+                for componentIndex in restored[packageIndex].items[itemIndex].components.indices {
+                    if case .wholesale = restored[packageIndex].items[itemIndex]
+                        .components[componentIndex].origin
+                    {
+                        restored[packageIndex].items[itemIndex]
+                            .components[componentIndex].isResumable = false
+                    } else {
+                        restored[packageIndex].items[itemIndex]
+                            .components[componentIndex].isResumable = nil
+                    }
+                }
             }
         }
 

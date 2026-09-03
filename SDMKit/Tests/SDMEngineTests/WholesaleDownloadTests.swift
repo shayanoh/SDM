@@ -87,7 +87,10 @@ private func wholesaleEngine(
     #expect(await snapshotItem(item.id, in: engine)?.state == .completed)
 }
 
-@Test func pausingAWholesaleDownloadDiscardsPartialAndRestartsFromZero() async throws {
+@Test func pausingANonResumableWholesaleDownloadShowsZeroAndReinvokes() async throws {
+    // No fragmented progress seen ⇒ the resumable native downloader is not
+    // confirmed ⇒ the item stays non-resumable and its bar shows zero on
+    // pause (its next attempt cannot rely on --continue).
     let dir = try makeScratchDirectory()
     defer { try? FileManager.default.removeItem(at: dir) }
     let fake = FakeWholesaleDownloader()
@@ -98,13 +101,11 @@ private func wholesaleEngine(
     fake.emit(WholesaleProgress(downloadedBytes: 400, totalBytes: 1000, phase: .downloading))
 
     await engine.stopItem(item.id)
-    // Let the non-blocking pause unwind.
     try await engine.runUntilIdle()
     var snap = await snapshotItem(item.id, in: engine)
     #expect(snap?.state == .stopped)
+    #expect(snap?.isResumable == false)
     #expect(snap?.completed.totalBytes == 0)
-    #expect(
-        !FileManager.default.fileExists(atPath: dir.appendingPathComponent("P/Clip.mp4").path))
 
     #expect(fake.callCount == 1)
     await engine.startItem(item.id)
@@ -114,6 +115,108 @@ private func wholesaleEngine(
     try await engine.runUntilIdle()
     snap = await snapshotItem(item.id, in: engine)
     #expect(snap?.state == .completed)
+}
+
+@Test func fragmentedProgressMakesAWholesaleItemResumable() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let fake = FakeWholesaleDownloader()
+    let engine = wholesaleEngine(dir: dir, downloader: fake)
+    let item = wholesaleItem()
+    await engine.add(DownloadPackage(name: "P", items: [item]))
+    await fake.waitUntilStarted()
+
+    #expect(await snapshotItem(item.id, in: engine)?.isResumable == false)
+
+    fake.emit(
+        WholesaleProgress(
+            downloadedBytes: 400, totalBytes: 1000, fraction: 0.4,
+            phase: .downloading, isFragmented: true))
+    await engine.tick()  // mirrors the probe result onto the item
+    #expect(await snapshotItem(item.id, in: engine)?.isResumable == true)
+
+    fake.finishSuccess()
+    try await engine.runUntilIdle()
+}
+
+@Test func pausingAResumableWholesaleDownloadKeepsProgressAndResumes() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let fake = FakeWholesaleDownloader()
+    let engine = wholesaleEngine(dir: dir, downloader: fake)
+    let item = wholesaleItem()
+    await engine.add(DownloadPackage(name: "P", items: [item]))
+    await fake.waitUntilStarted()
+    fake.emit(
+        WholesaleProgress(
+            downloadedBytes: 400, totalBytes: 1000, fraction: 0.4,
+            phase: .downloading, isFragmented: true))
+    await engine.tick()
+
+    await engine.stopItem(item.id)
+    try await engine.runUntilIdle()
+    var snap = await snapshotItem(item.id, in: engine)
+    #expect(snap?.state == .stopped)
+    #expect(snap?.isResumable == true)
+    // Synthesized progress is retained — the next run's --continue resumes.
+    #expect(snap?.completed.totalBytes == 400)
+    #expect(fake.callCount == 1)
+
+    await engine.startItem(item.id)
+    await fake.waitUntilStarted()
+    #expect(fake.callCount == 2)
+    fake.finishSuccess()
+    try await engine.runUntilIdle()
+    snap = await snapshotItem(item.id, in: engine)
+    #expect(snap?.state == .completed)
+}
+
+@Test func aResumableWholesaleItemIsPreemptedByAHigherPriorityItem() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let fake = FakeWholesaleDownloader()
+    let gate = WorkerGate()
+    let engine = DownloadEngine(
+        transport: WorkerGatedOrigin(payload: testPayload(4000), gate: gate),
+        stateStore: InMemoryStateStore(),
+        settings: EngineSettings(
+            maxConcurrent: 1, segmentsPerItem: 1, globalMaxConnections: 8, downloadFolder: dir),
+        wholesaleDownloader: fake)
+
+    let hls = wholesaleItem()
+    await engine.add(DownloadPackage(name: "P", items: [hls]))
+    await fake.waitUntilStarted()
+    fake.emit(
+        WholesaleProgress(
+            downloadedBytes: 400, totalBytes: 1000, fraction: 0.4,
+            phase: .downloading, isFragmented: true))
+    await engine.tick()
+    #expect(await snapshotItem(hls.id, in: engine)?.isResumable == true)
+
+    // A higher-priority plain item arrives; the wholesale item is now
+    // resumable, so once hysteresis elapses it yields its slot rather than
+    // holding it as a non-resumable item would.
+    let plain = DownloadItem(
+        url: URL(string: "https://example.com/b.bin")!, filename: "b.bin",
+        priority: .highest)
+    await engine.add(DownloadPackage(name: "Q", items: [plain]))
+    for _ in 0..<(AppTiming.ticksPerSecond * 5) { await engine.tick() }
+
+    #expect(await snapshotItem(hls.id, in: engine)?.state == .queued)
+    #expect(await snapshotItem(plain.id, in: engine)?.state == .running)
+    #expect(fake.callCount == 1)
+
+    // Let plain finish; the wholesale item is re-desired and re-invoked
+    // (its --continue resume), which we then let finish.
+    let resumeWatch = Task {
+        while fake.callCount < 2 { await Task.yield() }
+        fake.finishSuccess()
+    }
+    await gate.open()
+    try await engine.runUntilIdle()
+    await resumeWatch.value
+    #expect(fake.callCount == 2)
+    #expect(await snapshotItem(hls.id, in: engine)?.state == .completed)
 }
 
 @Test func aRunningWholesaleItemReservesItsSchedulerSlot() async throws {

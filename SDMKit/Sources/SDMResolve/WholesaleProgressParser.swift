@@ -41,17 +41,20 @@ public enum WholesaleProgressParser {
         let estimate = number(fields[3])
 
         var fraction: Double?
+        var isFragmented = false
         if fields.count >= 6,
             let index = number(fields[4]), let count = number(fields[5]), count > 0
         {
             fraction = min(1, max(0, Double(index) / Double(count)))
+            isFragmented = true
         }
 
         return WholesaleProgress(
             downloadedBytes: downloaded,
             totalBytes: total ?? estimate,
             fraction: fraction,
-            phase: .downloading)
+            phase: .downloading,
+            isFragmented: isFragmented)
     }
 
     /// yt-dlp numbers arrive as integers, comma-grouped, or — for

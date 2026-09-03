@@ -95,6 +95,8 @@ public struct SystemProcessRunner: ProcessRunner {
             throw ProcessRunError.timedOut
         }
         if Task.isCancelled {
+            // `onCancel` above already sent SIGTERM; let the child flush.
+            await drainAfterTerminate(exited)
             throw CancellationError()
         }
 
@@ -163,6 +165,8 @@ public struct SystemProcessRunner: ProcessRunner {
             throw ProcessRunError.timedOut
         }
         if Task.isCancelled {
+            // `onCancel` above already sent SIGTERM; let the child flush.
+            await drainAfterTerminate(exited)
             throw CancellationError()
         }
 
@@ -246,6 +250,38 @@ private final class ExitSignal: @unchecked Sendable {
             waiter?.resume()
         }
     }
+
+    /// Like `wait()` but ignores task cancellation — used to drain a child
+    /// that has just been sent SIGTERM so it can flush before we return.
+    func waitIgnoringCancellation() async {
+        let id = UUID()
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            if hasFired {
+                lock.unlock()
+                continuation.resume()
+            } else {
+                waiters[id] = continuation
+                lock.unlock()
+            }
+        }
+    }
+}
+
+/// After SIGTERM, give the child a bounded window to exit on its own so it
+/// can flush any resume state (yt-dlp's `.ytdl` / `.part`) before a
+/// rescheduled run touches the same files. Runs detached so the caller's
+/// own cancellation does not cut the wait short.
+private func drainAfterTerminate(_ exited: ExitSignal) async {
+    let drain = Task.detached {
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await exited.waitIgnoringCancellation() }
+            group.addTask { try? await Task.sleep(for: .seconds(3)) }
+            _ = await group.next()
+            group.cancelAll()
+        }
+    }
+    await drain.value
 }
 
 /// Thread-safe byte accumulator for the pipe readability handlers.

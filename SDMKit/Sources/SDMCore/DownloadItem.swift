@@ -122,9 +122,13 @@ public struct DownloadItem: Identifiable, Equatable, Sendable {
         set { for index in components.indices { components[index].validator = newValue } }
     }
 
-    /// A wholesale (yt-dlp-as-downloader) component makes the whole item
-    /// non-resumable and its scheduler slot reserved. Parent spec
-    /// `2026-09-03-multi-site-resolver-design.md` §6.7.
+    /// True when any component is downloaded wholesale (yt-dlp as the
+    /// downloader). Such an item can leave yt-dlp scratch files in its
+    /// package folder, which remove / reset must sweep. Resumability is no
+    /// longer decided here — a wholesale component drives its own
+    /// `isResumable` once it confirms yt-dlp's native downloader is in use.
+    /// Parent specs `2026-09-03-multi-site-resolver-design.md` §6.7 and
+    /// `2026-09-03-wholesale-resume-design.md`.
     public var hasWholesaleComponent: Bool {
         components.contains {
             if case .wholesale = $0.origin { return true } else { return false }
@@ -133,7 +137,6 @@ public struct DownloadItem: Identifiable, Equatable, Sendable {
 
     public var isResumable: Bool? {
         get {
-            if hasWholesaleComponent { return false }
             if components.contains(where: { $0.isResumable == false }) { return false }
             if components.contains(where: { $0.isResumable == nil }) { return nil }
             return true

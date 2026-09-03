@@ -14,14 +14,25 @@ public struct WholesaleProgress: Sendable, Equatable {
     public var fraction: Double?
     public var phase: Phase
 
+    /// True when this report came from yt-dlp's native fragment downloader
+    /// (`m3u8_native` / `http_dash_segments`) — i.e. it carried a positive
+    /// `fragment_count`. That downloader is the one whose `--continue`
+    /// resume SDM relies on, so the engine only advertises a wholesale
+    /// component as resumable once it has seen a fragmented report. A run
+    /// routed through ffmpeg-as-downloader never sets this. See
+    /// `2026-09-03-wholesale-resume-design.md`.
+    public var isFragmented: Bool
+
     public init(
         downloadedBytes: Int64? = nil, totalBytes: Int64? = nil,
-        fraction: Double? = nil, phase: Phase = .downloading
+        fraction: Double? = nil, phase: Phase = .downloading,
+        isFragmented: Bool = false
     ) {
         self.downloadedBytes = downloadedBytes
         self.totalBytes = totalBytes
         self.fraction = fraction
         self.phase = phase
+        self.isFragmented = isFragmented
     }
 }
 

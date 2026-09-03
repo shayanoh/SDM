@@ -83,6 +83,22 @@ private struct ProgressBox: @unchecked Sendable {
     #expect(runner.lastArguments.contains("https://x.com/1"))
 }
 
+@Test func requestsFragmentResumeAndNativeHLS() async throws {
+    let dest = FileManager.default.temporaryDirectory
+        .appendingPathComponent("\(UUID().uuidString).mp4")
+    defer { try? FileManager.default.removeItem(at: dest) }
+    let runner = FakeStreamingRunner(lines: ["sdm:downloading|1|1|NA|1|1"], exitCode: 0)
+    let d = YtDlpWholesaleDownloader(runner: runner, locator: wholesaleLocator())
+    try await d.download(
+        pageURL: u("https://x.com/1"), formatSelector: "b", destination: dest,
+        onProgress: { _ in })
+
+    #expect(runner.lastArguments.contains("--continue"))
+    #expect(runner.lastArguments.contains("--hls-prefer-native"))
+    #expect(!runner.lastArguments.contains("--no-continue"))
+    #expect(!runner.lastArguments.contains("--no-part"))
+}
+
 @Test func nonZeroExitThrowsFailedWithTail() async {
     let dest = FileManager.default.temporaryDirectory
         .appendingPathComponent("\(UUID().uuidString).mp4")

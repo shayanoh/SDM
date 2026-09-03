@@ -27,12 +27,16 @@ import Testing
 @Test func derivesFractionFromFragmentIndexAndCount() {
     let p = WholesaleProgressParser.parse("sdm:downloading|1000|NA|NA|659|1318")
     #expect(p?.fraction == 0.5)
+    // A fragment count means yt-dlp's native (resumable) downloader is in use.
+    #expect(p?.isFragmented == true)
 }
 
 @Test func fragmentFractionIsNilWithoutFragmentInfo() {
     let p = WholesaleProgressParser.parse("sdm:downloading|1000|4000|NA|NA|NA")
     #expect(p?.fraction == nil)
     #expect(p?.totalBytes == 4000)
+    // No fragment count — not (yet) known to be the resumable downloader.
+    #expect(p?.isFragmented == false)
 }
 
 @Test func handlesNoneAndCommaGroupedNumbers() {
