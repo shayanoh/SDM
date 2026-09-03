@@ -1,4 +1,5 @@
 import Foundation
+import SDMCore
 
 public enum FailureKind: Equatable, Sendable {
     case transient
@@ -28,6 +29,21 @@ public struct RetryPolicy: Sendable {
                 return .transient
             case .http(let status):
                 return Self.classify(status: status)
+            }
+        }
+        if let wholesale = error as? WholesaleError {
+            switch wholesale {
+            case .binaryMissing:
+                return .permanent(reason: "yt-dlp is not installed")
+            case .authRequired:
+                return .permanent(
+                    reason: "The site requires sign-in — set cookies in Settings → Media Sites")
+            case .unavailable:
+                return .permanent(reason: "The video is unavailable or DRM-protected")
+            case .cancelled, .failed:
+                // A one-shot yt-dlp download failure: retry a couple of times
+                // (transient network / rate limit), then it hits the cap.
+                return .transient
             }
         }
         if let download = error as? DownloadError {
