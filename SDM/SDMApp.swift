@@ -105,6 +105,7 @@ struct SDMApp: App {
     @State private var grabberController: GrabberController
     @State private var themeStore = ThemeStore()
     @State private var activationPolicyController: ActivationPolicyController
+    @State private var launchAtLoginController = LaunchAtLoginController()
     @State private var clipboardWatcher: ClipboardWatcher
     /// Link ids already handed to the download engine by auto-add-and-start,
     /// so a later snapshot change (e.g. an unrelated link finishing its
@@ -239,6 +240,7 @@ struct SDMApp: App {
                 .environment(managedBinaries)
                 .environment(themeStore)
                 .environment(activationPolicyController)
+                .environment(launchAtLoginController)
                 .environment(clipboardWatcher)
                 .environment(notificationManager)
         }
