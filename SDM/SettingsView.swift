@@ -6,14 +6,15 @@ import SwiftUI
 /// not the native `Settings {}` scene, so it can carry its own OK/Cancel
 /// bar. Downloads, Linkgrabber, and Notifications are fully buffered:
 /// nothing writes to a backing store until `commit()` runs on OK. The
-/// Appearance tab's theme and Dock/Menu Bar picker apply live (so their
-/// effect is visible behind this window immediately) and are reverted on
-/// Cancel from a snapshot taken on appear.
+/// Appearance tab's theme, Dock/Menu Bar picker, and Launch at Login toggle
+/// apply live (so their effect is visible behind this window immediately)
+/// and are reverted on Cancel from a snapshot taken on appear.
 struct SettingsView: View {
     @Environment(EngineController.self) private var controller
     @Environment(ManagedBinariesController.self) private var managedBinaries
     @Environment(ThemeStore.self) private var themeStore
     @Environment(ActivationPolicyController.self) private var activationPolicyController
+    @Environment(LaunchAtLoginController.self) private var launchAtLoginController
     @Environment(NotificationManager.self) private var notificationManager
     @Environment(ClipboardWatcher.self) private var clipboardWatcher
     @Environment(\.colorScheme) private var colorScheme
@@ -47,6 +48,7 @@ struct SettingsView: View {
 
     @State private var originalThemeID: String?
     @State private var originalActivationMode: ActivationPolicyMode?
+    @State private var originalLaunchAtLogin: Bool?
 
     private var theme: Theme { themeStore.resolved(for: colorScheme) }
 
@@ -100,6 +102,7 @@ struct SettingsView: View {
         .onAppear {
             originalThemeID = themeStore.selectedID
             originalActivationMode = activationPolicyController.mode
+            originalLaunchAtLogin = launchAtLoginController.isEnabled
         }
     }
 
@@ -107,6 +110,14 @@ struct SettingsView: View {
 
     private var appearanceTab: some View {
         VStack(alignment: .leading, spacing: 16) {
+            SettingsSection(title: "General", theme: theme) {
+                Toggle(
+                    "Launch SDM at login",
+                    isOn: Binding(
+                        get: { launchAtLoginController.isEnabled },
+                        set: { launchAtLoginController.isEnabled = $0 }
+                    ))
+            }
             SettingsSection(title: "Theme", theme: theme) {
                 HStack {
                     Text("Theme")
@@ -360,6 +371,9 @@ struct SettingsView: View {
         }
         if let originalActivationMode {
             activationPolicyController.mode = originalActivationMode
+        }
+        if let originalLaunchAtLogin {
+            launchAtLoginController.isEnabled = originalLaunchAtLogin
         }
         dismiss()
     }
