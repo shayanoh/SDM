@@ -139,6 +139,7 @@ struct SDMApp: App {
 
         appDelegate.controller = engine
         appDelegate.activationPolicyController = activationPolicy
+        touchBarController.configure(controller: engine, themeStore: themeStore)
 
         engine.startHeartbeatIfNeeded()
         managed.start()
@@ -271,6 +272,7 @@ struct SDMApp: App {
         // actually look different, instead of every tick.
         .onChange(of: controller.snapshot) { _, _ in
             menuBarIconController.update(fraction: overallFraction, drawCircle: downloadsRunning)
+            touchBarController.update()
         }
     }
 
