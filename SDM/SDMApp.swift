@@ -116,6 +116,7 @@ struct SDMApp: App {
     @State private var notificationManager: NotificationManager
     @State private var notifiedLinkIDs: Set<UUID> = []
     @State private var menuBarIconController = MenuBarIconController()
+    @State private var touchBarController = TouchBarController()
     @State private var managedBinaries: ManagedBinariesController
     @Environment(\.openWindow) private var openWindow
 
