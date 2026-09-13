@@ -3,16 +3,21 @@ import SDMCore
 import SDMEngine
 import SwiftUI
 
-/// Installs SDM's Touch Bar item directly on `NSApp` — a `var` inherited
-/// from `NSResponder` — rather than overriding `touchBar` on any window or
-/// view controller. None of SDM's windows provide a custom `touchBar`, so
-/// `NSApp`'s is the one AppKit falls back to at the tail of the responder
-/// chain: it becomes the effective bar whenever SDM is the active app,
-/// regardless of which window (if any) is key.
+/// Installs SDM's Touch Bar item on `NSApp` **and** on every open `NSWindow`.
+/// Both are necessary: AppKit resolves the Touch Bar by walking the *key
+/// window's* responder chain (first responder → … → the window itself) and
+/// only falls back to `NSApp` when there is **no key window at all** (e.g.
+/// accessory/menu-bar-only mode). Setting `NSApp.touchBar` alone is
+/// therefore invisible the moment any SDM window has focus — which is the
+/// common case — since that window's own chain resolves first and never
+/// reaches `NSApp`. Setting `.touchBar` directly on each window (the same
+/// shared `NSTouchBar` instance — harmless, since only the one actually-key
+/// window's copy is ever realized on hardware) covers that case; `NSApp`'s
+/// copy covers the no-window-key case.
 ///
-/// Setting `NSApp.touchBar` is an inert no-op on the overwhelming majority
-/// of Macs, which have no Touch Bar hardware, and behaves identically in
-/// the Touch Bar Simulator — no availability guard is needed.
+/// Setting these is an inert no-op on the overwhelming majority of Macs,
+/// which have no Touch Bar hardware, and behaves identically in the Touch
+/// Bar Simulator — no availability guard is needed.
 ///
 /// `update()` is called from the same `.onChange(of: controller.snapshot)`
 /// hook `SDMApp` already uses to refresh the menu bar icon, so this needs no
@@ -49,15 +54,18 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
         let isAnyRunning = items.contains { $0.state == .running }
         let hasWaitingWork = items.contains { $0.isEnabled && $0.state != .completed }
 
-        guard isAnyRunning || hasWaitingWork else {
-            NSApp.touchBar = nil
-            return
+        let bar: NSTouchBar?
+        if isAnyRunning || hasWaitingWork {
+            let installed = touchBar ?? makeTouchBar()
+            touchBar = installed
+            bar = installed
+        } else {
+            bar = nil
         }
 
-        let bar = touchBar ?? makeTouchBar()
-        touchBar = bar
-        if NSApp.touchBar !== bar {
-            NSApp.touchBar = bar
+        NSApp.touchBar = bar
+        for window in NSApp.windows {
+            window.touchBar = bar
         }
     }
 
