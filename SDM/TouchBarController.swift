@@ -23,7 +23,9 @@ import SwiftUI
 /// hook `SDMApp` already uses to refresh the menu bar icon, so this needs no
 /// timer of its own. It only ever decides *whether* the bar is installed;
 /// once installed, `TouchBarContentView`'s own `@Observable` reads keep its
-/// content live.
+/// display content live on their own — the pause/resume button below is the
+/// one thing this class must refresh by hand, since it's a plain AppKit
+/// control, not SwiftUI.
 ///
 /// Three states, re-evaluated on every call:
 /// 1. **Downloading** (any item `.running`) — the bar is installed with full
@@ -36,12 +38,18 @@ import SwiftUI
 ///    the system Control Strip default rather than showing an empty bar.
 @MainActor
 final class TouchBarController: NSObject, NSTouchBarDelegate {
-    private static let mainItemIdentifier = NSTouchBarItem.Identifier(
-        "com.shayanoh.SDM.touchbar.main")
+    private static let pauseResumeItemIdentifier = NSTouchBarItem.Identifier(
+        "com.shayanoh.SDM.touchbar.pauseResume")
+    private static let displayItemIdentifier = NSTouchBarItem.Identifier(
+        "com.shayanoh.SDM.touchbar.display")
 
     private weak var controller: EngineController?
     private weak var themeStore: ThemeStore?
     private var touchBar: NSTouchBar?
+    /// Weak: the item (and its button) is owned by `touchBar`, not this
+    /// property — this is only a shortcut to refresh its image/enabled
+    /// state each `update()` without re-walking `touchBar.item(forIdentifier:)`.
+    private weak var pauseResumeItem: NSButtonTouchBarItem?
 
     func configure(controller: EngineController, themeStore: ThemeStore) {
         self.controller = controller
@@ -65,9 +73,7 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
 
         // Reassigning `.touchBar` to the *same* instance still costs AppKit a
         // teardown/rebuild of the realized item view — at `update()`'s tick
-        // rate that reads as constant flicker and swallows in-flight taps
-        // (e.g. the pause/resume button never finishes recognizing a tap
-        // before its view is torn down again). Guard by identity so this
+        // rate that reads as constant flicker. Guard by identity so this
         // only touches AppKit when the bar has actually changed.
         if NSApp.touchBar !== bar {
             NSApp.touchBar = bar
@@ -75,31 +81,94 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
         for window in NSApp.windows where window.touchBar !== bar {
             window.touchBar = bar
         }
+
+        updatePauseResumeItem(items: items)
+    }
+
+    /// Mirrors `PackagesBottomBar.downloadableItems`/`allDownloadableStopped`
+    /// (`PackagesListView.swift:1180-1193`) exactly — this button must behave
+    /// identically to the one on the downloads tab.
+    private func downloadableItems(_ items: [ItemSnapshot]) -> [ItemSnapshot] {
+        items.filter {
+            switch $0.state {
+            case .queued, .running, .stopped: return true
+            case .completed, .failed: return false
+            }
+        }
+    }
+
+    private func updatePauseResumeItem(items: [ItemSnapshot]) {
+        guard let pauseResumeItem else { return }
+        let downloadable = downloadableItems(items)
+        let allStopped = downloadable.allSatisfy { $0.state == .stopped }
+        pauseResumeItem.image =
+            NSImage(
+                systemSymbolName: allStopped ? "play.fill" : "pause.fill",
+                accessibilityDescription: allStopped ? "Resume All" : "Pause All")
+            ?? NSImage()
+        pauseResumeItem.isEnabled = !downloadable.isEmpty
     }
 
     private func makeTouchBar() -> NSTouchBar {
         let bar = NSTouchBar()
         bar.delegate = self
-        bar.defaultItemIdentifiers = [Self.mainItemIdentifier]
+        bar.defaultItemIdentifiers = [Self.pauseResumeItemIdentifier, Self.displayItemIdentifier]
         return bar
     }
 
     func touchBar(
         _ touchBar: NSTouchBar, makeItemForIdentifier identifier: NSTouchBarItem.Identifier
     ) -> NSTouchBarItem? {
-        guard identifier == Self.mainItemIdentifier, let controller, let themeStore else {
+        switch identifier {
+        case Self.pauseResumeItemIdentifier:
+            return makePauseResumeItem(identifier: identifier)
+        case Self.displayItemIdentifier:
+            return makeDisplayItem(identifier: identifier)
+        default:
             return nil
         }
+    }
+
+    /// A native `NSButtonTouchBarItem`, not a SwiftUI `Button` hosted the way
+    /// `TouchBarContentView` is — a hosted SwiftUI button highlights on
+    /// touch-down but its `action` never fires in a Touch Bar item context.
+    private func makePauseResumeItem(identifier: NSTouchBarItem.Identifier) -> NSTouchBarItem? {
+        guard let controller else { return nil }
+        let image =
+            NSImage(systemSymbolName: "pause.fill", accessibilityDescription: "Pause All")
+            ?? NSImage()
+        let item = NSButtonTouchBarItem(
+            identifier: identifier, image: image, target: self,
+            action: #selector(pauseResumeTapped))
+        pauseResumeItem = item
+        updatePauseResumeItem(items: controller.snapshot.packages.flatMap(\.items))
+        return item
+    }
+
+    private func makeDisplayItem(identifier: NSTouchBarItem.Identifier) -> NSTouchBarItem? {
+        guard let controller, let themeStore else { return nil }
         let item = NSCustomTouchBarItem(identifier: identifier)
-        // `TouchBarContentView` fixes its own `.frame(width: 480, height:
-        // 30)` at its root, so `NSHostingView`'s intrinsic content size
-        // already comes out right — no need to also set `.frame` here.
-        let hosting = NSHostingView(
+        // `TouchBarContentView` fixes its own `.frame(width:height:)` at its
+        // root, so `NSHostingView`'s intrinsic content size already comes
+        // out right — no need to also set `.frame` here.
+        item.view = NSHostingView(
             rootView: TouchBarContentView()
                 .environment(controller)
                 .environment(themeStore)
         )
-        item.view = hosting
         return item
+    }
+
+    @objc private func pauseResumeTapped(_ sender: Any) {
+        guard let controller else { return }
+        let downloadable = downloadableItems(controller.snapshot.packages.flatMap(\.items))
+        let allStopped = downloadable.allSatisfy { $0.state == .stopped }
+        Task {
+            if allStopped {
+                await controller.resumeAll()
+            } else {
+                await controller.pauseAll()
+            }
+        }
     }
 }

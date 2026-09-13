@@ -2,13 +2,20 @@ import SDMCore
 import SDMEngine
 import SwiftUI
 
-/// The live content of SDM's Touch Bar item. Hosted inside an
-/// `NSHostingView` by `TouchBarController` — everything here reuses the
-/// sidebar's own views/formulas (`Sparkline`, `formatted`/`formattedBytes`,
-/// `SDMApp.overallFraction`'s item filter) rather than re-deriving them, so
-/// the Touch Bar can never show a number the sidebar disagrees with.
+/// The live, read-only content of SDM's Touch Bar — ring, byte count,
+/// sparkline, speed, or the idle waiting text. Hosted inside an
+/// `NSHostingView` by `TouchBarController`, which owns a *separate*,
+/// native `NSButtonTouchBarItem` for pause/resume: a SwiftUI `Button`
+/// hosted the same way does not reliably receive a completed tap in a
+/// Touch Bar item (confirmed — it highlights on touch-down but its action
+/// never fires), so the one interactive control here is plain AppKit.
 ///
-/// `TouchBarController` only ever decides whether to install this at all
+/// Everything below reuses the sidebar's own views/formulas (`Sparkline`,
+/// `formatted`/`formattedBytes`, `SDMApp.overallFraction`'s item filter)
+/// rather than re-deriving them, so the Touch Bar can never show a number
+/// the sidebar disagrees with.
+///
+/// `TouchBarController` only ever decides whether to install the bar at all
 /// (see its three-state doc comment); once installed, `@Observable`
 /// `EngineController` keeps this live on its own, same as any SwiftUI view.
 struct TouchBarContentView: View {
@@ -42,25 +49,7 @@ struct TouchBarContentView: View {
         return "\(formattedBytes(downloaded)) / \(formattedBytes(total))"
     }
 
-    /// Mirrors `PackagesBottomBar.downloadableItems`
-    /// (`PackagesListView.swift:1180-1187`) exactly — the pause/resume
-    /// button here must behave identically to the one on the downloads tab.
-    private var downloadableItems: [ItemSnapshot] {
-        allItems.filter {
-            switch $0.state {
-            case .queued, .running, .stopped: return true
-            case .completed, .failed: return false
-            }
-        }
-    }
-
-    private var allDownloadableStopped: Bool {
-        downloadableItems.allSatisfy { $0.state == .stopped }
-    }
-
-    /// "Waiting to be downloaded": not completed, not disabled — independent
-    /// of `downloadableItems` above, which Pause/Resume All's own semantics
-    /// define and which this text does not need to match.
+    /// "Waiting to be downloaded": not completed, not disabled.
     private var waitingItems: [ItemSnapshot] {
         allItems.filter { $0.isEnabled && $0.state != .completed }
     }
@@ -73,19 +62,6 @@ struct TouchBarContentView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Button {
-                Task {
-                    if allDownloadableStopped {
-                        await controller.resumeAll()
-                    } else {
-                        await controller.pauseAll()
-                    }
-                }
-            } label: {
-                Image(systemName: allDownloadableStopped ? "play.fill" : "pause.fill")
-            }
-            .disabled(downloadableItems.isEmpty)
-
             if isAnyRunning {
                 ProgressView(value: overallFraction)
                     .progressViewStyle(.circular)
@@ -114,6 +90,6 @@ struct TouchBarContentView: View {
         // `maxWidth: .infinity`) just hugs its minimum size, cramming
         // everything to the left. This fixed width stands in for "fill the
         // available Touch Bar width."
-        .frame(width: 480, height: 30)
+        .frame(width: 440, height: 30)
     }
 }
