@@ -63,8 +63,16 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
             bar = nil
         }
 
-        NSApp.touchBar = bar
-        for window in NSApp.windows {
+        // Reassigning `.touchBar` to the *same* instance still costs AppKit a
+        // teardown/rebuild of the realized item view — at `update()`'s tick
+        // rate that reads as constant flicker and swallows in-flight taps
+        // (e.g. the pause/resume button never finishes recognizing a tap
+        // before its view is torn down again). Guard by identity so this
+        // only touches AppKit when the bar has actually changed.
+        if NSApp.touchBar !== bar {
+            NSApp.touchBar = bar
+        }
+        for window in NSApp.windows where window.touchBar !== bar {
             window.touchBar = bar
         }
     }
@@ -83,12 +91,14 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
             return nil
         }
         let item = NSCustomTouchBarItem(identifier: identifier)
+        // `TouchBarContentView` fixes its own `.frame(width: 480, height:
+        // 30)` at its root, so `NSHostingView`'s intrinsic content size
+        // already comes out right — no need to also set `.frame` here.
         let hosting = NSHostingView(
             rootView: TouchBarContentView()
                 .environment(controller)
                 .environment(themeStore)
         )
-        hosting.frame = CGRect(x: 0, y: 0, width: 480, height: 30)
         item.view = hosting
         return item
     }

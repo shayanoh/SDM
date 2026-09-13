@@ -89,20 +89,31 @@ struct TouchBarContentView: View {
             if isAnyRunning {
                 ProgressView(value: overallFraction)
                     .progressViewStyle(.circular)
+                    .controlSize(.mini)
                     .tint(theme.accentColor)
                 Text(downloadedOfTotalText)
-                    .font(.body.monospacedDigit())
+                    .font(.callout.monospacedDigit())
+                    .fixedSize()
                 Sparkline(samples: controller.snapshot.globalHistory, color: theme.graphStrokeColor)
                     .frame(maxWidth: .infinity)
                 Text(formatted(controller.snapshot.globalBytesPerSecond))
-                    .font(.body.monospacedDigit())
+                    .font(.callout.monospacedDigit())
+                    .fixedSize()
             } else {
                 Text("\(waitingPackageCount) packages, \(waitingItems.count) items waiting")
                     .foregroundStyle(theme.textSecondaryColor)
+                    .fixedSize()
                 Spacer(minLength: 0)
             }
         }
         .padding(.horizontal, 8)
-        .frame(maxHeight: .infinity)
+        // The Touch Bar has no scrolling and SwiftUI's `NSHostingView` sizes
+        // itself to its content's intrinsic size, not to whatever frame
+        // `NSHostingView.frame` is assigned from the AppKit side — without
+        // an explicit width here every element (including the sparkline's
+        // `maxWidth: .infinity`) just hugs its minimum size, cramming
+        // everything to the left. This fixed width stands in for "fill the
+        // available Touch Bar width."
+        .frame(width: 480, height: 30)
     }
 }
