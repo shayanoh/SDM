@@ -325,6 +325,7 @@ private func downloadPartially(
     full.insert(ByteRange(start: 0, end: 4000))
     let poisoned = ResumeSidecar(
         sourceURL: testSourceURL,
+        resolvedURL: nil,
         totalBytes: 4000,
         validator: nil,
         completed: full

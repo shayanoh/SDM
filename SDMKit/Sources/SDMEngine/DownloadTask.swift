@@ -69,6 +69,11 @@ public actor DownloadTask {
     private let transport: any HTTPTransport
     private var configuration: Configuration
 
+    /// The URL workers actually fetch from, pinned to whatever `sourceURL`
+    /// resolved to (after redirects) on the probe that validated this run's
+    /// resume — see `resolvedURL` on `ResumeSidecar`. Defaults to `sourceURL`
+    /// until `prepare()` runs.
+    private var effectiveURL: URL
     private var completed = RangeSet()
     private var reserved: [UUID: ByteRange] = [:]
     /// Absolute byte offset each busy worker has written up to within its
@@ -132,6 +137,7 @@ public actor DownloadTask {
     ) {
         self.id = id
         self.sourceURL = sourceURL
+        self.effectiveURL = sourceURL
         self.destinationURL = destinationURL
         self.transport = transport
         self.configuration = configuration
@@ -227,9 +233,27 @@ public actor DownloadTask {
     /// backing file — restarts at zero rather than risk stitching new bytes
     /// onto stale (or nonexistent) ones.
     private func prepare() async throws {
-        let probe = try await transport.fetch(
-            RangeRequest(url: sourceURL, range: ByteRange(start: 0, end: 1))
+        // Probing whichever URL the *previous* run actually landed on (when
+        // known) rather than always re-resolving `sourceURL` keeps the
+        // validator comparison below meaningful: a redirecting origin like
+        // Fedora's MirrorManager can send a fresh probe to a different mirror
+        // than the one that wrote the bytes on disk, which would otherwise
+        // make a perfectly good resume look like the remote file changed.
+        let existingSidecar = ResumeSidecar.load(from: sidecarURL)
+        let pinnedURL = existingSidecar?.resolvedURL
+        var probe = try await transport.fetch(
+            RangeRequest(url: pinnedURL ?? sourceURL, range: ByteRange(start: 0, end: 1))
         )
+        // The pinned mirror from a prior run may have gone away entirely
+        // between sessions; re-resolve `sourceURL` once rather than failing
+        // a download that would otherwise succeed against any other mirror.
+        // A fresh mirror here still goes through the normal validator
+        // comparison below, so a genuine remote change is still caught.
+        if pinnedURL != nil, !(200..<300).contains(probe.statusCode) {
+            probe = try await transport.fetch(
+                RangeRequest(url: sourceURL, range: ByteRange(start: 0, end: 1))
+            )
+        }
         guard (200..<300).contains(probe.statusCode) else {
             throw statusError(probe.statusCode)
         }
@@ -237,6 +261,7 @@ public actor DownloadTask {
 
         totalBytes = size
         validator = probe.validator
+        effectiveURL = probe.resolvedURL
 
         // A server that ignores Range cannot be segmented: every worker would
         // receive the whole body and overwrite the others' offsets. It also
@@ -256,7 +281,7 @@ public actor DownloadTask {
 
         let incompleteURL = SparseFile.incompleteURL(for: destinationURL)
         if acceptsRanges,
-            let sidecar = ResumeSidecar.load(from: sidecarURL),
+            let sidecar = existingSidecar,
             sidecar.matches(totalBytes: size, validator: probe.validator),
             let onDiskSize = Self.fileSize(at: incompleteURL),
             onDiskSize >= size
@@ -552,7 +577,7 @@ public actor DownloadTask {
                 "\(tag, privacy: .public) requesting url=\(self.sourceURL.absoluteString, privacy: .public) range=\(claim.start, privacy: .public)-\(claim.end, privacy: .public)"
             )
         #endif
-        let response = try await transport.fetch(RangeRequest(url: sourceURL, range: claim))
+        let response = try await transport.fetch(RangeRequest(url: effectiveURL, range: claim))
         guard (200..<300).contains(response.statusCode) else {
             throw statusError(response.statusCode)
         }
@@ -703,6 +728,7 @@ public actor DownloadTask {
             try file.sync()
             let sidecar = ResumeSidecar(
                 sourceURL: sourceURL,
+                resolvedURL: effectiveURL,
                 totalBytes: totalBytes,
                 validator: validator,
                 completed: completed

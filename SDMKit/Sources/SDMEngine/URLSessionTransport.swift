@@ -94,6 +94,7 @@ public final class URLSessionTransport: HTTPTransport, @unchecked Sendable {
             totalSize: Self.totalSize(from: http),
             acceptsRanges: Self.acceptsRanges(from: http),
             validator: Self.validator(from: http),
+            resolvedURL: http.url ?? request.url,
             body: body
         )
     }

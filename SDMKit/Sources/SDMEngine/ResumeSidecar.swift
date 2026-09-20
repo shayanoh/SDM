@@ -8,6 +8,18 @@ public struct ResumeSidecar: Codable, Equatable, Sendable {
 
     public var formatVersion: Int
     public var sourceURL: URL
+    /// The URL the last successful probe/fetch actually resolved to, after
+    /// redirects. A redirecting origin (e.g. a mirror-network frontend, like
+    /// Fedora's `download.fedoraproject.org`) can send each connection to a
+    /// different backend with its own `ETag`/`Last-Modified`; probing
+    /// `sourceURL` fresh on every resume would then compare against whichever
+    /// mirror happens to answer *this time*, not the one the bytes on disk
+    /// actually came from, and `matches` would spuriously fail and discard a
+    /// perfectly good partial download. Reusing the pinned mirror keeps the
+    /// validator comparison meaningful across resumes. `nil` for sidecars
+    /// written before this field existed; those fall back to re-resolving
+    /// `sourceURL`.
+    public var resolvedURL: URL?
     public var totalBytes: Int64
     /// `ETag` or `Last-Modified` captured when the download started.
     public var validator: String?
@@ -16,12 +28,14 @@ public struct ResumeSidecar: Codable, Equatable, Sendable {
     public init(
         formatVersion: Int = ResumeSidecar.currentFormatVersion,
         sourceURL: URL,
+        resolvedURL: URL?,
         totalBytes: Int64,
         validator: String?,
         completed: RangeSet
     ) {
         self.formatVersion = formatVersion
         self.sourceURL = sourceURL
+        self.resolvedURL = resolvedURL
         self.totalBytes = totalBytes
         self.validator = validator
         self.completed = completed

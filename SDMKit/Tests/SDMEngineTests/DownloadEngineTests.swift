@@ -204,6 +204,7 @@ struct GatedOrigin: HTTPTransport {
                 totalSize: total,
                 acceptsRanges: !ignoresRanges,
                 validator: "etag-gated",
+                resolvedURL: request.url,
                 body: AsyncThrowingStream { $0.finish() }
             )
         }
@@ -234,6 +235,7 @@ struct GatedOrigin: HTTPTransport {
             totalSize: total,
             acceptsRanges: !ignoresRanges,
             validator: "etag-gated",
+            resolvedURL: request.url,
             body: body
         )
     }

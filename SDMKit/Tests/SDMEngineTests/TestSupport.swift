@@ -64,6 +64,7 @@ struct WorkerGatedOrigin: HTTPTransport {
                 totalSize: total,
                 acceptsRanges: true,
                 validator: "etag-gated",
+                resolvedURL: request.url,
                 body: AsyncThrowingStream { $0.finish() }
             )
         }
@@ -84,6 +85,7 @@ struct WorkerGatedOrigin: HTTPTransport {
             totalSize: total,
             acceptsRanges: true,
             validator: "etag-gated",
+            resolvedURL: request.url,
             body: body
         )
     }

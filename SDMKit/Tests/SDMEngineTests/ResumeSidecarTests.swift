@@ -7,6 +7,7 @@ import Testing
 private func sampleSidecar() -> ResumeSidecar {
     ResumeSidecar(
         sourceURL: URL(string: "https://example.com/a.bin")!,
+        resolvedURL: nil,
         totalBytes: 1000,
         validator: "etag-1",
         completed: RangeSet([ByteRange(start: 0, end: 250)])
@@ -74,6 +75,7 @@ private func sampleSidecar() -> ResumeSidecar {
 @Test func matchesAcceptsAbsentValidatorOnBothSides() {
     let sidecar = ResumeSidecar(
         sourceURL: URL(string: "https://example.com/a.bin")!,
+        resolvedURL: nil,
         totalBytes: 1000,
         validator: nil,
         completed: RangeSet()

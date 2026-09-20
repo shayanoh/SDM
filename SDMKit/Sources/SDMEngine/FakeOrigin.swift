@@ -54,6 +54,7 @@ public actor FakeOrigin: HTTPTransport {
                 totalSize: behavior.reportedSizeOverride ?? total,
                 acceptsRanges: !behavior.ignoresRanges,
                 validator: behavior.validator,
+                resolvedURL: request.url,
                 body: AsyncThrowingStream { $0.finish() }
             )
         }
@@ -106,6 +107,7 @@ public actor FakeOrigin: HTTPTransport {
             totalSize: behavior.reportedSizeOverride ?? total,
             acceptsRanges: !behavior.ignoresRanges,
             validator: behavior.validator,
+            resolvedURL: request.url,
             body: body
         )
     }
