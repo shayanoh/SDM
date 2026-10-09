@@ -1,8 +1,12 @@
 # SDM — UI Data-Path Performance: Findings and Refactor Plan
 
-**Status: IN PROGRESS (started 2026-10-09).** Steps 1, 2 and 5 are
+**Status: IMPLEMENTED (2026-10-10)**, all seven steps, on branch
+`ui-data-path-perf`; not yet merged. What was consciously left undone is
+listed under steps 3, 4 and 6.
+
+History of the work: Steps 1, 2 and 5 are
 implemented on branch `ui-data-path-perf` (2026-10-09), step 7 likewise;
-steps 6 and 4 on 2026-10-10; step 3 is open. Per-step status is in §4.
+steps 6, 4 and 3 on 2026-10-10. Per-step status is in §4.
 
 > Steps 1, 2 and 5 were tried live by Shayan on 2026-10-09 and are a clear
 > improvement; they have not been measured in Instruments. Step 7 is
@@ -73,7 +77,7 @@ Two things combine; the code alone does not say which dominates:
 |---|---|---|---|
 | 1 | Per-item observable models | App | **Done** |
 | 2 | Aggregates computed once per tick | App + Engine (pure helpers) | **Done** |
-| 3 | Display-sized data in the snapshot | Engine + App | Open |
+| 3 | Display-sized data in the snapshot | Engine + App | **Done** |
 | 4 | Incremental engine snapshot | Engine + App | **Done** |
 | 5 | Window-level leaks | App | **Done** |
 | 6 | Lighter rows | App | **Done** (no visual change) |
@@ -138,6 +142,26 @@ quit check.
 The snapshot carries completed bytes as a number and a short history
 (about 64 samples). Full history is fetched only for the item selected in
 the details panel. Addresses finding 10 and shrinks 7.
+
+**Done (2026-10-10).** `ItemSnapshot.speedHistory` is now the trailing
+`LiveWindow.itemHistorySamples` (64) samples. `SpeedSampler` maintains that
+tail as its own array, so a snapshot shares its storage (and an idle item's
+stays the same storage across ticks) rather than slicing the full history
+every time. Everything a list draws needs no more: the row sparkline is
+48 pt, the package header sums 64, the ETA averages 50.
+
+The sampler's full ten-minute history stays in the engine and is served by
+`DownloadEngine.speedHistories(for:)`. The details panel — whose graph spans
+the panel's width — tells `EngineController.setDetailItems(_:for:)` which
+items it is showing; the controller fetches their full histories each tick
+(and immediately on a selection change) into `ItemLiveModel.detailHistory`,
+and drops them when the selection moves on.
+
+Not done, on purpose: "completed bytes as a number". The row's segmented
+progress bar draws the `RangeSet` itself, so the snapshot has to keep
+carrying it; a byte count beside it would only duplicate
+`completed.totalBytes`. `globalHistory` is also unchanged — it is one
+array for the whole engine, not one per item.
 
 ### Step 4 — Incremental engine snapshot
 

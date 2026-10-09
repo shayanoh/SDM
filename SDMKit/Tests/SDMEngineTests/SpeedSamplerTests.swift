@@ -121,3 +121,25 @@ import Testing
     }
     #expect(sampler.history.count == AppTiming.ticksPerSecond * 60 * 10)
 }
+
+@Test func recentHistoryIsTheTrailingWindowOfTheFullHistory() {
+    var sampler = SpeedSampler(
+        historyLength: 10, averagingWindowSeconds: 2, ticksPerSecond: 1, recentLength: 3)
+    for bytes in [100, 200, 300, 400, 500] as [Int64] {
+        sampler.record(bytes: bytes)
+        sampler.tick()
+    }
+    #expect(sampler.history == [100, 200, 300, 400, 500])
+    #expect(sampler.recentHistory == [300, 400, 500])
+}
+
+@Test func recentHistoryRecordsTheDropToIdleLikeTheFullHistory() {
+    var sampler = SpeedSampler(
+        historyLength: 10, averagingWindowSeconds: 2, ticksPerSecond: 1, recentLength: 3)
+    sampler.record(bytes: 100)
+    sampler.tick()
+    sampler.idle()
+    sampler.idle()
+    #expect(sampler.recentHistory == [100, 0])
+    #expect(sampler.recentHistory == sampler.history)
+}

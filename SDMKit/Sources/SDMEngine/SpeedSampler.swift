@@ -14,6 +14,11 @@ public struct SpeedSampler: Sendable {
     private let ticksPerSecond: Int
     private var pendingBytes: Int64 = 0
     private var samples: [Double] = []
+    /// The trailing `recentLength` of `samples`, kept as its own array so
+    /// handing it to a snapshot shares storage instead of slicing — and an
+    /// idle sampler's stays the *same* storage tick after tick.
+    private var recent: [Double] = []
+    private let recentLength: Int
     /// Trailing window used only for `bytesPerSecond`, separate from the
     /// full `samples` history kept for the sparkline. Cleared by `idle()` so
     /// resuming after an idle stretch reports the new tick's rate outright,
@@ -37,9 +42,12 @@ public struct SpeedSampler: Sendable {
     public init(
         historyLength: Int = AppTiming.ticksPerSecond * 60 * 10,
         averagingWindowSeconds: Double = 2,
-        ticksPerSecond: Int = AppTiming.ticksPerSecond
+        ticksPerSecond: Int = AppTiming.ticksPerSecond,
+        recentLength: Int = LiveWindow.itemHistorySamples
     ) {
         precondition(historyLength > 0, "historyLength must be positive")
+        precondition(recentLength > 0, "recentLength must be positive")
+        self.recentLength = recentLength
         precondition(averagingWindowSeconds > 0, "averagingWindowSeconds must be positive")
         precondition(ticksPerSecond > 0, "ticksPerSecond must be positive")
         self.historyLength = historyLength
@@ -104,6 +112,10 @@ public struct SpeedSampler: Sendable {
         if samples.count > historyLength {
             samples.removeFirst(samples.count - historyLength)
         }
+        recent.append(value)
+        if recent.count > recentLength {
+            recent.removeFirst(recent.count - recentLength)
+        }
     }
 
     /// Mean of the trailing `averagingWindowSeconds` of samples since the
@@ -115,4 +127,8 @@ public struct SpeedSampler: Sendable {
     }
 
     public var history: [Double] { samples }
+
+    /// The trailing `recentLength` samples of `history` — what a snapshot
+    /// carries per item.
+    public var recentHistory: [Double] { recent }
 }

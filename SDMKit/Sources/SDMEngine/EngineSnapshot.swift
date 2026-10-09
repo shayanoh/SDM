@@ -19,6 +19,9 @@ public struct ItemSnapshot: Sendable, Equatable, Identifiable {
     public let activeSegments: Int
     public let configuredSegments: Int
     public let bytesPerSecond: Double
+    /// The trailing `LiveWindow.itemHistorySamples` speed samples — enough
+    /// for a row's sparkline and ETA, not the sampler's whole history. The
+    /// full series comes from `DownloadEngine.speedHistories(for:)`.
     public let speedHistory: [Double]
     /// Why this download's resume state could not be written, or `nil` when
     /// checkpointing is healthy. Surfaced because a sidecar that silently

@@ -9,6 +9,12 @@ public enum LiveWindow {
     /// The header draws it 60 pt wide and `Sparkline` takes one sample per
     /// point, so anything beyond that is never drawn.
     public static let packageSparklineSamples = 64
+    /// How many trailing speed samples an `ItemSnapshot` carries. Enough
+    /// for everything a list draws from it — the 48 pt row sparkline, the
+    /// package header's sum, and the ETA average — while the sampler's full
+    /// ten-minute history stays in the engine until something asks for it
+    /// (`DownloadEngine.speedHistories(for:)`).
+    public static let itemHistorySamples = 64
 }
 
 /// Mean of the trailing `LiveWindow.etaTicks` samples, or `fallback` when

@@ -63,6 +63,13 @@ final class EngineController {
     /// Starts `true` so nothing is ever stale before the window first
     /// reports in.
     @ObservationIgnored private var isListVisible = true
+    /// The items each details panel is currently showing, keyed by the
+    /// panel's own token — see `setDetailItems(_:for:)`.
+    @ObservationIgnored private var detailItemsByOwner: [UUID: Set<UUID>] = [:]
+    /// The union of `detailItemsByOwner`, and the ids that last received a
+    /// `detailHistory`, so deselected items can have theirs dropped.
+    @ObservationIgnored private var detailItemIDs: Set<UUID> = []
+    @ObservationIgnored private var itemsHoldingDetailHistory: Set<UUID> = []
     /// Set when the list structure changed while no list was visible, so
     /// the catch-up refresh knows to drop models of removed items too.
     @ObservationIgnored private var liveModelsNeedPruning = false
@@ -190,6 +197,7 @@ final class EngineController {
             notifyChanges(from: previousSnapshot, to: newSnapshot)
             previousSnapshot = newSnapshot
             publish(newSnapshot)
+            await refreshDetailHistories()
             try? await Task.sleep(for: .seconds(1.0 / Double(AppTiming.ticksPerSecond)))
         }
     }
@@ -293,6 +301,40 @@ final class EngineController {
         itemModels = itemModels.filter { liveItemIDs.contains($0.key) }
         let livePackageIDs = Set(snapshot.packages.map(\.id))
         packageModels = packageModels.filter { livePackageIDs.contains($0.key) }
+    }
+
+    /// Declares which items a details panel is showing, so their *full*
+    /// speed histories are fetched from the engine each tick; every other
+    /// item only ever has the short tail its snapshot carries. `owner`
+    /// identifies the panel — the Downloads and Completed tabs each have
+    /// one, and during a tab switch one may appear before the other has
+    /// gone — and an empty set withdraws that panel's claim.
+    func setDetailItems(_ itemIDs: Set<UUID>, for owner: UUID) {
+        if itemIDs.isEmpty {
+            detailItemsByOwner[owner] = nil
+        } else {
+            detailItemsByOwner[owner] = itemIDs
+        }
+        let union = detailItemsByOwner.values.reduce(into: Set<UUID>()) { $0.formUnion($1) }
+        guard union != detailItemIDs else { return }
+        detailItemIDs = union
+        // Fetched straight away rather than on the next tick, so a newly
+        // selected item's graph does not sit at its short history first.
+        Task { await refreshDetailHistories() }
+    }
+
+    private func refreshDetailHistories() async {
+        let wanted = detailItemIDs
+        let histories = wanted.isEmpty ? [:] : await engine.speedHistories(for: wanted)
+        // The selection may have moved on while the engine was answering.
+        guard wanted == detailItemIDs else { return }
+        for itemID in itemsHoldingDetailHistory.subtracting(wanted) {
+            itemModels[itemID]?.setDetailHistory(nil)
+        }
+        for itemID in wanted {
+            itemModels[itemID]?.setDetailHistory(histories[itemID])
+        }
+        itemsHoldingDetailHistory = wanted
     }
 
     /// Tells the controller whether any downloads list is on screen. The

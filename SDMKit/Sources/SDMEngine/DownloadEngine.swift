@@ -1230,7 +1230,7 @@ public actor DownloadEngine {
                         activeSegments: active,
                         configuredSegments: segmentCount(for: item.id),
                         bytesPerSecond: sampler.bytesPerSecond,
-                        speedHistory: sampler.history,
+                        speedHistory: sampler.recentHistory,
                         checkpointFailure: checkpointFailure,
                         remainingAttempts: failedAttempts[item.id].map {
                             retryPolicy.maxAttempts - $0
@@ -1287,6 +1287,18 @@ public actor DownloadEngine {
         let result = lastSnapshot == built ? lastSnapshot ?? built : built
         lastSnapshot = result
         lastSnapshotGeneration = builtAtGeneration
+        return result
+    }
+
+    /// Each requested item's full speed history — the sampler's whole
+    /// retained series, not the short tail a snapshot carries. For the one
+    /// place that draws a wide graph of a specific item: the details panel.
+    /// Items with no sampler are simply absent from the result.
+    public func speedHistories(for itemIDs: Set<UUID>) -> [UUID: [Double]] {
+        var result: [UUID: [Double]] = [:]
+        for itemID in itemIDs {
+            if let sampler = samplers[itemID] { result[itemID] = sampler.history }
+        }
         return result
     }
 

@@ -468,6 +468,8 @@ struct BottomPanel: View {
     public var theme: Theme
     public var downloadItems: [ItemSnapshot]
     public var allPackages: [PackageSnapshot]
+    /// Identifies this panel to `EngineController.setDetailItems(_:for:)`.
+    @State private var detailOwner = UUID()
     var body: some View {
         ScrollView {
             if downloadItems.isEmpty {
@@ -486,6 +488,14 @@ struct BottomPanel: View {
             }
         }
         .background(theme.surfaceSecondaryColor)
+        // The panel's graphs span its whole width, far more than the short
+        // history a snapshot carries per item — so it asks for the full
+        // history of exactly the items it is showing, and gives that up
+        // when it goes away.
+        .onChange(of: downloadItems.map(\.id), initial: true) { _, itemIDs in
+            controller.setDetailItems(Set(itemIDs), for: detailOwner)
+        }
+        .onDisappear { controller.setDetailItems([], for: detailOwner) }
     }
 
     @ViewBuilder
@@ -514,7 +524,7 @@ struct BottomPanel: View {
             sumFractionCompleted += item.fractionCompleted
             activeSegments += live.activeSegments
             configuredSegments += live.configuredSegments
-            let itemSpeedHistory = live.speedHistory
+            let itemSpeedHistory = live.detailHistory ?? live.speedHistory
             if speedHistory.isEmpty && itemSpeedHistory.count > 0 {
                 speedHistory = itemSpeedHistory
             } else {
@@ -692,7 +702,7 @@ struct BottomPanel: View {
             GridRow {
                 HStack {
                     Sparkline(
-                        samples: live.speedHistory,
+                        samples: live.detailHistory ?? live.speedHistory,
                         color: theme.graphStrokeColor
                     )
                     .frame(maxWidth: .infinity)

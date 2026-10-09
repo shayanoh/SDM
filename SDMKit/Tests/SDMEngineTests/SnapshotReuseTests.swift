@@ -198,3 +198,30 @@ private func sharesStorage<Element>(_ a: [Element], _ b: [Element]) -> Bool {
     #expect(after.packages[0].items[0].isEnabled == false)
     #expect(sharesStorage(before.packages[1].items, after.packages[1].items))
 }
+
+// MARK: - Display-sized history
+
+@Test func snapshotCarriesOnlyTheRecentHistoryWhileTheEngineKeepsTheFullOne() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let engine = makeEngine(dir: dir)
+    let item = DownloadItem(url: testSourceURL, filename: "a.bin")
+    await engine.add(DownloadPackage(name: "Batch", items: [item]))
+    try await engine.runUntilIdle()
+    // One real tick folds the transferred bytes in; the rest are idle and
+    // add a single zero, so the full history is exactly two samples.
+    for _ in 0..<5 { await engine.tick() }
+
+    let short = try #require(await snapshotItem(item.id, in: engine)).speedHistory
+    let full = try #require(await engine.speedHistories(for: [item.id])[item.id])
+    #expect(short.count <= LiveWindow.itemHistorySamples)
+    #expect(short == Array(full.suffix(LiveWindow.itemHistorySamples)))
+    #expect(full.reduce(0, +) > 0)
+}
+
+@Test func speedHistoriesOmitsUnknownItems() async throws {
+    let dir = try makeScratchDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let engine = makeEngine(dir: dir)
+    #expect(await engine.speedHistories(for: [UUID()]).isEmpty)
+}

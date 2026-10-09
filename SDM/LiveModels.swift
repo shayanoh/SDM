@@ -34,6 +34,14 @@ final class ItemLiveModel {
     /// treating it as structural would hand the `List` a new data source
     /// once a second for as long as anything is retrying.
     private(set) var retryHoldSeconds: Int?
+    /// The item's full speed history, present only while the details panel
+    /// is showing this item — `speedHistory` above is the short tail every
+    /// snapshot carries. See `EngineController.setDetailItems(_:for:)`.
+    private(set) var detailHistory: [Double]?
+
+    func setDetailHistory(_ history: [Double]?) {
+        if detailHistory != history { detailHistory = history }
+    }
 
     init(_ item: ItemSnapshot) {
         retryHoldSeconds = item.retryHoldSeconds
