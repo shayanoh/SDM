@@ -24,6 +24,19 @@ public struct ResumeSidecar: Codable, Equatable, Sendable {
     /// `ETag` or `Last-Modified` captured when the download started.
     public var validator: String?
     public var completed: RangeSet
+    /// The subset of `completed` that had been `fsync`ed when this sidecar
+    /// was written. The file is only flushed to the device about once a
+    /// minute (`DownloadTask.Configuration.syncIntervalTicks`), while the
+    /// sidecar is rewritten far more often, so `completed` can be ahead of
+    /// what would survive a power cut. `nil` for sidecars written before
+    /// this field existed — those were always flushed first, so their
+    /// `completed` is itself durable.
+    public var durableCompleted: RangeSet?
+    /// `kern.bootsessionuuid` when this sidecar was written. Same value now
+    /// means the machine has not restarted since, so everything written is
+    /// still in the page cache (or on disk) and `completed` can be trusted
+    /// whole. See `resumableRanges(bootSessionID:)`.
+    public var bootSessionID: String?
 
     public init(
         formatVersion: Int = ResumeSidecar.currentFormatVersion,
@@ -31,8 +44,12 @@ public struct ResumeSidecar: Codable, Equatable, Sendable {
         resolvedURL: URL?,
         totalBytes: Int64,
         validator: String?,
-        completed: RangeSet
+        completed: RangeSet,
+        durableCompleted: RangeSet? = nil,
+        bootSessionID: String? = nil
     ) {
+        self.durableCompleted = durableCompleted
+        self.bootSessionID = bootSessionID
         self.formatVersion = formatVersion
         self.sourceURL = sourceURL
         self.resolvedURL = resolvedURL
@@ -49,6 +66,34 @@ public struct ResumeSidecar: Codable, Equatable, Sendable {
     public func matches(totalBytes: Int64, validator: String?) -> Bool {
         self.totalBytes == totalBytes && self.validator == validator
     }
+
+    /// The ranges a resume may trust.
+    ///
+    /// Written bytes that were never `fsync`ed survive a crash or a force
+    /// quit — the kernel still holds them — but not a power cut or kernel
+    /// panic. A changed boot session is how the difference is told apart:
+    /// same session, trust everything recorded; different session (or one
+    /// that cannot be determined), fall back to what was flushed. Trusting
+    /// `completed` after a power cut would stitch new bytes onto blocks
+    /// that never reached the disk and finalize a silently corrupt file.
+    public func resumableRanges(bootSessionID current: String?) -> RangeSet {
+        guard let durableCompleted else { return completed }
+        if let current, let bootSessionID, current == bootSessionID { return completed }
+        return durableCompleted
+    }
+
+    /// This boot's `kern.bootsessionuuid`, or `nil` if it cannot be read.
+    public static let currentBootSessionID: String? = {
+        var size = 0
+        guard sysctlbyname("kern.bootsessionuuid", nil, &size, nil, 0) == 0, size > 0 else {
+            return nil
+        }
+        var buffer = [CChar](repeating: 0, count: size)
+        guard sysctlbyname("kern.bootsessionuuid", &buffer, &size, nil, 0) == 0 else {
+            return nil
+        }
+        return String(cString: buffer)
+    }()
 
     public func save(to url: URL) throws {
         let data = try JSONEncoder().encode(self)

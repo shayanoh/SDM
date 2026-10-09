@@ -50,6 +50,16 @@ public actor DownloadTask {
         /// signed URL the engine can refresh) rather than a plain
         /// `serverError`. It carries the yt-dlp `format_id`.
         public var refreshableFormatID: String?
+        /// Heartbeat ticks between `fsync`s of the partial file. The
+        /// sidecar is rewritten on every checkpoint, but flushing the file
+        /// to the device on each one cost about as much time as writing the
+        /// data did; once a minute bounds what a power cut can lose to a
+        /// minute's worth, and a crash or force quit still loses nothing.
+        public var syncIntervalTicks: Int
+        /// Identifies the current boot — see
+        /// `ResumeSidecar.resumableRanges(bootSessionID:)`. Injected so a
+        /// test can stand in for a restart.
+        public var bootSessionID: String?
 
         public init(
             workerCount: Int,
@@ -57,8 +67,13 @@ public actor DownloadTask {
             checkpointInterval: Int64,
             checkpointStalenessTicks: Int = AppTiming.ticksPerSecond * 5,
             cachedCompleted: RangeSet?,
-            refreshableFormatID: String? = nil
+            refreshableFormatID: String? = nil,
+            syncIntervalTicks: Int = AppTiming.ticksPerSecond * 60,
+            bootSessionID: String? = ResumeSidecar.currentBootSessionID
         ) {
+            precondition(syncIntervalTicks > 0, "syncIntervalTicks must be positive")
+            self.syncIntervalTicks = syncIntervalTicks
+            self.bootSessionID = bootSessionID
             precondition(workerCount >= 1, "workerCount must be at least 1")
             precondition(minChunk > 0, "minChunk must be positive")
             precondition(checkpointInterval > 0, "checkpointInterval must be positive")
@@ -100,6 +115,13 @@ public actor DownloadTask {
     /// Elapsed 1 Hz ticks since the last checkpoint, for the wall-clock
     /// trigger driven by `checkpointTick()`.
     private var ticksSinceCheckpoint: Int = 0
+    /// The part of `completed` known to have reached the storage device:
+    /// its value at the last `fsync`. What a sidecar records as
+    /// `durableCompleted`.
+    private var durable = RangeSet()
+    /// Elapsed heartbeat ticks since the last `fsync`, advanced by
+    /// `checkpointTick()`.
+    private var ticksSinceSync: Int = 0
     private var acceptsRanges = true
     /// Why the most recent checkpoint failed, or `nil` if the last one
     /// succeeded. A sidecar that cannot be written means a crash loses all
@@ -214,6 +236,13 @@ public actor DownloadTask {
             // `.incomplete` and the sidecar are left in place — a failed
             // download must stay resumable. SparseFile.close() is
             // idempotent, so this can't fight with Task 10's pause().
+            //
+            // One last flushed checkpoint first (a no-op once `pause()` has
+            // already cleared `file`): the sidecar then vouches for every
+            // byte this attempt wrote, rather than only what the last
+            // once-a-minute flush covered. Skipped when nothing was written
+            // at all, so an attempt that never got a byte leaves no sidecar.
+            if !completed.ranges.isEmpty { checkpoint(forceSync: true) }
             file?.close()
             throw error
         }
@@ -306,14 +335,26 @@ public actor DownloadTask {
             let onDiskSize = Self.fileSize(at: incompleteURL),
             onDiskSize >= size
         {
-            completed = sidecar.completed
+            completed = sidecar.resumableRanges(bootSessionID: configuration.bootSessionID)
         } else {
             completed = RangeSet()
             ResumeSidecar.remove(at: sidecarURL)
             try? FileManager.default.removeItem(at: incompleteURL)
         }
 
-        file = try SparseFile(finalURL: destinationURL, totalBytes: size)
+        let opened = try SparseFile(finalURL: destinationURL, totalBytes: size)
+        file = opened
+        // Resumed bytes may still be only in the page cache (the previous
+        // run does not flush on every checkpoint). One flush here makes
+        // them durable before any sidecar of this run vouches for them; if
+        // it fails, this run simply vouches for nothing until its first
+        // successful flush.
+        if completed.ranges.isEmpty {
+            durable = RangeSet()
+        } else {
+            durable = (try? opened.sync()) != nil ? completed : RangeSet()
+        }
+        ticksSinceSync = 0
     }
 
     private static func fileSize(at url: URL) -> Int64? {
@@ -357,7 +398,9 @@ public actor DownloadTask {
         isPaused = true
         guard file != nil else { return }
         targetWorkerCount = 0
-        checkpoint()
+        // A deliberate stop flushes: what the sidecar records is then
+        // durable in full, whatever happens to the machine afterwards.
+        checkpoint(forceSync: true)
         file?.close()
         file = nil
     }
@@ -639,8 +682,10 @@ public actor DownloadTask {
             // ran — recording bytes that were never durably written.
             guard let file else { break }
             let writable = Swift.min(Int64(chunk.count), effectiveEnd - offset)
-            let slice = chunk.prefix(Int(writable))
-            try file.write(Data(slice), at: offset)
+            // Written straight from the received buffer. `prefix` is a view
+            // onto the same storage; wrapping it in `Data(...)` copied every
+            // downloaded byte once more before it reached `pwrite`.
+            try file.write(chunk.prefix(Int(writable)), at: offset)
             record(ByteRange(start: offset, end: offset + writable))
             offset += writable
             writeCursor[workerID] = offset
@@ -708,28 +753,36 @@ public actor DownloadTask {
     public func checkpointTick() {
         guard file != nil else { return }
         ticksSinceCheckpoint += 1
+        ticksSinceSync += 1
         guard ticksSinceCheckpoint >= configuration.checkpointStalenessTicks else { return }
         checkpoint()
     }
 
-    /// Writes the sidecar describing what is durably on disk.
+    /// Writes the sidecar describing what has been written, and — about once
+    /// a minute, or when `forceSync` — flushes the file first.
     ///
-    /// The `fsync` is load-bearing and must come first. The sidecar is written
-    /// with `Data.write(options: .atomic)` — a temp file plus a rename, which
-    /// macOS orders aggressively — so without it, under power loss or a kernel
-    /// panic, the sidecar can land while the `pwrite`s it describes have not.
-    /// The next launch then trusts a `RangeSet` covering zero-filled blocks;
-    /// `prepare()`'s backing-file size check passes (the file was `ftruncate`d
-    /// to full size at creation), and the download finalizes silently corrupt.
-    /// Against a mere process crash the page cache covers for you, which is
-    /// why this was invisible in testing. One fsync per 8 MB per worker is
-    /// negligible.
+    /// The sidecar records two sets: `completed`, everything written, and
+    /// `durableCompleted`, what had been `fsync`ed. Recording only the first
+    /// without flushing would be unsafe: the sidecar is written with
+    /// `Data.write(options: .atomic)` — a temp file plus a rename, which
+    /// macOS orders aggressively — so under power loss or a kernel panic it
+    /// can land while the `pwrite`s it describes have not. The next launch
+    /// would then trust a `RangeSet` covering zero-filled blocks;
+    /// `prepare()`'s backing-file size check passes (the file was
+    /// `ftruncate`d to full size at creation), and the download finalizes
+    /// silently corrupt. `ResumeSidecar.resumableRanges(bootSessionID:)` is
+    /// what keeps that from happening while still flushing rarely: after a
+    /// restart only the flushed set is trusted.
+    ///
+    /// Flushing on *every* checkpoint, as this used to, was measured at
+    /// about as much time as writing the data itself, and it blocks every
+    /// worker of the file while it runs.
     ///
     /// Failures used to be swallowed by `try?`. A sidecar that silently fails
     /// to write means a crash loses all progress with no signal anywhere, so
     /// the reason is recorded in `lastCheckpointFailure` and surfaced through
     /// the engine's snapshot to the UI.
-    private func checkpoint() {
+    private func checkpoint(forceSync: Bool = false) {
         bytesSinceCheckpoint = 0
         ticksSinceCheckpoint = 0
         // Spec §5.3: no Range support means no checkpointing. A sidecar
@@ -745,13 +798,19 @@ public actor DownloadTask {
         guard let file else { return }
 
         do {
-            try file.sync()
+            if forceSync || ticksSinceSync >= configuration.syncIntervalTicks {
+                try file.sync()
+                durable = completed
+                ticksSinceSync = 0
+            }
             let sidecar = ResumeSidecar(
                 sourceURL: sourceURL,
                 resolvedURL: effectiveURL,
                 totalBytes: totalBytes,
                 validator: validator,
-                completed: completed
+                completed: completed,
+                durableCompleted: durable,
+                bootSessionID: configuration.bootSessionID
             )
             try sidecar.save(to: sidecarURL)
             lastCheckpointFailure = nil
