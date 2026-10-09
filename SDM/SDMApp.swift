@@ -140,6 +140,19 @@ struct SDMApp: App {
         appDelegate.controller = engine
         appDelegate.activationPolicyController = activationPolicy
         touchBarController.configure(controller: engine, themeStore: themeStore)
+        // Driven from the controller's publish, not from a `.onChange` on a
+        // scene below — see `EngineController.onPublish`. `update(fraction:
+        // drawCircle:)` only re-rasterizes the icon when the ring would
+        // actually look different, so calling it on every publish is cheap.
+        let menuBarIcon = menuBarIconController
+        let touchBar = touchBarController
+        engine.onPublish = { [weak engine] in
+            guard let engine else { return }
+            menuBarIcon.update(
+                fraction: engine.stats.overallFraction,
+                drawCircle: engine.stats.runningCount > 0)
+            touchBar.update()
+        }
 
         engine.startHeartbeatIfNeeded()
         managed.start()
@@ -263,28 +276,12 @@ struct SDMApp: App {
                 .environment(grabberController)
                 .environment(themeStore)
         } label: {
-            Image(nsImage: menuBarIconController.image)
+            MenuBarIconLabel(controller: menuBarIconController)
         }
         .menuBarExtraStyle(.window)
-        // Three narrow triggers rather than one on the whole `snapshot`:
-        // watching `snapshot` meant an `Equatable` compare of every item on
-        // every tick just to learn "something moved". Between them these
-        // cover everything `refreshChrome()` reads — the ring's fraction,
-        // whether anything is running, and (for the Touch Bar's pause/resume
-        // state) any item's state or enablement.
-        .onChange(of: controller.stats.overallFraction) { _, _ in refreshChrome() }
-        .onChange(of: controller.stats.runningCount) { _, _ in refreshChrome() }
-        .onChange(of: controller.structuralPackages) { _, _ in refreshChrome() }
-    }
-
-    /// `update(fraction:drawCircle:)` only re-rasterizes the icon when the
-    /// ring would actually look different, so calling this more often than
-    /// strictly needed is harmless.
-    private func refreshChrome() {
-        menuBarIconController.update(
-            fraction: controller.stats.overallFraction,
-            drawCircle: controller.stats.runningCount > 0)
-        touchBarController.update()
+        // Deliberately no `.onChange` here on anything that moves per tick:
+        // this `body` must not read such a value at all. See
+        // `EngineController.onPublish`.
     }
 
     private func handleOpenUrl(_ url: URL) async {
@@ -321,4 +318,15 @@ struct SDMApp: App {
         Binding(get: { activationPolicyController.showsMenuBarIcon }, set: { _ in })
     }
 
+}
+
+/// The status item's image. A view of its own so the read of
+/// `MenuBarIconController.image` — which changes as the ring advances —
+/// invalidates only this label, not `SDMApp.body` and every scene in it.
+private struct MenuBarIconLabel: View {
+    let controller: MenuBarIconController
+
+    var body: some View {
+        Image(nsImage: controller.image)
+    }
 }

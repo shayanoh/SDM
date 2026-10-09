@@ -19,8 +19,9 @@ import SwiftUI
 /// which have no Touch Bar hardware, and behaves identically in the Touch
 /// Bar Simulator — no availability guard is needed.
 ///
-/// `update()` is called from `SDMApp.refreshChrome()`, the same hook that
-/// refreshes the menu bar icon, so this needs no timer of its own. It only ever decides *whether* the bar is installed;
+/// `update()` is called from `EngineController.onPublish` (wired up in
+/// `SDMApp.init`), the same hook that refreshes the menu bar icon, so this
+/// needs no timer of its own. It only ever decides *whether* the bar is installed;
 /// once installed, `TouchBarContentView`'s own `@Observable` reads keep its
 /// display content live on their own — the pause/resume button below is the
 /// one thing this class must refresh by hand, since it's a plain AppKit

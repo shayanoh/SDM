@@ -59,6 +59,13 @@ final class EngineController {
     /// changed.
     @ObservationIgnored private var itemModels: [UUID: ItemLiveModel] = [:]
     @ObservationIgnored private var packageModels: [UUID: PackageLiveModel] = [:]
+    /// Called after every publish that changed something — the hook for
+    /// state that lives outside any view (the menu bar icon, the Touch
+    /// Bar). It exists so `SDMApp.body` does not have to watch a per-tick
+    /// value to refresh them: a `Scene`-level `.onChange` on one re-ran the
+    /// whole scene body every tick, and with it SwiftUI re-applied the main
+    /// window's toolbar — the largest main-thread cost while downloading.
+    @ObservationIgnored var onPublish: (() -> Void)?
     /// Whether a downloads list is on screen — see `setListVisible(_:)`.
     /// Starts `true` so nothing is ever stale before the window first
     /// reports in.
@@ -212,6 +219,8 @@ final class EngineController {
         // *reassignment*, not on value change, so assigning it anyway would
         // re-evaluate every reader at full tick rate with nothing running.
         guard newSnapshot != snapshot else { return }
+        // Runs last, once everything below is in its new state.
+        defer { onPublish?() }
         let priorSnapshot = snapshot
         snapshot = newSnapshot
         stats.update(from: newSnapshot)
