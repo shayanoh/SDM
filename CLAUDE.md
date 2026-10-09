@@ -6,13 +6,15 @@ macOS download manager. Segmented transfers, resume, clipboard link grabbing, Yo
 
 ## Current state
 
-**All five phases are complete and merged to `main`** (Phase 1 merged 2026-08-04, Phase 5 merged 2026-09-02). ~401 tests, no network and no real clock anywhere in the suite.
+**All five phases are complete and merged to `main`** (Phase 1 merged 2026-08-04, Phase 5 merged 2026-09-02). ~549 tests, no network and no real clock anywhere in the suite.
 
 `SDMKit/` is a local SPM package with **four library targets** — `SDMCore`, `SDMEngine`, `SDMGrabber`, `SDMResolve` — linked into the `SDM` app target. The engine, scheduler, persistence, linkgrabber, menu bar, notifications, theming, activation-policy modes, and the yt-dlp/YouTube feature (multi-component downloads, `ffmpeg` muxing, silent 403 URL refresh, playlists, format picker, YouTube Settings tab) all work end to end.
 
 **What's still open lives in `todo.md` at the repo root** — a couple of consciously-deferred Phase 5 items (proactive URL refresh, per-component details panel) and the small Phase 1 follow-ups owed since before Phase 3. Nothing in the design specs or plan docs is an open backlog; they carry "IMPLEMENTED" / "SUPERSEDED" status banners.
 
 **Managed binaries (2026-09-03):** `yt-dlp` / `ffmpeg` / `ffprobe` / `qjs` (QuickJS-ng) are provisioned into `~/Library/Application Support/SDM/bin/` — ffmpeg/ffprobe/qjs bundled as LZFSE blobs and inflated on launch, yt-dlp downloaded + SHA-256-verified + self-updated by `SDMResolve/ManagedBinaries.swift`. No `brew install` required. Spec: `docs/superpowers/specs/2026-09-03-managed-binaries-design.md`.
+
+**UI data path (2026-10-10):** the engine → UI path was reworked for CPU and scrolling: per-item / per-package `@Observable` live models and whole-engine `EngineStats` (`SDM/LiveModels.swift`), aggregates computed once per tick (`SDMEngine/SnapshotAggregates.swift`), engine snapshots reused when unchanged, a 64-sample speed history per item with the full one fetched only for the details panel. Findings, what was done and what was deliberately left: `docs/superpowers/specs/2026-10-09-ui-data-path-performance.md`.
 
 **Multi-site resolver + HLS/DASH wholesale (2026-09-03):** the yt-dlp gate is a curated ~50-site `SiteRegistry` (`SDMResolve`), not just YouTube — Vimeo, Twitch, TikTok, SoundCloud, Reddit, Aparat, the major adult tubes, etc. HLS/DASH-only videos (no single `Range`-capable URL) download via `YtDlpWholesaleDownloader` (yt-dlp as a downloader) driven by `WholesaleComponentTask` in the engine; that path is non-resumable and its progress is a synthesized `RangeSet`. Spec: `docs/superpowers/specs/2026-09-03-multi-site-resolver-design.md`.
 
@@ -50,6 +52,9 @@ Everything else falls out of this: changing the segment count mid-flight, resumi
 - **Running non-resumable items reserve their slots before rank-based filling.** Skipping this produces unsatisfiable desired sets and thrash. `isResumable` is three-state (`Bool?`): `nil` means not yet probed, and the scheduler keys on `== false`, so an unprobed item stays preemptible. Collapsing unknown into "not resumable" makes every running item unpreemptible and silently kills preemption — that bug shipped once already.
 - **Verdict rules and package clustering are pure functions** over value types, with fixture tables. Tune the data, not the control flow.
 - **Views never touch engine actors.** They consume a coalesced snapshot stream published off the engine heartbeat (`AppTiming.ticksPerSecond`).
+- **Per-tick figures reach views through per-object live models, not one shared observable.** `EngineController.publish` writes a model's field only when it changed (`@Observable` notifies on assignment, not on value change); `structuralPackages` is what tells the `List` its rows changed. A view that reads `controller.snapshot` in its `body` re-evaluates every tick — keep such reads in small leaf views.
+- **Nothing may sit between the `List` and a row's `.tag`, `.listRowBackground` and `.draggable`.** Wrapping a row in `.equatable()`, or putting `.onGeometryChange` above those, hides them from the `List` (selection, row color and drag all broke that way once). A skip-if-unchanged boundary goes *inside* the row — see `ItemRowBody`.
+- **`DownloadEngine.snapshot()` reuses unchanged values.** Every stored property it reads bumps `snapshotGeneration` in its `didSet`; a new snapshot input must do the same or an idle engine will serve a stale snapshot.
 - **Colors come from theme roles, never literals.** macOS-26-only APIs live in one `ViewModifier` file, never inline in views.
 
 ## Phasing
