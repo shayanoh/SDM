@@ -254,18 +254,22 @@ import Testing
         transport: FakeOrigin(payload: testPayload(10)),
         stateStore: InMemoryStateStore(),
         settings: EngineSettings(
-            maxConcurrent: 1, segmentsPerItem: 1, globalMaxConnections: 8, downloadFolder: dir)
+            maxConcurrent: 1, segmentsPerItem: 1, globalMaxConnections: 8, downloadFolder: dir,
+            fileCheckIntervalTicks: 1)
     )
     let item = DownloadItem(url: testSourceURL, filename: "a.bin")
     let packageID = UUID()
     await engine.add(DownloadPackage(id: packageID, name: "Batch", items: [item]))
     try await engine.runUntilIdle()
 
+    await engine.tick()
     #expect(await snapshotItem(item.id, in: engine)?.fileMissing == false)
 
     let destination = dir.appendingPathComponent("Batch").appendingPathComponent("a.bin")
     try FileManager.default.removeItem(at: destination)
 
+    // The file is checked on the tick, not inside `snapshot()`.
+    await engine.tick()
     #expect(await snapshotItem(item.id, in: engine)?.fileMissing == true)
 }
 

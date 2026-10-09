@@ -104,6 +104,10 @@ final class ItemLiveModel {
 final class PackageLiveModel {
     let id: UUID
     private(set) var aggregate: PackageAggregate
+    /// Whether the package had a running item when last refreshed.
+    /// Bookkeeping for `EngineController.refreshLiveModels`, not something a
+    /// view reads — hence not observed.
+    @ObservationIgnored var hasRunningItems = false
 
     init(id: UUID, aggregate: PackageAggregate) {
         self.id = id

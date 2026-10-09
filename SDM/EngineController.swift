@@ -204,6 +204,7 @@ final class EngineController {
         // *reassignment*, not on value change, so assigning it anyway would
         // re-evaluate every reader at full tick rate with nothing running.
         guard newSnapshot != snapshot else { return }
+        let priorSnapshot = snapshot
         snapshot = newSnapshot
         stats.update(from: newSnapshot)
 
@@ -215,7 +216,9 @@ final class EngineController {
         // its model already there. Skipped entirely while no list is on
         // screen — see `setListVisible(_:)`.
         if isListVisible {
-            refreshLiveModels(from: newSnapshot, structuralChanged: structuralChanged)
+            refreshLiveModels(
+                from: newSnapshot, previous: priorSnapshot,
+                structuralChanged: structuralChanged)
         } else if structuralChanged {
             liveModelsNeedPruning = true
         }
@@ -231,9 +234,29 @@ final class EngineController {
     /// Brings every item's and package's live model in line with
     /// `snapshot`, creating missing ones and — when the set of items may
     /// have changed — dropping the ones whose item or package is gone.
-    private func refreshLiveModels(from snapshot: EngineSnapshot, structuralChanged: Bool) {
+    ///
+    /// - Parameter previous: the snapshot the models were last refreshed
+    ///   from, or `nil` when they may be arbitrarily out of date (catching
+    ///   up after the list was hidden). A package whose items are unchanged
+    ///   since `previous` is skipped — and the engine hands back the *same*
+    ///   `items` storage for an unchanged package, so that check is O(1)
+    ///   rather than a walk over every item.
+    private func refreshLiveModels(
+        from snapshot: EngineSnapshot, previous: EngineSnapshot?, structuralChanged: Bool
+    ) {
         let globalRecentSpeed = stats.recentGlobalSpeed
-        for package in snapshot.packages {
+        let previousPackages = structuralChanged ? nil : previous?.packages
+        for (index, package) in snapshot.packages.enumerated() {
+            // With no structural change the packages line up by index. A
+            // package with a running item is never skipped: its ETA also
+            // depends on the global rate.
+            if let previousPackages, index < previousPackages.count,
+                previousPackages[index].id == package.id,
+                let model = packageModels[package.id], !model.hasRunningItems,
+                previousPackages[index].items == package.items
+            {
+                continue
+            }
             var isStale = structuralChanged
             var hasRunning = false
             for item in package.items {
@@ -254,11 +277,14 @@ final class EngineController {
                         PackageAggregate(
                             items: package.items, globalRecentSpeed: globalRecentSpeed))
                 }
+                model.hasRunningItems = hasRunning
             } else {
-                packageModels[package.id] = PackageLiveModel(
+                let model = PackageLiveModel(
                     id: package.id,
                     aggregate: PackageAggregate(
                         items: package.items, globalRecentSpeed: globalRecentSpeed))
+                model.hasRunningItems = hasRunning
+                packageModels[package.id] = model
             }
         }
 
@@ -283,7 +309,8 @@ final class EngineController {
         guard visible != isListVisible else { return }
         isListVisible = visible
         guard visible else { return }
-        refreshLiveModels(from: snapshot, structuralChanged: liveModelsNeedPruning)
+        refreshLiveModels(
+            from: snapshot, previous: nil, structuralChanged: liveModelsNeedPruning)
         liveModelsNeedPruning = false
     }
 
@@ -334,6 +361,9 @@ final class EngineController {
                 packageA.priority == packageB.priority,
                 packageA.items.count == packageB.items.count
             else { return false }
+            // An unchanged package comes back from the engine as the same
+            // `items` storage, which `==` recognizes without walking it.
+            if packageA.items == packageB.items { continue }
             for (itemA, itemB) in zip(packageA.items, packageB.items) {
                 guard itemA.id == itemB.id, itemA.url == itemB.url,
                     itemA.filename == itemB.filename, itemA.state == itemB.state,
@@ -358,10 +388,23 @@ final class EngineController {
     /// notifications spec §9.8 lists, once per transition — never a repeat
     /// for a state that has already been announced.
     private func notifyChanges(from old: EngineSnapshot?, to new: EngineSnapshot) {
-        guard let old else { return }
+        guard let old, old.packages != new.packages else { return }
+
+        // Only packages whose items differ can hold a transition, and the
+        // engine returns an unchanged package's `items` as the same
+        // storage, so finding them costs one cheap compare per package.
+        // Both sides are collected — an item moved between packages changed
+        // its old package *and* its new one — so its previous state is
+        // always among `changedOld` and a move never reads as "finished".
+        let oldByID = Dictionary(uniqueKeysWithValues: old.packages.map { ($0.id, $0) })
+        let newByID = Dictionary(uniqueKeysWithValues: new.packages.map { ($0.id, $0) })
+        let changedNew = new.packages.filter { oldByID[$0.id]?.items != $0.items }
+        guard !changedNew.isEmpty else { return }
+        let changedOld = old.packages.filter { newByID[$0.id]?.items != $0.items }
+
         let oldStates = Dictionary(
-            uniqueKeysWithValues: old.packages.flatMap(\.items).map { ($0.id, $0.state) })
-        for item in new.packages.flatMap(\.items) {
+            uniqueKeysWithValues: changedOld.flatMap(\.items).map { ($0.id, $0.state) })
+        for item in changedNew.flatMap(\.items) {
             guard oldStates[item.id] != item.state else { continue }
             switch item.state {
             case .completed:
@@ -373,13 +416,14 @@ final class EngineController {
             }
         }
 
-        let oldPackagesDone = Dictionary(
-            uniqueKeysWithValues: old.packages.map {
-                ($0.id, !$0.items.isEmpty && $0.completedCount == $0.items.count)
-            })
-        for package in new.packages {
+        for package in changedNew {
             let isDone = !package.items.isEmpty && package.completedCount == package.items.count
-            guard isDone, oldPackagesDone[package.id] != true else { continue }
+            guard isDone else { continue }
+            let wasDone =
+                oldByID[package.id].map {
+                    !$0.items.isEmpty && $0.completedCount == $0.items.count
+                } ?? false
+            guard !wasDone else { continue }
             notifications.notifyPackageFinished(name: package.name)
         }
     }

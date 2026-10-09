@@ -2,7 +2,7 @@
 
 **Status: IN PROGRESS (started 2026-10-09).** Steps 1, 2 and 5 are
 implemented on branch `ui-data-path-perf` (2026-10-09), step 7 likewise;
-step 6 on 2026-10-10; steps 3 and 4 are open. Per-step status is in §4.
+steps 6 and 4 on 2026-10-10; step 3 is open. Per-step status is in §4.
 
 > Steps 1, 2 and 5 were tried live by Shayan on 2026-10-09 and are a clear
 > improvement; they have not been measured in Instruments. Step 7 is
@@ -74,7 +74,7 @@ Two things combine; the code alone does not say which dominates:
 | 1 | Per-item observable models | App | **Done** |
 | 2 | Aggregates computed once per tick | App + Engine (pure helpers) | **Done** |
 | 3 | Display-sized data in the snapshot | Engine + App | Open |
-| 4 | Incremental engine snapshot | Engine | Open |
+| 4 | Incremental engine snapshot | Engine + App | **Done** |
 | 5 | Window-level leaks | App | **Done** |
 | 6 | Lighter rows | App | **Done** (no visual change) |
 | 7 | Skip per-item publishing when no window is visible | App | **Done** |
@@ -145,6 +145,48 @@ Cache `ItemSnapshot` for non-running items and invalidate on mutation. Move
 the file-missing check to a slow cadence. Add an id → item index. Read one
 telemetry struct per component in a single actor hop. Addresses findings 8,
 9, 11.
+
+**Done (2026-10-10), with one deliberate change of approach.** The engine
+mutates items in dozens of places, so per-item "invalidate on mutation"
+flags would have been one missed call site away from serving a stale row.
+What was built instead cannot go stale by omission of a call:
+
+- **Idle fast path.** Every stored property `snapshot()` reads bumps one
+  `snapshotGeneration` counter in its `didSet`. With no runner alive and the
+  generation unchanged, `snapshot()` returns the previous `EngineSnapshot`
+  as-is. `tick()` was reworked so a tick with nothing running writes none of
+  those properties (idle samplers are no longer touched).
+- **Compare-and-reuse while active.** Each package is still built, then
+  compared with its cached previous value; when equal the cached value is
+  returned, so its `items` array is the *same storage* as last tick. The
+  same is done one level up for the whole snapshot. Reuse is decided by
+  comparing content, never by tracking mutations.
+- **App side uses that identity.** `publish`'s whole-snapshot compare,
+  `packagesStructurallyEqual`, `refreshLiveModels` and `notifyChanges` skip
+  a package whose `items` equal the previous ones — O(1) for shared storage.
+  `notifyChanges` no longer builds a dictionary of every item per tick.
+- **File-missing check** (finding 8) runs every
+  `EngineSettings.fileCheckIntervalTicks` (default 5 s) and once at
+  restore, into a `missingFiles` set; completing or resetting an item
+  clears its entry. **Behavior change:** a finished file deleted in Finder
+  is now flagged within about 5 s instead of within one tick.
+- **Finding 9:** `tick()` builds the set of running ids in one pass instead
+  of a linear `itemState(for:)` scan per sampler.
+- **Finding 11:** `ComponentTelemetry` — one actor hop per component per
+  snapshot instead of five.
+
+Covered by `SnapshotReuseTests`: a mutation made after an idle snapshot is
+visible in the next one (enablement, segment override, settings, removal, a
+full download), an idle engine returns the same storage across ticks, an
+untouched package keeps its storage when another changes, and the
+file-check cadence.
+
+**What is not done.** While anything is downloading the engine still builds
+and compares every item every tick — O(items), off the main thread. Making
+that O(changed) needs real per-item dirty tracking, which was judged not
+worth the staleness risk without measurements showing it matters. Within one
+package that has a running item, the app-side passes are also still O(items
+in that package).
 
 ### Step 5 — Window-level leaks
 

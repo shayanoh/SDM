@@ -20,7 +20,10 @@ public struct SpeedSampler: Sendable {
     /// rather than averaging it against the zero samples idle time left
     /// behind.
     private var activeSamples: [Double] = []
-    private var isActive = false
+    /// Whether the last window closed with `tick()` rather than `idle()`.
+    /// Readable so `DownloadEngine.tick()` can leave an already-idle sampler
+    /// untouched instead of calling a no-op `idle()` on it.
+    public private(set) var isActive = false
 
     /// - Parameters:
     ///   - historyLength: sparkline sample count kept, in ticks. Defaults to

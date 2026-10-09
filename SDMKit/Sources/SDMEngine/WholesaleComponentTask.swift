@@ -102,6 +102,15 @@ actor WholesaleComponentTask {
     var probedSupportsRanges: Bool? { state.sawFragmentedProgress ? true : false }
     var lastCheckpointFailure: String? { nil }
     var isAssembling: Bool { state.phase == .postProcessing }
+    /// See `DownloadTask.telemetry`.
+    var telemetry: ComponentTelemetry {
+        ComponentTelemetry(
+            completedRanges: completedRanges,
+            expectedTotalBytes: expectedTotalBytes,
+            activeWorkerCount: activeWorkerCount,
+            lastCheckpointFailure: lastCheckpointFailure,
+            isAssembling: isAssembling)
+    }
 
     func checkpointTick() {}
     func setWorkerCount(_ count: Int) {}

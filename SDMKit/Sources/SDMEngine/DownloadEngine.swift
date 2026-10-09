@@ -25,6 +25,11 @@ public struct EngineSettings: Sendable {
     /// only bounds *splitting*, not claiming. Settings UI default is 10 MB,
     /// exposed there in 1...100 MB.
     public var minSegmentSizeBytes: Int64
+    /// Heartbeat ticks between checks that each completed item's file is
+    /// still on disk (`ItemSnapshot.fileMissing`). A file deleted outside
+    /// SDM is noticed within this long; it used to be a `stat` per completed
+    /// item on every snapshot.
+    public var fileCheckIntervalTicks: Int
 
     public init(
         maxConcurrent: Int,
@@ -34,7 +39,8 @@ public struct EngineSettings: Sendable {
         downloadFolder: URL,
         checkpointIntervalBytes: Int64 = 8 * 1024 * 1024,
         persistDebounceTicks: Int = AppTiming.ticksPerSecond * 2,
-        minSegmentSizeBytes: Int64 = 10 * 1024 * 1024
+        minSegmentSizeBytes: Int64 = 10 * 1024 * 1024,
+        fileCheckIntervalTicks: Int = AppTiming.ticksPerSecond * 5
     ) {
         precondition(maxConcurrent >= 1, "maxConcurrent must be at least 1")
         precondition(segmentsPerItem >= 1, "segmentsPerItem must be at least 1")
@@ -43,6 +49,7 @@ public struct EngineSettings: Sendable {
         precondition(checkpointIntervalBytes > 0, "checkpointIntervalBytes must be positive")
         precondition(persistDebounceTicks >= 1, "persistDebounceTicks must be at least 1")
         precondition(minSegmentSizeBytes > 0, "minSegmentSizeBytes must be positive")
+        precondition(fileCheckIntervalTicks >= 1, "fileCheckIntervalTicks must be at least 1")
         self.maxConcurrent = maxConcurrent
         self.segmentsPerItem = segmentsPerItem
         self.globalMaxConnections = globalMaxConnections
@@ -51,6 +58,7 @@ public struct EngineSettings: Sendable {
         self.checkpointIntervalBytes = checkpointIntervalBytes
         self.persistDebounceTicks = persistDebounceTicks
         self.minSegmentSizeBytes = minSegmentSizeBytes
+        self.fileCheckIntervalTicks = fileCheckIntervalTicks
     }
 }
 
@@ -133,6 +141,15 @@ public actor DownloadEngine {
                 switch worker {
                 case .segmented(let task): return await task.completedRanges
                 case .wholesale(let task): return await task.completedRanges
+                }
+            }
+        }
+
+        var telemetry: ComponentTelemetry {
+            get async {
+                switch worker {
+                case .segmented(let task): return await task.telemetry
+                case .wholesale(let task): return await task.telemetry
                 }
             }
         }
@@ -224,17 +241,23 @@ public actor DownloadEngine {
     private let resolver: (any LinkResolver)?
     private let muxer: (any Muxer)?
     private let wholesaleDownloader: (any WholesaleDownloader)?
-    private var settings: EngineSettings
+    // Every stored property `snapshot()` reads bumps `snapshotGeneration`
+    // when written — see its doc comment. A new property that feeds the
+    // snapshot must do the same.
+    private var settings: EngineSettings { didSet { snapshotGeneration &+= 1 } }
     /// Items currently in the `ffmpeg` assembly step. Their `state` stays
     /// `.running`; the snapshot exposes this as `isAssembling`.
-    private var assembling: Set<UUID> = []
+    private var assembling: Set<UUID> = [] { didSet { snapshotGeneration &+= 1 } }
 
-    private var packages: [DownloadPackage] = []
-    private var runners: [UUID: Runner] = [:]
-    private var samplers: [UUID: SpeedSampler] = [:]
+    private var packages: [DownloadPackage] = [] { didSet { snapshotGeneration &+= 1 } }
+    private var runners: [UUID: Runner] = [:] { didSet { snapshotGeneration &+= 1 } }
+    private var samplers: [UUID: SpeedSampler] = [:] { didSet { snapshotGeneration &+= 1 } }
     private var globalSampler = SpeedSampler(
         historyLength: AppTiming.ticksPerSecond * 300, averagingWindowSeconds: 2)
-    private var segmentOverrides: [UUID: Int] = [:]
+    {
+        didSet { snapshotGeneration &+= 1 }
+    }
+    private var segmentOverrides: [UUID: Int] = [:] { didSet { snapshotGeneration &+= 1 } }
     /// Byte totals already folded into the samplers, so progress read at 1 Hz
     /// is turned into per-window deltas exactly once.
     private var sampledBytes: [UUID: Int64] = [:]
@@ -244,16 +267,16 @@ public actor DownloadEngine {
     private let retryPolicy: RetryPolicy
     /// Consecutive failed attempts per item, reset by any attempt that made
     /// real progress and by success.
-    private var failedAttempts: [UUID: Int] = [:]
+    private var failedAttempts: [UUID: Int] = [:] { didSet { snapshotGeneration &+= 1 } }
     /// Ticks of backoff an item still owes before it may be re-desired.
     /// Counted in heartbeat ticks rather than measured against a clock, which
     /// is the same idiom `checkpointTick()` uses and keeps the engine
     /// deterministic under test.
-    private var retryHoldTicks: [UUID: Int] = [:]
+    private var retryHoldTicks: [UUID: Int] = [:] { didSet { snapshotGeneration &+= 1 } }
     /// The most recent transient failure's message per item, surfaced in the
     /// snapshot only while `failedAttempts` still holds the item (i.e. it is
     /// retrying, not yet terminal and not recovered).
-    private var lastFailure: [UUID: String] = [:]
+    private var lastFailure: [UUID: String] = [:] { didSet { snapshotGeneration &+= 1 } }
     /// Bytes an attempt started from, so a failure that nevertheless moved
     /// bytes can clear the attempt counter.
     private var attemptStartBytes: [UUID: Int64] = [:]
@@ -275,7 +298,30 @@ public actor DownloadEngine {
     /// The last checkpoint failure reported by each item's task, kept after
     /// the runner retires so the reason does not vanish from the UI the
     /// instant the download stops.
-    private var checkpointFailures: [UUID: String] = [:]
+    private var checkpointFailures: [UUID: String] = [:] { didSet { snapshotGeneration &+= 1 } }
+    /// Completed items whose destination file was gone at the last check.
+    /// Refreshed on a slow tick cadence (`fileCheckIntervalTicks`) rather
+    /// than `stat`-ed for every completed item on every snapshot.
+    private var missingFiles: Set<UUID> = [] { didSet { snapshotGeneration &+= 1 } }
+    /// Ticks left before `missingFiles` is refreshed again. Starts at zero
+    /// so the first tick checks.
+    private var ticksUntilFileCheck = 0
+
+    /// Bumped by every write to a stored property `snapshot()` reads. While
+    /// nothing is running, an unchanged generation means the previous
+    /// snapshot is still exact, and `snapshot()` returns it without
+    /// rebuilding anything. Deliberately coarse — one counter for the whole
+    /// engine rather than per-item dirty flags — so the only way to serve a
+    /// stale snapshot is to add a snapshot input without the `didSet`, not
+    /// to miss one of the dozens of places that mutate an item.
+    private var snapshotGeneration: UInt64 = 0
+    /// The last snapshot built, and the generation it was built at.
+    private var lastSnapshot: EngineSnapshot?
+    private var lastSnapshotGeneration: UInt64 = 0
+    /// Each package's last snapshot, so one whose content came out the same
+    /// is handed back as the *same value* — sharing its `items` storage —
+    /// and consumers comparing two engine snapshots can skip it in O(1).
+    private var packageSnapshotCache: [UUID: PackageSnapshot] = [:]
 
     public init(
         transport: any HTTPTransport,
@@ -388,6 +434,9 @@ public actor DownloadEngine {
                 samplers[item.id] = SpeedSampler()
             }
         }
+        // So the very first snapshot after launch — published before any
+        // tick — already knows which finished files have since gone.
+        refreshMissingFiles()
         await persist()
         await reconcile()
     }
@@ -804,6 +853,7 @@ public actor DownloadEngine {
         sampledBytes[itemID] = nil
         checkpointFailures[itemID] = nil
         attemptStartBytes[itemID] = nil
+        missingFiles.remove(itemID)
 
         mutateItem(itemID) {
             for index in $0.components.indices {
@@ -1004,17 +1054,29 @@ public actor DownloadEngine {
         // goes `.queued` → `.running` → `.completed` entirely between two
         // heartbeats — still lands in history exactly once instead of being
         // silently dropped.
-        var anyItemActive = false
-        for itemID in Array(samplers.keys) {
-            let isRunning = itemState(for: itemID) == .running
-            let hasPendingBytes = samplers[itemID]?.hasPendingBytes ?? false
-            if isRunning || hasPendingBytes {
-                samplers[itemID]?.tick()
-                anyItemActive = true
-            } else {
-                samplers[itemID]?.idle()
+        //
+        // Decided in one read-only pass and applied afterwards, touching
+        // only the samplers that actually change: an idle sampler is left
+        // alone entirely, so a tick with nothing running writes nothing a
+        // snapshot reads (see `snapshotGeneration`).
+        var runningIDs = Set<UUID>()
+        for package in packages {
+            for item in package.items where item.state == .running {
+                runningIDs.insert(item.id)
             }
         }
+        var toTick: [UUID] = []
+        var toIdle: [UUID] = []
+        for (itemID, sampler) in samplers {
+            if runningIDs.contains(itemID) || sampler.hasPendingBytes {
+                toTick.append(itemID)
+            } else if sampler.isActive {
+                toIdle.append(itemID)
+            }
+        }
+        for itemID in toTick { samplers[itemID]?.tick() }
+        for itemID in toIdle { samplers[itemID]?.idle() }
+        let anyItemActive = !toTick.isEmpty
         // Mirrors the per-item branch above: without it, `globalSampler`
         // mutated `history` every tick forever (even appending zeros),
         // which kept `EngineSnapshot.globalHistory` changing identity and
@@ -1022,9 +1084,15 @@ public actor DownloadEngine {
         // no downloads running at all.
         if anyItemActive || globalSampler.hasPendingBytes {
             globalSampler.tick()
-        } else {
+        } else if globalSampler.isActive {
             globalSampler.idle()
         }
+
+        if ticksUntilFileCheck <= 0 {
+            refreshMissingFiles()
+            ticksUntilFileCheck = settings.fileCheckIntervalTicks
+        }
+        ticksUntilFileCheck -= 1
 
         for (itemID, remaining) in retryHoldTicks {
             if remaining <= 1 {
@@ -1064,7 +1132,19 @@ public actor DownloadEngine {
     }
 
     public func snapshot() async -> EngineSnapshot {
+        // With no runner there is no live task state to ask, so the result
+        // is a function of this actor's own stored properties — and none of
+        // those has been written since the last build.
+        if runners.isEmpty, let lastSnapshot, lastSnapshotGeneration == snapshotGeneration {
+            return lastSnapshot
+        }
+        // Captured before the first `await` below: anything written while
+        // this call is suspended bumps the counter past it, so the next call
+        // rebuilds rather than trusting what is assembled here.
+        let builtAtGeneration = snapshotGeneration
+
         var packageSnapshots: [PackageSnapshot] = []
+        var refreshedCache: [UUID: PackageSnapshot] = [:]
         for package in packages {
             var items: [ItemSnapshot] = []
             for item in package.items {
@@ -1084,15 +1164,16 @@ public actor DownloadEngine {
                     for componentRun in runner.components {
                         let index = componentRun.componentIndex
                         guard index < sizes.count else { continue }
-                        if let live = await componentRun.expectedTotalBytes {
+                        let telemetry = await componentRun.telemetry
+                        if let live = telemetry.expectedTotalBytes {
                             sizes[index] = live
                         }
-                        liveRanges[index] = await componentRun.completedRanges
-                        active += await componentRun.activeWorkerCount
-                        if let failure = await componentRun.lastCheckpointFailure {
+                        liveRanges[index] = telemetry.completedRanges
+                        active += telemetry.activeWorkerCount
+                        if let failure = telemetry.lastCheckpointFailure {
                             checkpointFailure = failure
                         }
-                        if await componentRun.isAssembling { wholesalePostProcessing = true }
+                        if telemetry.isAssembling { wholesalePostProcessing = true }
                     }
 
                     if sizes.allSatisfy({ $0 != nil }) {
@@ -1133,14 +1214,9 @@ public actor DownloadEngine {
                 // since been moved or deleted outside SDM should say so
                 // rather than silently claiming to be done. Scoped to
                 // `.completed` — any other state's file legitimately may not
-                // exist yet.
-                var fileMissing = false
-                if item.state == .completed {
-                    let destination = settings.downloadFolder
-                        .appendingPathComponent(package.name)
-                        .appendingPathComponent(item.filename)
-                    fileMissing = !FileManager.default.fileExists(atPath: destination.path)
-                }
+                // exist yet. Read from the periodically refreshed set, not
+                // checked here: see `refreshMissingFiles()`.
+                let fileMissing = item.state == .completed && missingFiles.contains(item.id)
                 items.append(
                     ItemSnapshot(
                         id: item.id,
@@ -1178,16 +1254,27 @@ public actor DownloadEngine {
                     )
                 )
             }
-            packageSnapshots.append(
-                PackageSnapshot(
-                    id: package.id,
-                    name: package.name,
-                    priority: package.priority,
-                    items: items
-                )
+            let built = PackageSnapshot(
+                id: package.id,
+                name: package.name,
+                priority: package.priority,
+                items: items
             )
+            // Hand back the previous value when nothing in it changed, so
+            // its `items` array is the same storage as last time. Checked
+            // by comparing the freshly built value against the cached one —
+            // never by tracking what was mutated — so it cannot go stale.
+            if let cached = packageSnapshotCache[package.id], cached == built {
+                packageSnapshots.append(cached)
+                refreshedCache[package.id] = cached
+            } else {
+                packageSnapshots.append(built)
+                refreshedCache[package.id] = built
+            }
         }
-        return EngineSnapshot(
+        packageSnapshotCache = refreshedCache
+
+        let built = EngineSnapshot(
             packages: packageSnapshots,
             // Spec §5.4: the global figure is the sum of the package figures,
             // which are sums of the item figures, so the three can never
@@ -1195,6 +1282,30 @@ public actor DownloadEngine {
             globalBytesPerSecond: packageSnapshots.reduce(0) { $0 + $1.bytesPerSecond },
             globalHistory: globalSampler.history
         )
+        // Same reuse one level up: an unchanged engine returns the very
+        // same snapshot value, `packages` storage included.
+        let result = lastSnapshot == built ? lastSnapshot ?? built : built
+        lastSnapshot = result
+        lastSnapshotGeneration = builtAtGeneration
+        return result
+    }
+
+    /// Re-checks which completed items' files are still on disk. One `stat`
+    /// per completed item, so it runs on `fileCheckIntervalTicks` (and once
+    /// at restore) instead of inside every `snapshot()`.
+    private func refreshMissingFiles() {
+        var missing = Set<UUID>()
+        for package in packages {
+            let folder = settings.downloadFolder.appendingPathComponent(package.name)
+            for item in package.items where item.state == .completed {
+                let destination = folder.appendingPathComponent(item.filename)
+                if !FileManager.default.fileExists(atPath: destination.path) {
+                    missing.insert(item.id)
+                }
+            }
+        }
+        // Gated so an unchanged result does not bump `snapshotGeneration`.
+        if missing != missingFiles { missingFiles = missing }
     }
 
     /// Stops everything and writes durable state. Jobs are awaited rather than
@@ -1591,6 +1702,9 @@ public actor DownloadEngine {
             if state == .completed {
                 failedAttempts[itemID] = nil
                 retryHoldTicks[itemID] = nil
+                // Just written, so not missing — whatever an earlier check
+                // of a previous copy of this file concluded.
+                missingFiles.remove(itemID)
             }
         }
 

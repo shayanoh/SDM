@@ -20,6 +20,16 @@ public enum DownloadError: Error, Equatable {
     case truncatedResponse(expected: Int64, received: Int64)
 }
 
+/// One component's live figures as `DownloadEngine.snapshot()` needs them.
+/// A single value so a snapshot costs one actor hop per component.
+struct ComponentTelemetry: Sendable {
+    var completedRanges: RangeSet
+    var expectedTotalBytes: Int64?
+    var activeWorkerCount: Int
+    var lastCheckpointFailure: String?
+    var isAssembling: Bool
+}
+
 /// Downloads one file using a pool of ephemeral workers that claim gaps from a
 /// shared `RangeSet`. See spec §5.
 public actor DownloadTask {
@@ -146,6 +156,16 @@ public actor DownloadTask {
 
     public var completedRanges: RangeSet { completed }
     public var activeWorkerCount: Int { reserved.count }
+    /// Everything `DownloadEngine.snapshot()` reads from a task, in one
+    /// actor hop instead of one per figure.
+    var telemetry: ComponentTelemetry {
+        ComponentTelemetry(
+            completedRanges: completed,
+            expectedTotalBytes: expectedTotalBytes,
+            activeWorkerCount: reserved.count,
+            lastCheckpointFailure: lastCheckpointFailure,
+            isAssembling: false)
+    }
     /// The most workers that were ever live at once during this run. Lets a
     /// caller (and the tests) observe the concurrency a `setWorkerCount` raise
     /// actually achieved, which byte identity alone cannot show.
