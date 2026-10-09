@@ -204,12 +204,15 @@ row, around content that declares nothing for the `List`.
 If scrolling is still slow at thousands of rows after this, the next move
 is an `NSOutlineView`-backed list — not before measuring.
 
-**Noticed, not changed** (from reading the code; predates this work):
-`EngineController.packagesStructurallyEqual` does not compare
-`isAssembling`, `retryHoldSeconds` or `lastFailureReason`, yet the row draws
-all three from the structural snapshot. So a row's "Assembling…" state and
-its "Retrying in Ns" countdown only refresh when something else structural
-changes.
+**Stale row states — fixed 2026-10-10.** `packagesStructurallyEqual` did
+not compare `isAssembling`, `failedAttemptCount` or `lastFailureReason`,
+though the row draws all three from the structural snapshot, so
+"Assembling…" and a retry's failure reason only appeared once something else
+structural changed. They are compared now. The "Retrying in Ns" countdown
+went the other way: `retryHoldSeconds` moved into `ItemLiveModel` and is
+drawn by its own leaf (`ItemStatusText`), because making a once-a-second
+value structural would re-diff the whole `List` every second while anything
+is retrying.
 
 ### Step 7 — Skip per-item publishing when no window is visible
 

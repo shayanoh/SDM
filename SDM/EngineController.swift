@@ -340,7 +340,14 @@ final class EngineController {
                     itemA.isEnabled == itemB.isEnabled, itemA.isResumable == itemB.isResumable,
                     itemA.checkpointFailure == itemB.checkpointFailure,
                     itemA.remainingAttempts == itemB.remainingAttempts,
-                    itemA.fileMissing == itemB.fileMissing
+                    itemA.fileMissing == itemB.fileMissing,
+                    // The row draws these too. Left out, "Assembling…" and
+                    // a retry's failure reason only appeared once something
+                    // else here happened to change. (`retryHoldSeconds` is
+                    // deliberately *not* here — see `ItemLiveModel`.)
+                    itemA.isAssembling == itemB.isAssembling,
+                    itemA.failedAttemptCount == itemB.failedAttemptCount,
+                    itemA.lastFailureReason == itemB.lastFailureReason
                 else { return false }
             }
         }

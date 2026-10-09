@@ -29,8 +29,14 @@ final class ItemLiveModel {
     /// `speedHistory` averaged over the ETA window, maintained here so no
     /// view has to re-reduce the history in its `body`.
     private(set) var recentAverageSpeed: Double
+    /// Seconds left on a retry backoff hold. Here rather than in the row's
+    /// structural content because it counts down every second on its own —
+    /// treating it as structural would hand the `List` a new data source
+    /// once a second for as long as anything is retrying.
+    private(set) var retryHoldSeconds: Int?
 
     init(_ item: ItemSnapshot) {
+        retryHoldSeconds = item.retryHoldSeconds
         id = item.id
         completed = item.completed
         completedBytes = item.completed.totalBytes
@@ -47,6 +53,10 @@ final class ItemLiveModel {
     /// so the caller knows the owning package's aggregate is stale.
     @discardableResult
     func update(from item: ItemSnapshot) -> Bool {
+        // Not part of `changed`: no package aggregate depends on it.
+        if retryHoldSeconds != item.retryHoldSeconds {
+            retryHoldSeconds = item.retryHoldSeconds
+        }
         var changed = false
         if completed != item.completed {
             completed = item.completed

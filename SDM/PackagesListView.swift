@@ -651,11 +651,11 @@ struct BottomPanel: View {
 
     /// The panel spells the state out in full — including the whole retry /
     /// failure reason, which the list row can only show the first line of.
-    private func statusDescription(_ item: ItemSnapshot) -> String {
+    private func statusDescription(_ item: ItemSnapshot, retryHoldSeconds: Int?) -> String {
         if item.isAssembling { return item.isEnabled ? "Assembling…" : "Assembling… (disabled)" }
         let base: String
         if item.isRetrying {
-            let when = item.retryHoldSeconds.map { "retrying in \($0)s" } ?? "retrying soon"
+            let when = retryHoldSeconds.map { "retrying in \($0)s" } ?? "retrying soon"
             let attempt =
                 item.failedAttemptCount.map { done in
                     let total = done + (item.remainingAttempts ?? 0)
@@ -710,7 +710,7 @@ struct BottomPanel: View {
             }
             GridRow {
                 Text("Status")
-                Text(statusDescription(downloadItem))
+                Text(statusDescription(downloadItem, retryHoldSeconds: live.retryHoldSeconds))
                     .font(.body)
                     .foregroundStyle(statusColor(downloadItem))
                     .textSelection(.enabled)
@@ -1397,7 +1397,6 @@ nonisolated struct ItemRowContent: Equatable, Sendable {
     let checkpointFailure: String?
     let remainingAttempts: Int?
     let lastFailureReason: String?
-    let retryHoldSeconds: Int?
 
     init(_ item: ItemSnapshot) {
         id = item.id
@@ -1412,7 +1411,6 @@ nonisolated struct ItemRowContent: Equatable, Sendable {
         checkpointFailure = item.checkpointFailure
         remainingAttempts = item.remainingAttempts
         lastFailureReason = item.lastFailureReason
-        retryHoldSeconds = item.retryHoldSeconds
     }
 }
 
@@ -1582,10 +1580,7 @@ private struct ItemRowBody: View, Equatable {
     @ViewBuilder
     private var statusLine: some View {
         HStack(spacing: 6) {
-            Text(Self.describe(item))
-                .font(.caption)
-                .lineLimit(2)
-                .foregroundStyle(statusColor)
+            ItemStatusText(item: item, model: model, style: statusColor)
             if let checkpointFailure = item.checkpointFailure {
                 // Not a failure of the download, but it means a crash would
                 // lose everything transferred so far.
@@ -1614,11 +1609,11 @@ private struct ItemRowBody: View, Equatable {
         text.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? text
     }
 
-    static func describe(_ item: ItemRowContent) -> String {
+    static func describe(_ item: ItemRowContent, retryHoldSeconds: Int?) -> String {
         if item.isAssembling { return "Assembling…" }
         let base: String
         if item.isRetrying {
-            let when = item.retryHoldSeconds.map { "Retrying in \($0)s" } ?? "Retrying soon"
+            let when = retryHoldSeconds.map { "Retrying in \($0)s" } ?? "Retrying soon"
             let left =
                 (item.remainingAttempts).map { " · \($0) attempt\($0 == 1 ? "" : "s") left" }
                 ?? ""
@@ -1709,6 +1704,26 @@ private struct ItemBytesText: View {
         )
         .font(.caption.monospacedDigit())
         .foregroundStyle(theme.textSecondaryColor)
+    }
+}
+
+/// The row's status text. A leaf of its own because the "Retrying in Ns"
+/// countdown ticks down without anything structural changing: it reads the
+/// hold from the live model, and only while the item is actually retrying,
+/// so every other row never observes it.
+private struct ItemStatusText: View {
+    let item: ItemRowContent
+    let model: ItemLiveModel
+    let style: AnyShapeStyle
+
+    var body: some View {
+        Text(
+            ItemRowBody.describe(
+                item, retryHoldSeconds: item.isRetrying ? model.retryHoldSeconds : nil)
+        )
+        .font(.caption)
+        .lineLimit(2)
+        .foregroundStyle(style)
     }
 }
 
