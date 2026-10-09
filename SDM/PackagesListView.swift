@@ -191,6 +191,12 @@ struct PackagesListView: View {
                 row: itemRow(item, index: index), packageID: packageID, controller: controller
             )
             .equatable()
+            // `.tag()` must be the outermost modifier on a row. Applied
+            // inside `DraggableItemRow.body`, beneath `.onGeometryChange`,
+            // it stopped reaching the `List`: the row then fell back to the
+            // enclosing `DisclosureGroup`'s `.tag(package.id)`, so clicking
+            // any item selected its whole package.
+            .tag(item.id)
         } else {
             itemRow(item, index: index)
                 .equatable()
@@ -1289,7 +1295,6 @@ private struct DraggableItemRow: View, Equatable {
         let index = row.index
         row
             .equatable()
-            .tag(itemID)
             .draggable(DraggedRowID.item(itemID))
             .dropDestination(
                 for: DraggedRowID.self,
