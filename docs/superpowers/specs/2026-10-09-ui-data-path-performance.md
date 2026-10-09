@@ -2,12 +2,14 @@
 
 **Status: IN PROGRESS (started 2026-10-09).** Steps 1, 2 and 5 are
 implemented on branch `ui-data-path-perf` (2026-10-09), step 7 likewise;
-steps 3, 4 and 6 are open. Per-step status is in §4.
+step 6 on 2026-10-10; steps 3 and 4 are open. Per-step status is in §4.
 
 > Steps 1, 2 and 5 were tried live by Shayan on 2026-10-09 and are a clear
 > improvement; they have not been measured in Instruments. Step 7 is
 > verified by a clean build only — closing and reopening the main window
-> during a download is the check still owed.
+> during a download is the check still owed. Step 6 is likewise build-only:
+> its three parts are separate commits so each can be judged live (and
+> reverted) on its own.
 
 ## 1. Symptom
 
@@ -74,7 +76,7 @@ Two things combine; the code alone does not say which dominates:
 | 3 | Display-sized data in the snapshot | Engine + App | Open |
 | 4 | Incremental engine snapshot | Engine | Open |
 | 5 | Window-level leaks | App | **Done** |
-| 6 | Lighter rows | App | Open |
+| 6 | Lighter rows | App | **Done** (no visual change) |
 | 7 | Skip per-item publishing when no window is visible | App | **Done** |
 
 ### Step 1 — Per-item observable models
@@ -158,10 +160,37 @@ main-actor `ByteCountFormatter`.
 
 ### Step 6 — Lighter rows
 
-Draw the progress bar and sparkline in one `Canvas`, use a fixed row height
-in place of the per-row `GeometryReader`, pass rows only the fields they
-show. If scrolling is still slow at thousands of rows after this, the next
-move is an `NSOutlineView`-backed list — not before.
+Constraint set on 2026-10-09: **the UI must not change.** That ruled out
+two ideas from the first draft of this plan — a fixed row height (the
+status line can wrap to two lines) and merging the sparkline and progress
+bar into one `Canvas` (they sit in different parts of the row). What was
+done instead, one commit each:
+
+1. **Equatable rows over display-only content.** `ItemRow` takes an
+   `ItemRowContent` (just the fields it draws) plus its `ItemLiveModel`, and
+   is applied with `.equatable()`; so is `DraggableItemRow`, whose drop
+   action now reads `controller.structuralPackages` at drop time instead of
+   holding the whole package list. A selection click or structural change
+   no longer re-runs every row's body. `PackageHeaderRow` was deliberately
+   left alone: there are few of them, and its context-menu and drop
+   closures capture the package, so skipping its body would risk stale
+   captures for little gain.
+2. **Shapes instead of `Canvas`.** `Sparkline` and `SegmentedProgressBar`
+   draw the same paths as stroked/filled `Shape`s, clipped to the same
+   bounds. Expected to make rows cheaper to create while scrolling; not
+   measured.
+3. **`onGeometryChange` instead of a `GeometryReader` background** for the
+   row and header height the drop logic needs — two fewer views per row.
+
+If scrolling is still slow at thousands of rows after this, the next move
+is an `NSOutlineView`-backed list — not before measuring.
+
+**Noticed, not changed** (from reading the code; predates this work):
+`EngineController.packagesStructurallyEqual` does not compare
+`isAssembling`, `retryHoldSeconds` or `lastFailureReason`, yet the row draws
+all three from the structural snapshot. So a row's "Assembling…" state and
+its "Retrying in Ns" countdown only refresh when something else structural
+changes.
 
 ### Step 7 — Skip per-item publishing when no window is visible
 

@@ -971,15 +971,11 @@ private struct PackageHeaderRow: View {
                     },
                     isTargeted: { isTargeted = $0 }
                 )
-                .background(
-                    GeometryReader { proxy in
-                        Color.clear
-                            .onAppear { headerHeight = proxy.size.height }
-                            .onChange(of: proxy.size.height) { _, newHeight in
-                                headerHeight = newHeight
-                            }
-                    }
-                )
+                .onGeometryChange(for: CGFloat.self) { proxy in
+                    proxy.size.height
+                } action: { newHeight in
+                    headerHeight = newHeight
+                }
         } else {
             content
         }
@@ -1327,13 +1323,11 @@ private struct DraggableItemRow: View, Equatable {
                 },
                 isTargeted: { isTargeted = $0 }
             )
-            .background(
-                GeometryReader { proxy in
-                    Color.clear
-                        .onAppear { rowHeight = proxy.size.height }
-                        .onChange(of: proxy.size.height) { _, newHeight in rowHeight = newHeight }
-                }
-            )
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.size.height
+            } action: { newHeight in
+                rowHeight = newHeight
+            }
             .overlay {
                 if isTargeted {
                     RoundedRectangle(cornerRadius: 4)
