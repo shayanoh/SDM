@@ -166,21 +166,40 @@ status line can wrap to two lines) and merging the sparkline and progress
 bar into one `Canvas` (they sit in different parts of the row). What was
 done instead, one commit each:
 
-1. **Equatable rows over display-only content.** `ItemRow` takes an
-   `ItemRowContent` (just the fields it draws) plus its `ItemLiveModel`, and
-   is applied with `.equatable()`; so is `DraggableItemRow`, whose drop
-   action now reads `controller.structuralPackages` at drop time instead of
-   holding the whole package list. A selection click or structural change
-   no longer re-runs every row's body. `PackageHeaderRow` was deliberately
-   left alone: there are few of them, and its context-menu and drop
-   closures capture the package, so skipping its body would risk stale
-   captures for little gain.
+1. **Equatable row content.** `ItemRow` takes an `ItemRowContent` (just
+   the fields it draws) plus its `ItemLiveModel`. Its visible content is
+   `ItemRowBody`, which is `Equatable` and applied with `.equatable()`
+   *inside* `ItemRow.body`; a selection click or a structural change to
+   another item no longer re-runs it. `DraggableItemRow`'s drop action reads
+   `controller.structuralPackages` at drop time instead of holding the whole
+   package list. `PackageHeaderRow` was deliberately left alone.
 2. **Shapes instead of `Canvas`.** `Sparkline` and `SegmentedProgressBar`
    draw the same paths as stroked/filled `Shape`s, clipped to the same
    bounds. Expected to make rows cheaper to create while scrolling; not
    measured.
-3. **`onGeometryChange` instead of a `GeometryReader` background** for the
-   row and header height the drop logic needs — two fewer views per row.
+3. ~~`onGeometryChange` instead of a `GeometryReader` background.~~
+   **Reverted** — see below.
+
+**What broke on the first attempt (2026-10-10), and the rule that came out
+of it.** A row declares three things the `List` reads: its `.tag`, its
+`.listRowBackground`, and `.draggable`. The first version put `.equatable()`
+around the whole row and its drag wrapper, and `.onGeometryChange` above
+`.draggable`. Observed live:
+
+- behind `.equatable()` the tag and the row background never reached the
+  `List`: clicking an item selected its whole package (it fell back to the
+  `DisclosureGroup`'s tag) and the selection color and zebra striping
+  disappeared, on the Completed tab too;
+- with `.onGeometryChange` above `.draggable`, the drag stopped being a
+  list drag and became a gesture on the row's content: content could be
+  dragged but not clicked to select, empty gaps could be clicked but not
+  dragged, and a Downloads-tab package header could be dragged but not
+  selected at all.
+
+**Rule: nothing may sit between the `List` and a row's `.tag`,
+`.listRowBackground` and `.draggable`.** No `.equatable()` around a row, no
+`.onGeometryChange` above them. A skip-if-unchanged boundary goes inside the
+row, around content that declares nothing for the `List`.
 
 If scrolling is still slow at thousands of rows after this, the next move
 is an `NSOutlineView`-backed list — not before measuring.

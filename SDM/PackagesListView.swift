@@ -188,31 +188,30 @@ struct PackagesListView: View {
     private func row(_ item: ItemSnapshot, index: Int, packageID: UUID) -> some View {
         if allowsReordering {
             DraggableItemRow(
-                row: itemRow(item, index: index), packageID: packageID, controller: controller
-            )
-            .equatable()
-            // `.tag()` must be the outermost modifier on a row. Applied
-            // inside `DraggableItemRow.body`, beneath `.onGeometryChange`,
-            // it stopped reaching the `List`: the row then fell back to the
-            // enclosing `DisclosureGroup`'s `.tag(package.id)`, so clicking
-            // any item selected its whole package.
-            .tag(item.id)
+                itemID: item.id, packageID: packageID, index: index,
+                controller: controller, theme: theme
+            ) {
+                itemRow(item, index: index)
+            }
         } else {
             itemRow(item, index: index)
-                .equatable()
-                .tag(item.id)
         }
     }
 
-    /// `.equatable()` at both call sites above is what lets SwiftUI skip a
-    /// row whose `ItemRow` value compares equal: this body re-runs on every
-    /// selection click and every structural change, and without it each
-    /// one re-ran every row's body too.
-    private func itemRow(_ item: ItemSnapshot, index: Int) -> ItemRow {
+    /// Nothing may sit between the `List` and what a row declares for it —
+    /// its `.tag`, its `.listRowBackground` (inside `ItemRow.body`) and, for
+    /// a draggable row, `.draggable`. Wrapping a row in `.equatable()` or
+    /// putting `.onGeometryChange` above those was tried and hid all three
+    /// from the `List`: clicking an item selected its whole package, the
+    /// selection color vanished, and drags stopped being list drags. Any
+    /// "skip this row if unchanged" boundary belongs *inside* the row —
+    /// see `ItemRowBody`.
+    private func itemRow(_ item: ItemSnapshot, index: Int) -> some View {
         ItemRow(
             item: ItemRowContent(item), model: controller.liveModel(for: item), index: index,
             stats: controller.stats, isSelected: selectedItemIDs.contains(item.id), theme: theme
         )
+        .tag(item.id)
     }
 
     /// The package containing `item`, looked up by scanning `packages` — item
@@ -977,11 +976,18 @@ private struct PackageHeaderRow: View {
                     },
                     isTargeted: { isTargeted = $0 }
                 )
-                .onGeometryChange(for: CGFloat.self) { proxy in
-                    proxy.size.height
-                } action: { newHeight in
-                    headerHeight = newHeight
-                }
+                // A `GeometryReader` background, not `.onGeometryChange` — with
+                // the latter above `.draggable` the header could be dragged but
+                // no longer selected.
+                .background(
+                    GeometryReader { proxy in
+                        Color.clear
+                            .onAppear { headerHeight = proxy.size.height }
+                            .onChange(of: proxy.size.height) { _, newHeight in
+                                headerHeight = newHeight
+                            }
+                    }
+                )
         } else {
             content
         }
@@ -1272,29 +1278,21 @@ private func canReset(_ item: ItemSnapshot) -> Bool {
 /// that by not claiming a specific edge at all, matching the "nearest edge"
 /// intuition without needing to track it.
 ///
-/// `Equatable`, and applied with `.equatable()`, so this body — the one
-/// hosting `.draggable` — is not re-evaluated unless the row itself changed.
-/// That is also why the drop action reads the package list from
-/// `controller` when the drop happens rather than holding a copy: a copy
-/// would both go stale under a skipped body and, being the whole list,
-/// make every row compare unequal on any structural change.
-private struct DraggableItemRow: View, Equatable {
-    let row: ItemRow
+/// The drop action reads the package list from `controller` when the drop
+/// happens rather than holding a copy of it.
+private struct DraggableItemRow<Content: View>: View {
+    let itemID: UUID
     let packageID: UUID
+    let index: Int
     let controller: EngineController
+    let theme: Theme
+    @ViewBuilder let content: () -> Content
 
     @State private var isTargeted = false
     @State private var rowHeight: CGFloat = 1
 
-    nonisolated static func == (lhs: DraggableItemRow, rhs: DraggableItemRow) -> Bool {
-        lhs.row == rhs.row && lhs.packageID == rhs.packageID && lhs.controller === rhs.controller
-    }
-
     var body: some View {
-        let itemID = row.item.id
-        let index = row.index
-        row
-            .equatable()
+        content()
             .draggable(DraggedRowID.item(itemID))
             .dropDestination(
                 for: DraggedRowID.self,
@@ -1328,15 +1326,20 @@ private struct DraggableItemRow: View, Equatable {
                 },
                 isTargeted: { isTargeted = $0 }
             )
-            .onGeometryChange(for: CGFloat.self) { proxy in
-                proxy.size.height
-            } action: { newHeight in
-                rowHeight = newHeight
-            }
+            // A `GeometryReader` background, not `.onGeometryChange`: the
+            // latter, sitting above `.draggable`, stopped the `List` from
+            // treating the row as a drag source — see `itemRow(_:index:)`.
+            .background(
+                GeometryReader { proxy in
+                    Color.clear
+                        .onAppear { rowHeight = proxy.size.height }
+                        .onChange(of: proxy.size.height) { _, newHeight in rowHeight = newHeight }
+                }
+            )
             .overlay {
                 if isTargeted {
                     RoundedRectangle(cornerRadius: 4)
-                        .strokeBorder(row.theme.accentColor, lineWidth: 2)
+                        .strokeBorder(theme.accentColor, lineWidth: 2)
                 }
             }
     }
@@ -1413,7 +1416,12 @@ nonisolated struct ItemRowContent: Equatable, Sendable {
     }
 }
 
-private struct ItemRow: View, Equatable {
+/// A list row: the row background the `List` reads, around the row's
+/// visible content. Deliberately *not* `Equatable` and never wrapped in
+/// `.equatable()` — see `PackagesListView.itemRow(_:index:)`. The
+/// skip-if-unchanged boundary is one level in, on `ItemRowBody`, which has
+/// nothing the `List` needs to see.
+private struct ItemRow: View {
     let item: ItemRowContent
     let model: ItemLiveModel
     let index: Int
@@ -1421,15 +1429,43 @@ private struct ItemRow: View, Equatable {
     let isSelected: Bool
     let theme: Theme
 
-    nonisolated static func == (lhs: ItemRow, rhs: ItemRow) -> Bool {
-        lhs.item == rhs.item && lhs.model === rhs.model && lhs.index == rhs.index
-            && lhs.stats === rhs.stats && lhs.isSelected == rhs.isSelected
+    var body: some View {
+        ItemRowBody(item: item, model: model, stats: stats, theme: theme)
+            .equatable()
+            .listRowBackground(alternatingRowBackground)
+    }
+
+    /// Theme-driven zebra striping. `NSColor.alternatingContentBackgroundColors`
+    /// (the previous source) only adapts to system light/dark — its second
+    /// stripe is a near-transparent overlay tuned for the *default* system
+    /// background, so against a custom theme like Dracula or Nord one of the
+    /// two stripes reads as visibly wrong/missing. This alternates between
+    /// the theme's own primary and secondary surface roles instead.
+    private var alternatingRowBackground: Color {
+        guard !isSelected else { return theme.selectionTintColor.mix(with: Color.black, by: 0.2) }
+        return index.isMultiple(of: 2)
+            ? theme.surfacePrimaryColor : theme.surfaceSecondaryColor
+    }
+}
+
+/// Everything a row draws. `Equatable` over just its inputs so SwiftUI can
+/// skip it when the list re-evaluates for an unrelated reason — a selection
+/// click (selection only changes `ItemRow`'s background) or a structural
+/// change to some other item.
+private struct ItemRowBody: View, Equatable {
+    let item: ItemRowContent
+    let model: ItemLiveModel
+    let stats: EngineStats
+    let theme: Theme
+
+    nonisolated static func == (lhs: ItemRowBody, rhs: ItemRowBody) -> Bool {
+        lhs.item == rhs.item && lhs.model === rhs.model && lhs.stats === rhs.stats
             && lhs.theme == rhs.theme
     }
 
     /// This body deliberately never reads a property of the item's live
     /// model — `.draggable(_:)` is attached to the view this `body` produces
-    /// (see `PackagesListView.row(_:index:)`), and re-evaluating *this* body
+    /// (see `PackagesListView.row(_:index:packageID:)`), and re-evaluating *this* body
     /// on every tick was what tore down the in-flight `NSItemProvider`
     /// mid-drag (confirmed via `NSItemProviderErrorDomain Code=-1000
     /// "operation was cancelled"`). It only hands the model down: all
@@ -1480,19 +1516,6 @@ private struct ItemRow: View, Equatable {
         .padding(.vertical, 4)
         .padding(.horizontal, 4)
         .opacity(item.isEnabled ? 1.0 : 0.55)
-        .listRowBackground(alternatingRowBackground)
-    }
-
-    /// Theme-driven zebra striping. `NSColor.alternatingContentBackgroundColors`
-    /// (the previous source) only adapts to system light/dark — its second
-    /// stripe is a near-transparent overlay tuned for the *default* system
-    /// background, so against a custom theme like Dracula or Nord one of the
-    /// two stripes reads as visibly wrong/missing. This alternates between
-    /// the theme's own primary and secondary surface roles instead.
-    private var alternatingRowBackground: Color {
-        guard !isSelected else { return theme.selectionTintColor.mix(with: Color.black, by: 0.2) }
-        return index.isMultiple(of: 2)
-            ? theme.surfacePrimaryColor : theme.surfaceSecondaryColor
     }
 
     private var stateIconName: String {
