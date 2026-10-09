@@ -188,22 +188,25 @@ struct PackagesListView: View {
     private func row(_ item: ItemSnapshot, index: Int, packageID: UUID) -> some View {
         if allowsReordering {
             DraggableItemRow(
-                itemID: item.id, packageID: packageID, index: index, packages: packages,
-                controller: controller, theme: theme
-            ) {
-                itemRow(item, index: index)
-            }
+                row: itemRow(item, index: index), packageID: packageID, controller: controller
+            )
+            .equatable()
         } else {
             itemRow(item, index: index)
+                .equatable()
+                .tag(item.id)
         }
     }
 
-    private func itemRow(_ item: ItemSnapshot, index: Int) -> some View {
+    /// `.equatable()` at both call sites above is what lets SwiftUI skip a
+    /// row whose `ItemRow` value compares equal: this body re-runs on every
+    /// selection click and every structural change, and without it each
+    /// one re-ran every row's body too.
+    private func itemRow(_ item: ItemSnapshot, index: Int) -> ItemRow {
         ItemRow(
-            item: item, index: index, controller: controller,
-            isSelected: selectedItemIDs.contains(item.id), theme: theme
+            item: ItemRowContent(item), model: controller.liveModel(for: item), index: index,
+            stats: controller.stats, isSelected: selectedItemIDs.contains(item.id), theme: theme
         )
-        .tag(item.id)
     }
 
     /// The package containing `item`, looked up by scanning `packages` — item
@@ -1266,22 +1269,31 @@ private func canReset(_ item: ItemSnapshot) -> Bool {
 /// gives a `Bool`, not a live position — a whole-row highlight sidesteps
 /// that by not claiming a specific edge at all, matching the "nearest edge"
 /// intuition without needing to track it.
-private struct DraggableItemRow<Content: View>: View {
-    let itemID: UUID
+///
+/// `Equatable`, and applied with `.equatable()`, so this body — the one
+/// hosting `.draggable` — is not re-evaluated unless the row itself changed.
+/// That is also why the drop action reads the package list from
+/// `controller` when the drop happens rather than holding a copy: a copy
+/// would both go stale under a skipped body and, being the whole list,
+/// make every row compare unequal on any structural change.
+private struct DraggableItemRow: View, Equatable {
+    let row: ItemRow
     let packageID: UUID
-    let index: Int
-    /// The full package list, needed only to reorder a multi-item drag
-    /// payload into current list order — see `orderedDraggedItemIDs`.
-    let packages: [PackageSnapshot]
     let controller: EngineController
-    let theme: Theme
-    @ViewBuilder let content: () -> Content
 
     @State private var isTargeted = false
     @State private var rowHeight: CGFloat = 1
 
+    nonisolated static func == (lhs: DraggableItemRow, rhs: DraggableItemRow) -> Bool {
+        lhs.row == rhs.row && lhs.packageID == rhs.packageID && lhs.controller === rhs.controller
+    }
+
     var body: some View {
-        content()
+        let itemID = row.item.id
+        let index = row.index
+        row
+            .equatable()
+            .tag(itemID)
             .draggable(DraggedRowID.item(itemID))
             .dropDestination(
                 for: DraggedRowID.self,
@@ -1292,7 +1304,10 @@ private struct DraggableItemRow<Content: View>: View {
                     // for a drag containing only packages, which an item
                     // row never accepts), correctly falling through to "do
                     // nothing."
-                    guard let itemIDs = orderedDraggedItemIDs(dragged, in: packages) else {
+                    guard
+                        let itemIDs = orderedDraggedItemIDs(
+                            dragged, in: controller.structuralPackages)
+                    else {
                         return false
                     }
                     // Every row only ever offered "insert before me," which
@@ -1322,7 +1337,7 @@ private struct DraggableItemRow<Content: View>: View {
             .overlay {
                 if isTargeted {
                     RoundedRectangle(cornerRadius: 4)
-                        .strokeBorder(theme.accentColor, lineWidth: 2)
+                        .strokeBorder(row.theme.accentColor, lineWidth: 2)
                 }
             }
     }
@@ -1347,47 +1362,85 @@ private struct DraggableItemRow<Content: View>: View {
         speedHistory: [100000, 90000, 80000])
     let theme = ThemeCatalog.builtInThemes()[5]
     let controller = EngineController(notificationManager: NotificationManager())
+    let row = { (index: Int, isSelected: Bool) in
+        ItemRow(
+            item: ItemRowContent(item), model: controller.liveModel(for: item), index: index,
+            stats: controller.stats, isSelected: isSelected, theme: theme)
+    }
 
     List(selection: $selectedItemIDs) {
-        ItemRow(
-            item: item, index: 1, controller: controller, isSelected: false,
-            theme: theme)
-        ItemRow(
-            item: item, index: 2, controller: controller, isSelected: true,
-            theme: theme)
-        ItemRow(
-            item: item, index: 3, controller: controller, isSelected: false,
-            theme: theme)
-        ItemRow(
-            item: item, index: 4, controller: controller, isSelected: false,
-            theme: theme)
-        ItemRow(
-            item: item, index: 5, controller: controller, isSelected: true,
-            theme: theme)
-
+        row(1, false)
+        row(2, true)
+        row(3, false)
+        row(4, false)
+        row(5, true)
     }
 }
-private struct ItemRow: View {
-    let item: ItemSnapshot
+
+/// Exactly the fields `ItemRow` draws from an `ItemSnapshot`, and nothing
+/// else — notably not its `RangeSet`, speed history or part filenames, which
+/// the row's live leaves read from the item's `ItemLiveModel` instead. Being
+/// this small is what makes comparing two rows cheap enough to do for every
+/// row on every list update.
+nonisolated struct ItemRowContent: Equatable, Sendable {
+    let id: UUID
+    let filename: String
+    let state: ItemState
+    let isEnabled: Bool
+    let isResumable: Bool?
+    let fileMissing: Bool
+    let isAssembling: Bool
+    let isRetrying: Bool
+    let fractionCompleted: Double
+    let checkpointFailure: String?
+    let remainingAttempts: Int?
+    let lastFailureReason: String?
+    let retryHoldSeconds: Int?
+
+    init(_ item: ItemSnapshot) {
+        id = item.id
+        filename = item.filename
+        state = item.state
+        isEnabled = item.isEnabled
+        isResumable = item.isResumable
+        fileMissing = item.fileMissing
+        isAssembling = item.isAssembling
+        isRetrying = item.isRetrying
+        fractionCompleted = item.fractionCompleted
+        checkpointFailure = item.checkpointFailure
+        remainingAttempts = item.remainingAttempts
+        lastFailureReason = item.lastFailureReason
+        retryHoldSeconds = item.retryHoldSeconds
+    }
+}
+
+private struct ItemRow: View, Equatable {
+    let item: ItemRowContent
+    let model: ItemLiveModel
     let index: Int
-    let controller: EngineController
+    let stats: EngineStats
     let isSelected: Bool
     let theme: Theme
+
+    nonisolated static func == (lhs: ItemRow, rhs: ItemRow) -> Bool {
+        lhs.item == rhs.item && lhs.model === rhs.model && lhs.index == rhs.index
+            && lhs.stats === rhs.stats && lhs.isSelected == rhs.isSelected
+            && lhs.theme == rhs.theme
+    }
 
     /// This body deliberately never reads a property of the item's live
     /// model — `.draggable(_:)` is attached to the view this `body` produces
     /// (see `PackagesListView.row(_:index:)`), and re-evaluating *this* body
     /// on every tick was what tore down the in-flight `NSItemProvider`
     /// mid-drag (confirmed via `NSItemProviderErrorDomain Code=-1000
-    /// "operation was cancelled"`). It only looks the model up — an
-    /// unobserved lookup — and hands it down: all telemetry-dependent
-    /// rendering lives in `ItemTelemetryFields`/`ItemProgressBar`/
+    /// "operation was cancelled"`). It only hands the model down: all
+    /// telemetry-dependent rendering lives in `ItemTelemetryFields`/`ItemProgressBar`/
     /// `ItemBytesText`/`ItemETAText` below, which read the model in their
     /// own `body`. So only those leaves invalidate, and only for the item
     /// whose numbers actually changed — this row (and the drag it hosts)
     /// stays untouched.
     var body: some View {
-        let live = controller.liveModel(for: item)
+        let live = model
         HStack(alignment: .top, spacing: 8) {
             stateIcon
                 .font(.title3)
@@ -1418,7 +1471,7 @@ private struct ItemRow: View {
                     if item.state == .running || item.state == .queued {
                         ItemETAText(
                             model: live, isQueued: item.state == .queued,
-                            stats: controller.stats, theme: theme)
+                            stats: stats, theme: theme)
                     }
                     Spacer()
                     ItemBytesText(model: live, theme: theme)
@@ -1539,7 +1592,7 @@ private struct ItemRow: View {
         text.split(separator: "\n", omittingEmptySubsequences: true).first.map(String.init) ?? text
     }
 
-    static func describe(_ item: ItemSnapshot) -> String {
+    static func describe(_ item: ItemRowContent) -> String {
         if item.isAssembling { return "Assembling…" }
         let base: String
         if item.isRetrying {
