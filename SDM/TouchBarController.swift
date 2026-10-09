@@ -50,6 +50,11 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
     /// property — this is only a shortcut to refresh its image/enabled
     /// state each `update()` without re-walking `touchBar.item(forIdentifier:)`.
     private weak var pauseResumeItem: NSButtonTouchBarItem?
+    /// What `pauseResumeItem` currently shows, so `updatePauseResumeItem`
+    /// can leave it alone when nothing changed. `nil` until first applied,
+    /// and reset whenever the item itself is rebuilt.
+    private var shownAllStopped: Bool?
+    private var shownIsEnabled: Bool?
 
     func configure(controller: EngineController, themeStore: ThemeStore) {
         self.controller = controller
@@ -101,12 +106,23 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
         guard let pauseResumeItem else { return }
         let downloadable = downloadableItems(items)
         let allStopped = downloadable.allSatisfy { $0.state == .stopped }
-        pauseResumeItem.image =
-            NSImage(
-                systemSymbolName: allStopped ? "play.fill" : "pause.fill",
-                accessibilityDescription: allStopped ? "Resume All" : "Pause All")
-            ?? NSImage()
-        pauseResumeItem.isEnabled = !downloadable.isEmpty
+        let isEnabled = !downloadable.isEmpty
+        // Only touched when what it shows changes. This runs on every
+        // engine publish, and assigning a fresh `NSImage` each time — even
+        // an identical one — made AppKit lay the Touch Bar out again on
+        // every tick.
+        if shownAllStopped != allStopped {
+            shownAllStopped = allStopped
+            pauseResumeItem.image =
+                NSImage(
+                    systemSymbolName: allStopped ? "play.fill" : "pause.fill",
+                    accessibilityDescription: allStopped ? "Resume All" : "Pause All")
+                ?? NSImage()
+        }
+        if shownIsEnabled != isEnabled {
+            shownIsEnabled = isEnabled
+            pauseResumeItem.isEnabled = isEnabled
+        }
     }
 
     private func makeTouchBar() -> NSTouchBar {
@@ -141,6 +157,8 @@ final class TouchBarController: NSObject, NSTouchBarDelegate {
             identifier: identifier, image: image, target: self,
             action: #selector(pauseResumeTapped))
         pauseResumeItem = item
+        shownAllStopped = nil
+        shownIsEnabled = nil
         updatePauseResumeItem(items: controller.snapshot.packages.flatMap(\.items))
         return item
     }
