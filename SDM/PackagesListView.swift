@@ -1723,29 +1723,48 @@ private struct ItemETAText: View {
 /// width so it stays correct at any segment count. See spec §9.4. Uses
 /// spec §10.1's `progressFill` role for the fill and `surfaceTertiary` for
 /// the empty track.
+///
+/// Two filled `Shape`s rather than a `Canvas`: the same paths and colors,
+/// without a drawing surface of its own per row. `.clipped()` keeps what a
+/// `Canvas` did implicitly — nothing drawn outside the bar's bounds (a
+/// sliver's 0.5 pt minimum width can overhang the right edge).
 struct SegmentedProgressBar: View {
     let completed: RangeSet
     let total: Int64
     let theme: Theme
 
     var body: some View {
-        Canvas { context, size in
-            let background = Path(
-                roundedRect: CGRect(origin: .zero, size: size),
-                cornerRadius: size.height / 2
-            )
-            context.fill(background, with: .color(theme.surfaceTertiaryColor.opacity(0.6)))
-
-            guard total > 0 else { return }
-            for range in completed.ranges {
-                let x = size.width * CGFloat(range.start) / CGFloat(total)
-                let width = size.width * CGFloat(range.length) / CGFloat(total)
-                context.fill(
-                    Path(CGRect(x: x, y: 0, width: max(width, 0.5), height: size.height)),
-                    with: .color(theme.progressFillColor)
-                )
+        ProgressTrackShape()
+            .fill(theme.surfaceTertiaryColor.opacity(0.6))
+            .overlay {
+                CompletedRangesShape(completed: completed, total: total)
+                    .fill(theme.progressFillColor)
             }
+            .clipped()
+    }
+}
+
+private struct ProgressTrackShape: Shape {
+    nonisolated func path(in rect: CGRect) -> Path {
+        Path(roundedRect: rect, cornerRadius: rect.height / 2)
+    }
+}
+
+private struct CompletedRangesShape: Shape {
+    let completed: RangeSet
+    let total: Int64
+
+    nonisolated func path(in rect: CGRect) -> Path {
+        var path = Path()
+        guard total > 0 else { return path }
+        for range in completed.ranges {
+            let x = rect.width * CGFloat(range.start) / CGFloat(total)
+            let width = rect.width * CGFloat(range.length) / CGFloat(total)
+            path.addRect(
+                CGRect(
+                    x: rect.minX + x, y: rect.minY, width: max(width, 0.5), height: rect.height))
         }
+        return path
     }
 }
 
