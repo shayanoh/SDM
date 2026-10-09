@@ -49,15 +49,6 @@ struct MainWindowView: View {
         }
     }
 
-    private var overallFraction: Double {
-        let running = controller.snapshot.packages.flatMap(\.items).filter {
-            ($0.state == .running || $0.state == .queued || $0.state == .completed)
-                && ($0.totalBytes ?? 0) > 0
-        }
-        guard !running.isEmpty else { return 0 }
-        return running.reduce(0.0) { $0 + $1.fractionCompleted } / Double(running.count)
-    }
-
     var body: some View {
         // A `Window(id:)` scene keeps this view's state alive across
         // close/reopen so `openWindow(id:)` restores it instantly — but
@@ -79,32 +70,9 @@ struct MainWindowView: View {
     private var realBody: some View {
         NavigationSplitView {
             List(selection: $selection) {
-                let items = controller.snapshot.packages.flatMap(\.items)
-                let countRunning = items.count(where: { i in i.state == .running })
-                let countQueued = items.count(where: { i in i.state == .queued })
-                let isDownloading = countRunning > 0
-                HStack {
-                    Label("Downloads", systemImage: "arrow.down.circle")
-                        .symbolEffect(
-                            .breathe, options: .repeat(.continuous), isActive: isDownloading)
-                    Spacer()
-                    if isDownloading {
-                        Text("\(countRunning)/\(countRunning+countQueued)")
-                            .font(.caption)
-                            .fontWeight(.bold)
-                            .foregroundStyle(theme.textPrimaryColor)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 3)
-                            .background(theme.onlineColor)
-                            .clipShape(Capsule())
-                        ProgressView(value: overallFraction)
-                            .progressViewStyle(.circular)
-                            .tint(theme.accentColor)
-                            .controlSize(.mini)
-                    }
-                }
-                .tag(SidebarItem.downloads)
-                .listRowBackground(sidebarRowBackground(.downloads))
+                DownloadsSidebarLabel(stats: controller.stats, theme: theme)
+                    .tag(SidebarItem.downloads)
+                    .listRowBackground(sidebarRowBackground(.downloads))
                 Label("Completed", systemImage: "checkmark.circle")
                     .tag(SidebarItem.completed)
                     .listRowBackground(sidebarRowBackground(.completed))
@@ -287,6 +255,7 @@ struct MainWindowView: View {
             packages: controller.structuralPackages,
             allowsReordering: true,
             showsPauseResumeButton: true,
+            showsLiveAggregates: true,
             selectedItemIDs: $selectedItemIDs,
             collapsedPackageIDs: $collapsedPackageIDs,
             pendingDeletion: $pendingDeletion
@@ -300,22 +269,49 @@ struct MainWindowView: View {
     /// drift apart; a change to the list component lands in both at once.
     private var completedTab: some View {
         PackagesListView(
-            packages: completedPackages,
+            packages: controller.completedPackages,
             allowsReordering: false,
             showsPauseResumeButton: false,
+            showsLiveAggregates: false,
             selectedItemIDs: $selectedCompletedItemIDs,
             collapsedPackageIDs: $collapsedCompletedPackageIDs,
             pendingDeletion: $pendingDeletion
         )
     }
 
-    private var completedPackages: [PackageSnapshot] {
-        controller.structuralPackages.compactMap { package in
-            let completedItems = package.items.filter { $0.state == .completed }
-            guard !completedItems.isEmpty else { return nil }
-            return PackageSnapshot(
-                id: package.id, name: package.name, priority: package.priority,
-                items: completedItems)
+}
+
+/// The sidebar's "Downloads" row: running/queued badge and the overall
+/// progress ring. A distinct `View` so its reads of `stats` — which move
+/// every tick while anything transfers — invalidate only this label.
+/// Inline in `MainWindowView.realBody` they re-evaluated the whole window
+/// body, `downloadsTab` included, at the full tick rate.
+private struct DownloadsSidebarLabel: View {
+    let stats: EngineStats
+    let theme: Theme
+
+    var body: some View {
+        let countRunning = stats.runningCount
+        let isDownloading = countRunning > 0
+        HStack {
+            Label("Downloads", systemImage: "arrow.down.circle")
+                .symbolEffect(
+                    .breathe, options: .repeat(.continuous), isActive: isDownloading)
+            Spacer()
+            if isDownloading {
+                Text("\(countRunning)/\(countRunning + stats.queuedCount)")
+                    .font(.caption)
+                    .fontWeight(.bold)
+                    .foregroundStyle(theme.textPrimaryColor)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(theme.onlineColor)
+                    .clipShape(Capsule())
+                ProgressView(value: stats.overallFraction)
+                    .progressViewStyle(.circular)
+                    .tint(theme.accentColor)
+                    .controlSize(.mini)
+            }
         }
     }
 }
@@ -323,7 +319,7 @@ struct MainWindowView: View {
 /// The sidebar's live global-speed readout and bandwidth graph. A distinct
 /// `View` reading its own environment — same reasoning as
 /// `PackagesListView`'s `PackageHeaderRow`/`PackagesBottomBar`: this needs
-/// `controller.snapshot` at the full tick rate, but `MainWindowView.body`
+/// `controller.stats` at the full tick rate, but `MainWindowView.body`
 /// must not, or every tick would force it to reconstruct `downloadsTab`
 /// (and hence `PackagesListView`'s `List`) regardless of how stable
 /// `structuralPackages` itself stays.
@@ -334,9 +330,7 @@ private struct OverviewStatsBlock: View {
 
     private var theme: Theme { themeStore.resolved(for: colorScheme) }
 
-    private var activeCount: Int {
-        controller.snapshot.packages.flatMap(\.items).filter { $0.state == .running }.count
-    }
+    private var activeCount: Int { controller.stats.runningCount }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -345,11 +339,11 @@ private struct OverviewStatsBlock: View {
                     .font(.headline)
                     .foregroundStyle(theme.textSecondaryColor)
             } else {
-                Text(formatted(controller.snapshot.globalBytesPerSecond)).font(
+                Text(formatted(controller.stats.globalBytesPerSecond)).font(
                     .headline.monospacedDigit())
             }
             BandwidthGraph(
-                history: controller.snapshot.globalHistory, strokeColor: theme.graphStrokeColor,
+                history: controller.stats.globalHistory, strokeColor: theme.graphStrokeColor,
                 averageStrokeColor: theme.graphAverageStrokeColor
             )
             .frame(height: 40)

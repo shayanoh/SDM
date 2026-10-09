@@ -266,14 +266,25 @@ struct SDMApp: App {
             Image(nsImage: menuBarIconController.image)
         }
         .menuBarExtraStyle(.window)
-        // `controller.snapshot` changes every heartbeat tick regardless —
-        // this closure runs at that same rate, but `update(fraction:
-        // drawCircle:)` only re-rasterizes the icon when the ring would
-        // actually look different, instead of every tick.
-        .onChange(of: controller.snapshot) { _, _ in
-            menuBarIconController.update(fraction: overallFraction, drawCircle: downloadsRunning)
-            touchBarController.update()
-        }
+        // Three narrow triggers rather than one on the whole `snapshot`:
+        // watching `snapshot` meant an `Equatable` compare of every item on
+        // every tick just to learn "something moved". Between them these
+        // cover everything `refreshChrome()` reads — the ring's fraction,
+        // whether anything is running, and (for the Touch Bar's pause/resume
+        // state) any item's state or enablement.
+        .onChange(of: controller.stats.overallFraction) { _, _ in refreshChrome() }
+        .onChange(of: controller.stats.runningCount) { _, _ in refreshChrome() }
+        .onChange(of: controller.structuralPackages) { _, _ in refreshChrome() }
+    }
+
+    /// `update(fraction:drawCircle:)` only re-rasterizes the icon when the
+    /// ring would actually look different, so calling this more often than
+    /// strictly needed is harmless.
+    private func refreshChrome() {
+        menuBarIconController.update(
+            fraction: controller.stats.overallFraction,
+            drawCircle: controller.stats.runningCount > 0)
+        touchBarController.update()
     }
 
     private func handleOpenUrl(_ url: URL) async {
@@ -310,17 +321,4 @@ struct SDMApp: App {
         Binding(get: { activationPolicyController.showsMenuBarIcon }, set: { _ in })
     }
 
-    private var overallFraction: Double {
-        let running = controller.snapshot.packages.flatMap(\.items).filter {
-            ($0.state == .running || $0.state == .queued || $0.state == .completed)
-                && ($0.totalBytes ?? 0) > 0
-        }
-        guard !running.isEmpty else { return 0 }
-        return running.reduce(0.0) { $0 + $1.fractionCompleted } / Double(running.count)
-    }
-
-    private var downloadsRunning: Bool {
-        return controller.snapshot.packages.flatMap(\.items).filter { $0.state == .running }.count
-            > 0
-    }
 }

@@ -10,10 +10,10 @@ import SwiftUI
 /// Touch Bar item (confirmed — it highlights on touch-down but its action
 /// never fires), so the one interactive control here is plain AppKit.
 ///
-/// Everything below reuses the sidebar's own views/formulas (`Sparkline`,
-/// `formatted`/`formattedBytes`, `SDMApp.overallFraction`'s item filter)
-/// rather than re-deriving them, so the Touch Bar can never show a number
-/// the sidebar disagrees with.
+/// Everything below reuses the sidebar's own views and figures (`Sparkline`,
+/// `formatted`/`formattedBytes`, `EngineStats`) rather than re-deriving
+/// them, so the Touch Bar can never show a number the sidebar disagrees
+/// with.
 ///
 /// `TouchBarController` only ever decides whether to install the bar at all
 /// (see its three-state doc comment); once installed, `@Observable`
@@ -26,59 +26,33 @@ struct TouchBarContentView: View {
     /// toggle to follow, so this always resolves the dark theme for contrast.
     private var theme: Theme { themeStore.resolved(for: .dark) }
 
-    private var allItems: [ItemSnapshot] { controller.snapshot.packages.flatMap(\.items) }
-
-    private var isAnyRunning: Bool { allItems.contains { $0.state == .running } }
-
-    /// Same set `SDMApp.overallFraction` averages over (`SDMApp.swift:310-317`).
-    private var ringItems: [ItemSnapshot] {
-        allItems.filter {
-            ($0.state == .running || $0.state == .queued || $0.state == .completed)
-                && ($0.totalBytes ?? 0) > 0
-        }
-    }
-
-    private var overallFraction: Double {
-        guard !ringItems.isEmpty else { return 0 }
-        return ringItems.reduce(0.0) { $0 + $1.fractionCompleted } / Double(ringItems.count)
-    }
+    private var stats: EngineStats { controller.stats }
 
     private var downloadedOfTotalText: String {
-        let downloaded = ringItems.reduce(Int64(0)) { $0 + $1.completed.totalBytes }
-        let total = ringItems.reduce(Int64(0)) { $0 + ($1.totalBytes ?? 0) }
-        return "\(formattedBytes(downloaded)) / \(formattedBytes(total))"
-    }
-
-    /// "Waiting to be downloaded": not completed, not disabled.
-    private var waitingItems: [ItemSnapshot] {
-        allItems.filter { $0.isEnabled && $0.state != .completed }
-    }
-
-    private var waitingPackageCount: Int {
-        controller.snapshot.packages.filter { package in
-            package.items.contains { $0.isEnabled && $0.state != .completed }
-        }.count
+        "\(formattedBytes(stats.ringCompletedBytes)) / \(formattedBytes(stats.ringTotalBytes))"
     }
 
     var body: some View {
         HStack(spacing: 12) {
-            if isAnyRunning {
-                ProgressView(value: overallFraction)
+            if stats.runningCount > 0 {
+                ProgressView(value: stats.overallFraction)
                     .progressViewStyle(.circular)
                     .controlSize(.mini)
                     .tint(theme.accentColor)
                 Text(downloadedOfTotalText)
                     .font(.callout.monospacedDigit())
                     .fixedSize()
-                Sparkline(samples: controller.snapshot.globalHistory, color: theme.graphStrokeColor)
+                Sparkline(samples: stats.globalHistory, color: theme.graphStrokeColor)
                     .frame(maxWidth: .infinity)
-                Text(formatted(controller.snapshot.globalBytesPerSecond))
+                Text(formatted(stats.globalBytesPerSecond))
                     .font(.callout.monospacedDigit())
                     .fixedSize()
             } else {
-                Text("\(waitingPackageCount) packages, \(waitingItems.count) items waiting")
-                    .foregroundStyle(theme.textSecondaryColor)
-                    .fixedSize()
+                Text(
+                    "\(stats.waitingPackageCount) packages, \(stats.waitingItemCount) items waiting"
+                )
+                .foregroundStyle(theme.textSecondaryColor)
+                .fixedSize()
                 Spacer(minLength: 0)
             }
         }

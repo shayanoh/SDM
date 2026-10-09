@@ -1,8 +1,12 @@
 # SDM — UI Data-Path Performance: Findings and Refactor Plan
 
-**Status: IN PROGRESS (started 2026-10-09).** Steps 1, 2 and 5 are being
-implemented on branch `ui-data-path-perf`; steps 3, 4, 6 and 7 are open.
-Per-step status is in §4.
+**Status: IN PROGRESS (started 2026-10-09).** Steps 1, 2 and 5 are
+implemented on branch `ui-data-path-perf` (2026-10-09); steps 3, 4, 6 and 7
+are open. Per-step status is in §4.
+
+> Steps 1, 2 and 5 are verified by a clean build and the package test suite
+> only. They have **not** yet been exercised in the running app or measured
+> in Instruments — that is still owed before the branch is merged.
 
 ## 1. Symptom
 
@@ -64,11 +68,11 @@ Two things combine; the code alone does not say which dominates:
 
 | Step | What | Layer | Status |
 |---|---|---|---|
-| 1 | Per-item observable models | App | Open |
-| 2 | Aggregates computed once per tick | App | Open |
+| 1 | Per-item observable models | App | **Done** |
+| 2 | Aggregates computed once per tick | App + Engine (pure helpers) | **Done** |
 | 3 | Display-sized data in the snapshot | Engine + App | Open |
 | 4 | Incremental engine snapshot | Engine | Open |
-| 5 | Window-level leaks | App | Open |
+| 5 | Window-level leaks | App | **Done** |
 | 6 | Lighter rows | App | Open |
 | 7 | Skip per-item publishing when no window is visible | App | Open |
 
@@ -78,6 +82,20 @@ Replace the `itemTelemetry` dictionary with one stable `@Observable` object
 per item. `publish` writes only the fields that actually changed, so only
 the rows of items that are transferring re-render. Addresses finding 1.
 
+**Done.** `ItemLiveModel` (`SDM/LiveModels.swift`) holds an item's hot
+figures; `EngineController.publish` updates each model field only when it
+differs and keeps the models in an `@ObservationIgnored` dictionary, so
+adding or removing an item invalidates nothing by itself —
+`structuralPackages` changing is what tells the list its rows changed.
+`ItemRow` looks its model up (an unobserved read) and passes it to the
+telemetry leaves, which no longer take a `fallback` snapshot. The details
+panel reads the same models. `ItemTelemetry` and `itemTelemetry` are gone.
+
+`publish` now returns immediately when the new snapshot equals the previous
+one, which also removes the per-tick telemetry dictionary build from
+finding 7. The whole-snapshot compare and `notifyChanges`' dictionaries
+remain; those go with steps 3 and 4.
+
 ### Step 2 — Aggregates computed once per tick
 
 Package totals, speed, ETA and a windowed history go into a per-package
@@ -85,6 +103,32 @@ model; running/queued counts, overall fraction, global speed and history go
 into one global stats model. Sidebar, menu bar, Touch Bar, bottom bar and
 package headers read those instead of recomputing inside `body`. Addresses
 findings 4, 5 and the duplicated flat-maps.
+
+**Done.** The arithmetic is pure and lives in
+`SDMKit/Sources/SDMEngine/SnapshotAggregates.swift` (`PackageAggregate`,
+`EngineFigures`, `averageRecentSpeed`, `estimatedSecondsRemaining`), covered
+by `SnapshotAggregatesTests`. The observable holders are `PackageLiveModel`
+and `EngineStats` in `SDM/LiveModels.swift`.
+
+- A package's aggregate is recomputed only when one of its items changed,
+  the list structure changed, or it has a running item (its ETA depends on
+  the global rate).
+- The header sparkline sums the trailing `LiveWindow.packageSparklineSamples`
+  (64) samples instead of every item's full history. The drawn result is
+  unchanged: the sparkline is 60 pt wide and draws one sample per point.
+- `EngineStats` properties are gated individually, so a reader of
+  `runningCount` is not invalidated by `overallFraction` moving.
+- Readers moved to `stats`: sidebar label and overview block, bottom bar
+  speed, menu bar popover header, Touch Bar content, and the App scene's
+  menu-bar-icon/Touch-Bar refresh (now three narrow `.onChange` triggers in
+  place of one on the whole snapshot).
+- The Completed tab's headers sum only the completed items they are handed
+  (`showsLiveAggregates: false`), as before; that runs on structural
+  changes only.
+
+Still reading `controller.snapshot` directly, deliberately: the menu bar
+popover's active-item list, `TouchBarController`, the deletion sheet and the
+quit check.
 
 ### Step 3 — Display-sized data in the snapshot
 
@@ -104,6 +148,12 @@ telemetry struct per component in a single actor hop. Addresses findings 8,
 Move the sidebar's snapshot reads into a leaf view, memoise
 `completedPackages`, share one byte-count formatter. Addresses findings 2,
 3, 6.
+
+**Done.** The sidebar row is `DownloadsSidebarLabel`, so
+`MainWindowView.realBody` no longer reads anything that changes per tick.
+`EngineController.completedPackages` is stored and reassigned only when the
+filtered list structurally changes. `formatted` / `formattedBytes` share one
+main-actor `ByteCountFormatter`.
 
 ### Step 6 — Lighter rows
 

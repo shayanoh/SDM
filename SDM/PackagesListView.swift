@@ -25,6 +25,13 @@ struct PackagesListView: View {
     /// `.queued`/`.running`/`.stopped` items, which a `.completed` item never
     /// is.
     let showsPauseResumeButton: Bool
+    /// On for the Downloads tab, whose `packages` are the engine's own, so
+    /// each header and the bottom bar can read the per-tick aggregates
+    /// `EngineController` already maintains. Off for the Completed tab: its
+    /// packages are filtered copies, so a header there sums just the items
+    /// it was handed — nothing in a completed-only list changes per tick
+    /// anyway.
+    let showsLiveAggregates: Bool
 
     @Environment(EngineController.self) private var controller
     @Environment(ThemeStore.self) private var themeStore
@@ -103,7 +110,8 @@ struct PackagesListView: View {
                 .transition(.move(edge: .bottom))
             }
             PackagesBottomBar(
-                packages: packages, showsPauseResumeButton: showsPauseResumeButton, theme: theme
+                packages: packages, showsPauseResumeButton: showsPauseResumeButton,
+                showsLiveAggregates: showsLiveAggregates, theme: theme
             )
         }
         .background(keyboardShortcuts)
@@ -133,7 +141,8 @@ struct PackagesListView: View {
                 } label: {
                     PackageHeaderRow(
                         package: package, packages: packages,
-                        allowsReordering: allowsReordering, theme: theme,
+                        allowsReordering: allowsReordering,
+                        showsLiveAggregates: showsLiveAggregates, theme: theme,
                         pendingDeletion: $pendingDeletion)
                 }
                 .listRowBackground(
@@ -483,21 +492,21 @@ struct BottomPanel: View {
         var configuredSegments: Int = 0
         var destinationFolders: Set<URL> = []
         let _ = downloadItems.forEach({ item in
-            let telemetry = controller.itemTelemetry[item.id]
-            let completed = telemetry?.completed ?? item.completed
-            let bytes = telemetry?.totalBytes ?? item.totalBytes ?? 0
+            let live = controller.liveModel(for: item)
+            let completed = live.completed
+            let bytes = live.totalBytes ?? 0
             guard bytes > 0 else { return }
             completed.ranges.forEach({
                 completedRangeSet.insert(
                     ByteRange(start: $0.start + totalBytes, end: $0.end + totalBytes))
             })
-            downloadedBytes += completed.totalBytes
+            downloadedBytes += live.completedBytes
             totalBytes += bytes
-            bytesPerSecond += telemetry?.bytesPerSecond ?? item.bytesPerSecond
+            bytesPerSecond += live.bytesPerSecond
             sumFractionCompleted += item.fractionCompleted
-            activeSegments += telemetry?.activeSegments ?? item.activeSegments
-            configuredSegments += telemetry?.configuredSegments ?? item.configuredSegments
-            let itemSpeedHistory = telemetry?.speedHistory ?? item.speedHistory
+            activeSegments += live.activeSegments
+            configuredSegments += live.configuredSegments
+            let itemSpeedHistory = live.speedHistory
             if speedHistory.isEmpty && itemSpeedHistory.count > 0 {
                 speedHistory = itemSpeedHistory
             } else {
@@ -670,34 +679,26 @@ struct BottomPanel: View {
     private func singleItemData(downloadItem: ItemSnapshot, inPackage package: PackageSnapshot)
         -> some View
     {
-        let telemetry = controller.itemTelemetry[downloadItem.id]
+        let live = controller.liveModel(for: downloadItem)
         Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 4) {
             GridRow {
                 HStack {
                     Sparkline(
-                        samples: telemetry?.speedHistory
-                            ?? downloadItem.speedHistory,
+                        samples: live.speedHistory,
                         color: theme.graphStrokeColor
                     )
                     .frame(maxWidth: .infinity)
                     .frame(height: 48)
-                    Text(
-                        formatted(
-                            telemetry?.bytesPerSecond ?? downloadItem.bytesPerSecond
-                        )
-                    )
-                    .font(.caption.monospacedDigit())
-                    .frame(minWidth: 64, alignment: .trailing)
+                    Text(formatted(live.bytesPerSecond))
+                        .font(.caption.monospacedDigit())
+                        .frame(minWidth: 64, alignment: .trailing)
                 }
                 .gridCellColumns(2)
             }
             GridRow {
-                ItemProgressBar(
-                    itemID: downloadItem.id, fallback: downloadItem,
-                    controller: controller, theme: theme
-                )
-                .frame(height: 6)
-                .gridCellColumns(2)
+                ItemProgressBar(model: live, theme: theme)
+                    .frame(height: 6)
+                    .gridCellColumns(2)
             }
             GridRow {
                 Text("Status")
@@ -784,15 +785,14 @@ struct BottomPanel: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             GridRow {
-                // All three read from the same live telemetry (or its
-                // fallback) — using `downloadItem.fractionCompleted` for the
-                // percent while the bytes came from telemetry left the
-                // percent frozen on a multi-component item, since the
-                // `ItemSnapshot` handed to this panel is a structural one
-                // that does not update every tick.
-                let completedBytesValue =
-                    telemetry?.completed.totalBytes ?? downloadItem.completed.totalBytes
-                let totalBytesValue = telemetry?.totalBytes ?? downloadItem.totalBytes ?? 0
+                // All three read from the same live model — using
+                // `downloadItem.fractionCompleted` for the percent while the
+                // bytes came from the live model left the percent frozen on
+                // a multi-component item, since the `ItemSnapshot` handed to
+                // this panel is a structural one that does not update every
+                // tick.
+                let completedBytesValue = live.completedBytes
+                let totalBytesValue = live.totalBytes ?? 0
                 let downloadedBytes = formattedBytes(completedBytesValue)
                 let totalBytes = formattedBytes(totalBytesValue)
                 let progress =
@@ -806,9 +806,8 @@ struct BottomPanel: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             GridRow {
-                let active = telemetry?.activeSegments ?? downloadItem.activeSegments
-                let configured =
-                    telemetry?.configuredSegments ?? downloadItem.configuredSegments
+                let active = live.activeSegments
+                let configured = live.configuredSegments
                 Text("Segments")
                 Text("\(active)/\(configured)")
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -840,7 +839,7 @@ struct BottomPanel: View {
 /// this label and the
 /// `DisclosureGroup`'s content (the package's item rows, including whichever
 /// one is mid-drag) are one compound row-group entity in `List`'s AppKit
-/// backing. Reading `controller.itemTelemetry` straight in *this* body — as
+/// backing. Reading live telemetry straight in *this* body — as
 /// it used to — reconstructed the whole group, including the active
 /// `NSItemProvider` for a row being dragged inside it, on every tick
 /// (confirmed live: dragging still cancelled with
@@ -848,9 +847,7 @@ struct BottomPanel: View {
 /// split the same way, because this label was still the thing invalidating
 /// the group). Pushing the reads one level deeper into the two child views
 /// below keeps this body — and the group it's the label
-/// for — untouched by tick-driven telemetry. See `EngineController
-/// .itemTelemetry`'s doc comment for why any item's telemetry invalidates
-/// every reader in the first place.
+/// for — untouched by tick-driven telemetry.
 private struct PackageHeaderRow: View {
     let package: PackageSnapshot
     /// The full package list, needed only to compute where a dropped
@@ -858,6 +855,7 @@ private struct PackageHeaderRow: View {
     /// preferAfter:)`.
     let packages: [PackageSnapshot]
     let allowsReordering: Bool
+    let showsLiveAggregates: Bool
     let theme: Theme
     @Binding var pendingDeletion: MainWindowView.PendingDeletion?
 
@@ -873,6 +871,7 @@ private struct PackageHeaderRow: View {
                     PackageHeaderBytesText(
                         package: package,
                         controller: controller,
+                        isLive: showsLiveAggregates,
                         theme: theme
                     )
                 }
@@ -880,6 +879,7 @@ private struct PackageHeaderRow: View {
                 PackageHeaderSparkline(
                     package: package,
                     controller: controller,
+                    isLive: showsLiveAggregates,
                     theme: theme
                 )
             }
@@ -1004,6 +1004,20 @@ private struct PackageHeaderRow: View {
     }
 }
 
+/// A package header's figures: the aggregate `EngineController` maintains
+/// once per tick for a live list, or — for the Completed tab's filtered
+/// copy of a package — one summed here from just the items handed in. The
+/// second case only re-runs when the list structurally changes, since
+/// nothing in it is read from an observable.
+@MainActor
+private func headerAggregate(
+    for package: PackageSnapshot, controller: EngineController, isLive: Bool
+) -> PackageAggregate {
+    isLive
+        ? controller.liveModel(for: package).aggregate
+        : PackageAggregate(items: package.items, globalRecentSpeed: 0)
+}
+
 /// The package header's live "completed / total" bytes readout. See
 /// `PackageHeaderRow.body`'s doc comment for why this must be a separate
 /// leaf `View` rather than inline in `PackageHeaderRow.body`. A sibling of
@@ -1012,73 +1026,22 @@ private struct PackageHeaderRow: View {
 private struct PackageHeaderBytesText: View {
     let package: PackageSnapshot
     let controller: EngineController
+    let isLive: Bool
     let theme: Theme
 
     var body: some View {
+        let aggregate = headerAggregate(for: package, controller: controller, isLive: isLive)
         HStack {
-            Text("\(formattedBytes(liveCompletedBytes)) / \(formattedBytes(liveTotalBytes))")
-                .font(.caption)
-                .foregroundStyle(theme.textSecondaryColor)
-                .monospacedDigit()
-            if hasRunningItems {
-                let eta = etaForRunningItems + etaForQueuedItems
-                if eta > 0 {
-                    let etaText = formatTimeIntervalForEta(eta)
-                    Text("ETA: \(etaText)")
-                }
+            Text(
+                "\(formattedBytes(aggregate.completedBytes)) / \(formattedBytes(aggregate.totalBytes))"
+            )
+            .font(.caption)
+            .foregroundStyle(theme.textSecondaryColor)
+            .monospacedDigit()
+            if aggregate.eta > 0 {
+                Text("ETA: \(formatTimeIntervalForEta(aggregate.eta))")
             }
         }
-    }
-
-    /// Live per-item telemetry summed the same way `PackageSnapshot`'s own
-    /// (now-stale-on-`structuralPackages`) computed properties used to —
-    /// falling back to the structural item's own value for any item
-    /// telemetry hasn't reported yet (there shouldn't be a gap in practice,
-    /// since `EngineController` populates `itemTelemetry` for every item on
-    /// every tick, but a fallback costs nothing and avoids a silent zero).
-    private var liveCompletedBytes: Int64 {
-        package.items.reduce(0) {
-            $0 + (controller.itemTelemetry[$1.id]?.completed.totalBytes ?? $1.completed.totalBytes)
-        }
-    }
-
-    private var liveTotalBytes: Int64 {
-        package.items.reduce(0) {
-            $0 + (controller.itemTelemetry[$1.id]?.totalBytes ?? $1.totalBytes ?? 0)
-        }
-    }
-
-    private var hasRunningItems: Bool {
-        package.items.contains(where: { $0.state == .running })
-    }
-    private var etaForRunningItems: TimeInterval {
-        package.items.filter({ $0.state == .running }).map({ item in
-            getEtaForItem(controller: controller, itemID: item.id, fallback: item)
-        }).max() ?? 0
-    }
-
-    private var etaForQueuedItems: TimeInterval {
-        let remainingBytes = package.items.filter({ $0.state == .queued }).map({ item in
-            let telemetry = controller.itemTelemetry[item.id]
-            let totalBytes = telemetry?.totalBytes ?? item.totalBytes ?? 0
-            if totalBytes == 0 {
-                return 0
-            }
-            let completedBytes = telemetry?.completed.totalBytes ?? item.completed.totalBytes
-            let remainingBytes = totalBytes - completedBytes
-            return remainingBytes
-        }).reduce(0, +)
-        let globalHistory = controller.snapshot.globalHistory.suffix(
-            min(10 * AppTiming.ticksPerSecond, controller.snapshot.globalHistory.count)
-        )
-        let globalSpeed =
-            globalHistory.count > 0
-            ? (globalHistory.reduce(0, +) / Double(globalHistory.count))
-            : controller.snapshot.globalBytesPerSecond
-        if globalSpeed <= 0 {
-            return 0
-        }
-        return calculateTimeRemaningForBytes(remainingBytes, atSpeedBPS: globalSpeed)
     }
 }
 
@@ -1087,49 +1050,28 @@ private struct PackageHeaderBytesText: View {
 private struct PackageHeaderSparkline: View {
     let package: PackageSnapshot
     let controller: EngineController
+    let isLive: Bool
     let theme: Theme
 
     var body: some View {
+        let aggregate = headerAggregate(for: package, controller: controller, isLive: isLive)
         HStack {
-            Text(
-                formatted(
-                    package.items.map {
-                        controller.itemTelemetry[$0.id]?.bytesPerSecond ?? $0.bytesPerSecond
-                    }
-                    .reduce(0, { $0 + $1 })
-                )
-            )
-            Sparkline(samples: liveSpeedHistory, color: theme.graphStrokeColor)
+            Text(formatted(aggregate.bytesPerSecond))
+            Sparkline(samples: aggregate.speedHistory, color: theme.graphStrokeColor)
                 .frame(width: 60, height: 20)
         }
-    }
-
-    private var liveSpeedHistory: [Double] {
-        let histories = package.items.map {
-            controller.itemTelemetry[$0.id]?.speedHistory ?? $0.speedHistory
-        }
-        let length = histories.map(\.count).max() ?? 0
-        guard length > 0 else { return [] }
-        var summed = [Double](repeating: 0, count: length)
-        for history in histories {
-            let padding = length - history.count
-            for (index, value) in history.enumerated() {
-                summed[index + padding] += value
-            }
-        }
-        return summed
     }
 }
 
 // MARK: - PackagesBottomBar
 
-/// The Pause/Resume All bar and the aggregate speed readout. A distinct
-/// `View` for the same reason as `PackageHeaderRow`: reading
-/// `controller.itemTelemetry` here, rather than in `PackagesListView.body`
-/// directly, keeps the `List` above it from re-evaluating every tick.
+/// The Pause/Resume All bar and the aggregate speed readout. Its own body
+/// reads only `packages`, so it re-evaluates on a structural change; the
+/// one figure that moves every tick lives in `GlobalSpeedText`.
 private struct PackagesBottomBar: View {
     let packages: [PackageSnapshot]
     let showsPauseResumeButton: Bool
+    let showsLiveAggregates: Bool
     let theme: Theme
 
     @Environment(EngineController.self) private var controller
@@ -1154,8 +1096,12 @@ private struct PackagesBottomBar: View {
                 .disabled(downloadableItems.isEmpty)
                 Divider().frame(height: 16)
             }
-            Text(formatted(liveAggregateBytesPerSecond))
-                .font(.title3.monospacedDigit())
+            if showsLiveAggregates {
+                GlobalSpeedText(stats: controller.stats)
+            } else {
+                // A completed-only list is never transferring.
+                Text(formatted(0)).font(.title3.monospacedDigit())
+            }
             Spacer()
             Text("\(packages.count) packages, \(packages.flatMap(\.items).count) items")
                 .foregroundStyle(theme.textSecondaryColor)
@@ -1166,12 +1112,6 @@ private struct PackagesBottomBar: View {
         // no theme color of its own, it just blurs whatever sits behind it.
         .background(theme.surfaceSecondaryColor)
         .sdmSurface(.toolbar)
-    }
-
-    private var liveAggregateBytesPerSecond: Double {
-        packages.flatMap(\.items).reduce(0.0) {
-            $0 + (controller.itemTelemetry[$1.id]?.bytesPerSecond ?? 0)
-        }
     }
 
     /// Items the global bar's button actually acts on: `.completed`/`.failed`
@@ -1192,6 +1132,17 @@ private struct PackagesBottomBar: View {
     /// All," all-stopped means "Resume All."
     private var allDownloadableStopped: Bool {
         downloadableItems.allSatisfy { $0.state == .stopped }
+    }
+}
+
+/// The bottom bar's global speed readout — the only part of the bar that
+/// changes every tick, so the only part that observes it.
+private struct GlobalSpeedText: View {
+    let stats: EngineStats
+
+    var body: some View {
+        Text(formatted(stats.globalBytesPerSecond))
+            .font(.title3.monospacedDigit())
     }
 }
 
@@ -1423,22 +1374,20 @@ private struct ItemRow: View {
     let isSelected: Bool
     let theme: Theme
 
-    /// This body deliberately never reads `controller.itemTelemetry` —
-    /// `.draggable(_:)` is attached to the view this `body` produces (see
-    /// `PackagesListView.row(_:index:)`), and re-evaluating *this* body on
-    /// every tick was what tore down the in-flight `NSItemProvider` mid-drag
-    /// (confirmed via `NSItemProviderErrorDomain Code=-1000 "operation was
-    /// cancelled"`), for every row on every tick — not just the row actually
-    /// being dragged, since Observation tracks `itemTelemetry` as one whole
-    /// dictionary property rather than per-key, so any item's telemetry
-    /// change invalidates every row that reads the dictionary at all,
-    /// dragged or not. All telemetry-dependent rendering is pushed one level
-    /// deeper into `ItemTelemetryFields`/`ItemProgressBar`/`ItemBytesText`
-    /// below, which read `controller.itemTelemetry` in their own `body`
-    /// instead — so only those leaf children invalidate on a tick, and this
-    /// row (and the drag it hosts) stays untouched regardless of whether
-    /// this exact item, some other item, or nothing at all is downloading.
+    /// This body deliberately never reads a property of the item's live
+    /// model — `.draggable(_:)` is attached to the view this `body` produces
+    /// (see `PackagesListView.row(_:index:)`), and re-evaluating *this* body
+    /// on every tick was what tore down the in-flight `NSItemProvider`
+    /// mid-drag (confirmed via `NSItemProviderErrorDomain Code=-1000
+    /// "operation was cancelled"`). It only looks the model up — an
+    /// unobserved lookup — and hands it down: all telemetry-dependent
+    /// rendering lives in `ItemTelemetryFields`/`ItemProgressBar`/
+    /// `ItemBytesText`/`ItemETAText` below, which read the model in their
+    /// own `body`. So only those leaves invalidate, and only for the item
+    /// whose numbers actually changed — this row (and the drag it hosts)
+    /// stays untouched.
     var body: some View {
+        let live = controller.liveModel(for: item)
         HStack(alignment: .top, spacing: 8) {
             stateIcon
                 .font(.title3)
@@ -1460,22 +1409,19 @@ private struct ItemRow: View {
                             .foregroundStyle(theme.faultyColor)
                     }
                     Spacer()
-                    ItemTelemetryFields(
-                        itemID: item.id, fallback: item, controller: controller, theme: theme)
+                    ItemTelemetryFields(model: live, theme: theme)
                 }
-                ItemProgressBar(
-                    itemID: item.id, fallback: item, controller: controller, theme: theme
-                )
-                .frame(height: 6)
+                ItemProgressBar(model: live, theme: theme)
+                    .frame(height: 6)
                 HStack {
                     statusLine
                     if item.state == .running || item.state == .queued {
                         ItemETAText(
-                            itemID: item.id, fallback: item, controller: controller, theme: theme)
+                            model: live, isQueued: item.state == .queued,
+                            stats: controller.stats, theme: theme)
                     }
                     Spacer()
-                    ItemBytesText(
-                        itemID: item.id, fallback: item, controller: controller, theme: theme)
+                    ItemBytesText(model: live, theme: theme)
                 }
             }
         }
@@ -1483,10 +1429,6 @@ private struct ItemRow: View {
         .padding(.horizontal, 4)
         .opacity(item.isEnabled ? 1.0 : 0.55)
         .listRowBackground(alternatingRowBackground)
-    }
-
-    private var activeDownloadCount: Int {
-        controller.snapshot.packages.flatMap(\.items).filter { $0.state == .running }.count
     }
 
     /// Theme-driven zebra striping. `NSColor.alternatingContentBackgroundColors`
@@ -1650,30 +1592,20 @@ extension View {
 // MARK: - Live telemetry leaves
 
 /// The segment count, speed readout, and sparkline. A distinct `View` so its
-/// `controller.itemTelemetry` read lives in *this* `body`, not `ItemRow`'s —
-/// see `ItemRow.body`'s doc comment for why that split matters for drag.
+/// reads of the live model happen in *this* `body`, not `ItemRow`'s — see
+/// `ItemRow.body`'s doc comment for why that split matters for drag.
 private struct ItemTelemetryFields: View {
-    let itemID: UUID
-    let fallback: ItemSnapshot
-    let controller: EngineController
+    let model: ItemLiveModel
     let theme: Theme
-
-    private var telemetry: ItemTelemetry? { controller.itemTelemetry[itemID] }
-    private var activeSegments: Int { telemetry?.activeSegments ?? fallback.activeSegments }
-    private var configuredSegments: Int {
-        telemetry?.configuredSegments ?? fallback.configuredSegments
-    }
-    private var bytesPerSecond: Double { telemetry?.bytesPerSecond ?? 0 }
-    private var speedHistory: [Double] { telemetry?.speedHistory ?? [] }
 
     var body: some View {
         HStack {
-            Text("\(activeSegments)/\(configuredSegments) seg")
+            Text("\(model.activeSegments)/\(model.configuredSegments) seg")
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(theme.textSecondaryColor)
-            Text(formatted(bytesPerSecond))
+            Text(formatted(model.bytesPerSecond))
                 .font(.caption.monospacedDigit())
-            Sparkline(samples: speedHistory, color: theme.graphStrokeColor)
+            Sparkline(samples: model.speedHistory, color: theme.graphStrokeColor)
                 .frame(width: 48, height: 16)
         }
     }
@@ -1681,89 +1613,52 @@ private struct ItemTelemetryFields: View {
 
 /// The segmented progress bar. See `ItemTelemetryFields`'s doc comment.
 private struct ItemProgressBar: View {
-    let itemID: UUID
-    let fallback: ItemSnapshot
-    let controller: EngineController
+    let model: ItemLiveModel
     let theme: Theme
 
-    private var telemetry: ItemTelemetry? { controller.itemTelemetry[itemID] }
-    private var completed: RangeSet { telemetry?.completed ?? fallback.completed }
-    private var totalBytes: Int64? { telemetry?.totalBytes ?? fallback.totalBytes }
-
     var body: some View {
-        SegmentedProgressBar(completed: completed, total: totalBytes ?? 0, theme: theme)
+        SegmentedProgressBar(
+            completed: model.completed, total: model.totalBytes ?? 0, theme: theme)
     }
 }
 
 /// The "completed / total" bytes readout. See `ItemTelemetryFields`'s doc
 /// comment.
 private struct ItemBytesText: View {
-    let itemID: UUID
-    let fallback: ItemSnapshot
-    let controller: EngineController
+    let model: ItemLiveModel
     let theme: Theme
 
-    private var telemetry: ItemTelemetry? { controller.itemTelemetry[itemID] }
-    private var completed: RangeSet { telemetry?.completed ?? fallback.completed }
-    private var totalBytes: Int64? { telemetry?.totalBytes ?? fallback.totalBytes }
-
     var body: some View {
-        Text("\(formattedBytes(completed.totalBytes)) / \(formattedBytes(totalBytes ?? 0))")
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(theme.textSecondaryColor)
+        Text(
+            "\(formattedBytes(model.completedBytes)) / \(formattedBytes(model.totalBytes ?? 0))"
+        )
+        .font(.caption.monospacedDigit())
+        .foregroundStyle(theme.textSecondaryColor)
     }
-}
-
-private func getEtaForItem(controller: EngineController, itemID: UUID, fallback: ItemSnapshot)
-    -> TimeInterval
-{
-    let telemetry = controller.itemTelemetry[itemID]
-
-    let history: [Double] = telemetry?.speedHistory ?? []
-    var speedAverage: Double = 0
-    if history.count > 0 {
-        let tickCount = min(history.count, AppTiming.ticksPerSecond * 10)
-        speedAverage = history.suffix(tickCount).reduce(0, +) / Double(tickCount)
-    } else {
-        speedAverage = telemetry?.bytesPerSecond ?? 0
-    }
-
-    // A queued item has no speed of its own yet — estimate from the current
-    // global download rate, matching the package header's queued-ETA logic.
-    if speedAverage == 0, fallback.state == .queued {
-        let g = controller.snapshot.globalHistory
-        let window = g.suffix(min(10 * AppTiming.ticksPerSecond, g.count))
-        speedAverage =
-            window.isEmpty
-            ? controller.snapshot.globalBytesPerSecond
-            : window.reduce(0, +) / Double(window.count)
-    }
-
-    if speedAverage == 0 {
-        return 0
-    }
-
-    let totalBytes = telemetry?.totalBytes ?? fallback.totalBytes ?? 0
-    if totalBytes == 0 {
-        return 0
-    }
-    let completedBytes = telemetry?.completed.totalBytes ?? fallback.completed.totalBytes
-    let remainingBytes = totalBytes - completedBytes
-
-    return calculateTimeRemaningForBytes(remainingBytes, atSpeedBPS: speedAverage)
 }
 
 private struct ItemETAText: View {
-    let itemID: UUID
-    let fallback: ItemSnapshot
-    let controller: EngineController
+    let model: ItemLiveModel
+    let isQueued: Bool
+    let stats: EngineStats
     let theme: Theme
 
+    /// A queued item has no speed of its own yet — estimate from the current
+    /// global download rate, matching the package header's queued-ETA logic.
+    /// `stats` is only read on that path, so a running row does not observe
+    /// the global rate at all.
+    private var eta: TimeInterval {
+        var speed = model.recentAverageSpeed
+        if speed == 0, isQueued { speed = stats.recentGlobalSpeed }
+        return estimatedSecondsRemaining(
+            totalBytes: model.totalBytes ?? 0, completedBytes: model.completedBytes,
+            speed: speed)
+    }
+
     var body: some View {
-        let eta = getEtaForItem(controller: controller, itemID: itemID, fallback: fallback)
+        let eta = eta
         if eta > 0 {
-            let etaText = formatTimeIntervalForEta(eta)
-            Text("ETA: \(etaText)")
+            Text("ETA: \(formatTimeIntervalForEta(eta))")
                 .font(.caption)
                 .foregroundStyle(theme.textSecondaryColor)
         }
@@ -1801,14 +1696,22 @@ struct SegmentedProgressBar: View {
     }
 }
 
-func formatted(_ bytesPerSecond: Double) -> String {
+/// One formatter for the whole app: `formatted`/`formattedBytes` are called
+/// several times per visible row per tick, and allocating a
+/// `ByteCountFormatter` each time was a measurable share of a row's cost.
+/// Main-actor-only because `ByteCountFormatter` is not thread-safe.
+@MainActor private let byteCountFormatter: ByteCountFormatter = {
     let formatter = ByteCountFormatter()
     formatter.countStyle = .binary
-    return formatter.string(fromByteCount: Int64(bytesPerSecond)) + "/s"
+    return formatter
+}()
+
+@MainActor
+func formatted(_ bytesPerSecond: Double) -> String {
+    byteCountFormatter.string(fromByteCount: Int64(bytesPerSecond)) + "/s"
 }
 
+@MainActor
 func formattedBytes(_ bytes: Int64) -> String {
-    let formatter = ByteCountFormatter()
-    formatter.countStyle = .binary
-    return formatter.string(fromByteCount: bytes)
+    byteCountFormatter.string(fromByteCount: bytes)
 }

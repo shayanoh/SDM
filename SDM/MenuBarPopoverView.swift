@@ -20,14 +20,14 @@ struct MenuBarPopoverView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(formatted(controller.snapshot.globalBytesPerSecond))
+                Text(formatted(controller.stats.globalBytesPerSecond))
                     .font(.headline.monospacedDigit())
                 Spacer()
-                Text("\(activeItems.count) active").font(.caption).foregroundStyle(
+                Text("\(controller.stats.runningCount) active").font(.caption).foregroundStyle(
                     theme.textSecondaryColor)
             }
             BandwidthGraph(
-                history: controller.snapshot.globalHistory, strokeColor: theme.graphStrokeColor,
+                history: controller.stats.globalHistory, strokeColor: theme.graphStrokeColor,
                 averageStrokeColor: theme.graphAverageStrokeColor
             )
             .frame(height: 32)

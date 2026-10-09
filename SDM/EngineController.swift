@@ -4,20 +4,6 @@ import SDMCore
 import SDMEngine
 import SDMResolve
 
-/// The "hot" per-item fields that change every heartbeat tick while a
-/// download is active — split out from `ItemSnapshot` so a row can read live
-/// numbers without forcing `PackagesListView`'s `List` to receive a new
-/// `packages` array identity on every tick. See
-/// `EngineController.structuralPackages`/`itemTelemetry` for why.
-struct ItemTelemetry: Equatable {
-    var completed: RangeSet
-    var totalBytes: Int64?
-    var activeSegments: Int
-    var configuredSegments: Int
-    var bytesPerSecond: Double
-    var speedHistory: [Double]
-}
-
 /// A package's URL and optional size, as grabbed from LinkGrabber
 struct PackageUrlItem {
     let url: URL
@@ -42,8 +28,8 @@ final class EngineController {
     /// `snapshot.packages` for its `List`'s data source.
     ///
     /// Reassigning `snapshot` itself every tick (still done, for
-    /// `globalBytesPerSecond`/`globalHistory`/notifications/anything else
-    /// that wants a fully live view) is what originally caused this: every
+    /// notifications and anything else that wants a fully live view) is
+    /// what originally caused this: every
     /// reassignment fed `List` a brand-new `packages` value, forcing it to
     /// re-diff its entire structure five times a second even when nothing
     /// but a byte count changed inside an otherwise-identical row — which
@@ -55,13 +41,24 @@ final class EngineController {
     /// monitor, so the resume signal it depended on was itself unreliable.
     /// This fixes the actual cause instead of working around a symptom.
     private(set) var structuralPackages: [PackageSnapshot] = []
-    /// Live per-item telemetry, keyed by item ID, reassigned every tick
-    /// regardless of `structuralPackages`. A row (`ItemRow`, the package
-    /// header, the bottom bar) reads its own entry directly via
-    /// `@Environment(EngineController.self)`, which is what lets it update
-    /// at full tick rate without `PackagesListView.body` — and hence its
-    /// `List`'s structure — re-evaluating at all.
-    private(set) var itemTelemetry: [UUID: ItemTelemetry] = [:]
+    /// `structuralPackages` filtered down to `.completed` items — the
+    /// Completed tab's data source. Stored, and reassigned only when the
+    /// filtered result itself structurally changes, for the same reason
+    /// `structuralPackages` is: computing it inside `MainWindowView.body`
+    /// handed the Completed tab's `List` a brand-new array on every body
+    /// evaluation.
+    private(set) var completedPackages: [PackageSnapshot] = []
+    /// Whole-engine counts and the global speed figures, updated once per
+    /// tick. A `let`: readers observe the individual properties on it.
+    let stats = EngineStats()
+    /// Live per-item / per-package figures, one stable `@Observable` object
+    /// each — see `ItemLiveModel`. Deliberately *not* observed themselves:
+    /// a row looks its model up once and then observes that object, so
+    /// adding or removing an entry must not invalidate every other row.
+    /// `structuralPackages` changing is what tells views the set of rows
+    /// changed.
+    @ObservationIgnored private var itemModels: [UUID: ItemLiveModel] = [:]
+    @ObservationIgnored private var packageModels: [UUID: PackageLiveModel] = [:]
 
     /// `nonisolated` so `applicationWillTerminate` — which runs on the main
     /// thread and cannot await anything — can still reach the engine. Safe
@@ -190,55 +187,103 @@ final class EngineController {
         }
     }
 
-    /// The one place `snapshot`/`structuralPackages`/`itemTelemetry` are
-    /// updated together, so every call site (the tick loop, and every direct
-    /// user-action method below) keeps the three in sync the same way.
+    /// The one place `snapshot`, `structuralPackages`, `completedPackages`,
+    /// `stats` and the live models are updated together, so every call site
+    /// (the tick loop, and every direct user-action method below) keeps them
+    /// in sync the same way.
     private func publish(_ newSnapshot: EngineSnapshot) {
-        // `@Observable` notifies on *reassignment*, not on value change —
-        // gated the same way `itemTelemetry`/`structuralPackages` below are,
-        // otherwise every view reading `snapshot.*` (chiefly `BandwidthGraph`
-        // via `globalHistory`) re-evaluates at full tick rate forever, even
-        // once `SpeedSampler.idle()` has made the underlying data static.
-        if newSnapshot != snapshot {
-            snapshot = newSnapshot
-        }
-
-        // `@Observable` notifies on *reassignment*, not on value change — an
-        // unconditional `itemTelemetry = newTelemetry` here was invalidating
-        // every row that reads it on every tick even when nothing in it
-        // actually differed (confirmed live: with zero downloads running,
-        // every `ItemRow` was still re-rendering every tick). Gate the
-        // reassignment the same way `structuralPackages` already is.
-        let newTelemetry = Self.telemetry(from: newSnapshot)
-        let telemetryChanged = newTelemetry != itemTelemetry
-        if telemetryChanged {
-            itemTelemetry = newTelemetry
-        }
+        // Everything below is derived from the snapshot, so an unchanged one
+        // means there is nothing to do — and `@Observable` notifies on
+        // *reassignment*, not on value change, so assigning it anyway would
+        // re-evaluate every reader at full tick rate with nothing running.
+        guard newSnapshot != snapshot else { return }
+        snapshot = newSnapshot
+        stats.update(from: newSnapshot)
 
         let structuralChanged = !Self.packagesStructurallyEqual(
             structuralPackages, newSnapshot.packages)
-        if structuralChanged {
-            structuralPackages = newSnapshot.packages
+        let globalRecentSpeed = stats.recentGlobalSpeed
+
+        // Models are brought up to date *before* `structuralPackages` is
+        // reassigned below, so a row created for a newly added item finds
+        // its model already there.
+        for package in newSnapshot.packages {
+            var isStale = structuralChanged
+            var hasRunning = false
+            for item in package.items {
+                if let model = itemModels[item.id] {
+                    if model.update(from: item) { isStale = true }
+                } else {
+                    itemModels[item.id] = ItemLiveModel(item)
+                    isStale = true
+                }
+                if item.state == .running { hasRunning = true }
+            }
+            // A package with nothing running and no changed member has the
+            // same aggregate it had last tick. One with a running member is
+            // always recomputed: its ETA also depends on the global rate.
+            if let model = packageModels[package.id] {
+                if isStale || hasRunning {
+                    model.update(
+                        PackageAggregate(
+                            items: package.items, globalRecentSpeed: globalRecentSpeed))
+                }
+            } else {
+                packageModels[package.id] = PackageLiveModel(
+                    id: package.id,
+                    aggregate: PackageAggregate(
+                        items: package.items, globalRecentSpeed: globalRecentSpeed))
+            }
+        }
+
+        guard structuralChanged else { return }
+        let liveItemIDs = Set(newSnapshot.packages.flatMap { $0.items.map(\.id) })
+        itemModels = itemModels.filter { liveItemIDs.contains($0.key) }
+        let livePackageIDs = Set(newSnapshot.packages.map(\.id))
+        packageModels = packageModels.filter { livePackageIDs.contains($0.key) }
+
+        structuralPackages = newSnapshot.packages
+        let completed = Self.completedOnly(newSnapshot.packages)
+        if !Self.packagesStructurallyEqual(completedPackages, completed) {
+            completedPackages = completed
         }
     }
 
-    private static func telemetry(from snapshot: EngineSnapshot) -> [UUID: ItemTelemetry] {
-        var result: [UUID: ItemTelemetry] = [:]
-        for item in snapshot.packages.flatMap(\.items) {
-            result[item.id] = ItemTelemetry(
-                completed: item.completed,
-                totalBytes: item.totalBytes,
-                activeSegments: item.activeSegments,
-                configuredSegments: item.configuredSegments,
-                bytesPerSecond: item.bytesPerSecond,
-                speedHistory: item.speedHistory
-            )
+    /// The live model for `item`. `publish` creates one for every item
+    /// before the row that wants it can exist; creating it here on a miss
+    /// is only a backstop so a row never has to handle "no model".
+    func liveModel(for item: ItemSnapshot) -> ItemLiveModel {
+        if let model = itemModels[item.id] { return model }
+        let model = ItemLiveModel(item)
+        itemModels[item.id] = model
+        return model
+    }
+
+    /// The live aggregate model for `package`. Same backstop as
+    /// `liveModel(for:)` above.
+    func liveModel(for package: PackageSnapshot) -> PackageLiveModel {
+        if let model = packageModels[package.id] { return model }
+        let model = PackageLiveModel(
+            id: package.id,
+            aggregate: PackageAggregate(items: package.items, globalRecentSpeed: 0))
+        packageModels[package.id] = model
+        return model
+    }
+
+    /// Spec §9.1: "Completed is a filtered view of the same list, not a
+    /// separate store."
+    private static func completedOnly(_ packages: [PackageSnapshot]) -> [PackageSnapshot] {
+        packages.compactMap { package in
+            let completedItems = package.items.filter { $0.state == .completed }
+            guard !completedItems.isEmpty else { return nil }
+            return PackageSnapshot(
+                id: package.id, name: package.name, priority: package.priority,
+                items: completedItems)
         }
-        return result
     }
 
     /// Everything about a package/item *except* the fields already carried
-    /// by `ItemTelemetry` — i.e. everything a `List` actually needs to
+    /// by `ItemLiveModel` — i.e. everything a `List` actually needs to
     /// re-diff its structure for: identity, order, name/filename, and any
     /// state a row's non-telemetry chrome (icons, badges, strikethrough)
     /// depends on.
