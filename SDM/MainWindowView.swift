@@ -60,10 +60,18 @@ struct MainWindowView: View {
         // longer visible; swapping in an empty view then lets SwiftUI
         // tear the real content down instead of continuing to drive it,
         // and rebuilds it fresh the moment the window reopens.
-        if scenePhase == .background {
-            Color.clear
-        } else {
-            realBody
+        Group {
+            if scenePhase == .background {
+                Color.clear
+            } else {
+                realBody
+            }
+        }
+        // The same signal, passed on to the controller so it stops
+        // maintaining per-row live models nobody can see. Attached outside
+        // the `if` so it keeps firing while the content is torn down.
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            controller.setListVisible(phase != .background)
         }
     }
 

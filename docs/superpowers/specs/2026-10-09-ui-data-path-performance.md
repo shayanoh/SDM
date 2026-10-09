@@ -1,12 +1,13 @@
 # SDM — UI Data-Path Performance: Findings and Refactor Plan
 
 **Status: IN PROGRESS (started 2026-10-09).** Steps 1, 2 and 5 are
-implemented on branch `ui-data-path-perf` (2026-10-09); steps 3, 4, 6 and 7
-are open. Per-step status is in §4.
+implemented on branch `ui-data-path-perf` (2026-10-09), step 7 likewise;
+steps 3, 4 and 6 are open. Per-step status is in §4.
 
-> Steps 1, 2 and 5 are verified by a clean build and the package test suite
-> only. They have **not** yet been exercised in the running app or measured
-> in Instruments — that is still owed before the branch is merged.
+> Steps 1, 2 and 5 were tried live by Shayan on 2026-10-09 and are a clear
+> improvement; they have not been measured in Instruments. Step 7 is
+> verified by a clean build only — closing and reopening the main window
+> during a download is the check still owed.
 
 ## 1. Symptom
 
@@ -74,7 +75,7 @@ Two things combine; the code alone does not say which dominates:
 | 4 | Incremental engine snapshot | Engine | Open |
 | 5 | Window-level leaks | App | **Done** |
 | 6 | Lighter rows | App | Open |
-| 7 | Skip per-item publishing when no window is visible | App | Open |
+| 7 | Skip per-item publishing when no window is visible | App | **Done** |
 
 ### Step 1 — Per-item observable models
 
@@ -165,3 +166,14 @@ move is an `NSOutlineView`-backed list — not before.
 ### Step 7 — Skip per-item publishing when no window is visible
 
 With the main window closed only the menu bar aggregate is needed.
+
+**Done.** `MainWindowView` reports `scenePhase != .background` — the signal
+it already uses to tear its content down — through
+`EngineController.setListVisible(_:)`. While hidden, `publish` skips the
+per-item and per-package live models; `snapshot`, `stats`,
+`structuralPackages` and `completedPackages` stay current, since the menu
+bar icon, its popover and the Touch Bar read those. Becoming visible again
+refreshes every model from the current snapshot immediately, including
+dropping models of items removed in the meantime. The engine still builds a
+full snapshot every tick while hidden (notifications need it); trimming that
+belongs to step 4.

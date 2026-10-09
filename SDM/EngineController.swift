@@ -59,6 +59,13 @@ final class EngineController {
     /// changed.
     @ObservationIgnored private var itemModels: [UUID: ItemLiveModel] = [:]
     @ObservationIgnored private var packageModels: [UUID: PackageLiveModel] = [:]
+    /// Whether a downloads list is on screen — see `setListVisible(_:)`.
+    /// Starts `true` so nothing is ever stale before the window first
+    /// reports in.
+    @ObservationIgnored private var isListVisible = true
+    /// Set when the list structure changed while no list was visible, so
+    /// the catch-up refresh knows to drop models of removed items too.
+    @ObservationIgnored private var liveModelsNeedPruning = false
 
     /// `nonisolated` so `applicationWillTerminate` — which runs on the main
     /// thread and cannot await anything — can still reach the engine. Safe
@@ -202,12 +209,31 @@ final class EngineController {
 
         let structuralChanged = !Self.packagesStructurallyEqual(
             structuralPackages, newSnapshot.packages)
-        let globalRecentSpeed = stats.recentGlobalSpeed
 
         // Models are brought up to date *before* `structuralPackages` is
         // reassigned below, so a row created for a newly added item finds
-        // its model already there.
-        for package in newSnapshot.packages {
+        // its model already there. Skipped entirely while no list is on
+        // screen — see `setListVisible(_:)`.
+        if isListVisible {
+            refreshLiveModels(from: newSnapshot, structuralChanged: structuralChanged)
+        } else if structuralChanged {
+            liveModelsNeedPruning = true
+        }
+
+        guard structuralChanged else { return }
+        structuralPackages = newSnapshot.packages
+        let completed = Self.completedOnly(newSnapshot.packages)
+        if !Self.packagesStructurallyEqual(completedPackages, completed) {
+            completedPackages = completed
+        }
+    }
+
+    /// Brings every item's and package's live model in line with
+    /// `snapshot`, creating missing ones and — when the set of items may
+    /// have changed — dropping the ones whose item or package is gone.
+    private func refreshLiveModels(from snapshot: EngineSnapshot, structuralChanged: Bool) {
+        let globalRecentSpeed = stats.recentGlobalSpeed
+        for package in snapshot.packages {
             var isStale = structuralChanged
             var hasRunning = false
             for item in package.items {
@@ -237,16 +263,28 @@ final class EngineController {
         }
 
         guard structuralChanged else { return }
-        let liveItemIDs = Set(newSnapshot.packages.flatMap { $0.items.map(\.id) })
+        let liveItemIDs = Set(snapshot.packages.flatMap { $0.items.map(\.id) })
         itemModels = itemModels.filter { liveItemIDs.contains($0.key) }
-        let livePackageIDs = Set(newSnapshot.packages.map(\.id))
+        let livePackageIDs = Set(snapshot.packages.map(\.id))
         packageModels = packageModels.filter { livePackageIDs.contains($0.key) }
+    }
 
-        structuralPackages = newSnapshot.packages
-        let completed = Self.completedOnly(newSnapshot.packages)
-        if !Self.packagesStructurallyEqual(completedPackages, completed) {
-            completedPackages = completed
-        }
+    /// Tells the controller whether any downloads list is on screen. The
+    /// per-item and per-package live models exist only to feed list rows,
+    /// so with the main window closed — SDM keeps downloading from the menu
+    /// bar — updating them every tick is work nobody can see. `snapshot`,
+    /// `stats` and `structuralPackages` are unaffected: the menu bar icon,
+    /// its popover and the Touch Bar keep reading those.
+    ///
+    /// Turning it back on refreshes every model from the current snapshot
+    /// on the spot, so rows that reappear never show figures from before
+    /// the window closed.
+    func setListVisible(_ visible: Bool) {
+        guard visible != isListVisible else { return }
+        isListVisible = visible
+        guard visible else { return }
+        refreshLiveModels(from: snapshot, structuralChanged: liveModelsNeedPruning)
+        liveModelsNeedPruning = false
     }
 
     /// The live model for `item`. `publish` creates one for every item
