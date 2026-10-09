@@ -4,16 +4,14 @@
 `ui-data-path-perf`; not yet merged. What was consciously left undone is
 listed under steps 3, 4 and 6.
 
-History of the work: Steps 1, 2 and 5 are
-implemented on branch `ui-data-path-perf` (2026-10-09), step 7 likewise;
-steps 6, 4 and 3 on 2026-10-10. Per-step status is in §4.
+Steps 1, 2, 5 and 7 were done on 2026-10-09; steps 6, 4 and 3 and the
+stale-row-state fix on 2026-10-10. Per-step status is in §4.
 
-> Steps 1, 2 and 5 were tried live by Shayan on 2026-10-09 and are a clear
-> improvement; they have not been measured in Instruments. Step 7 is
-> verified by a clean build only — closing and reopening the main window
-> during a download is the check still owed. Step 6 is likewise build-only:
-> its three parts are separate commits so each can be judged live (and
-> reverted) on its own.
+> Verification so far. Steps 1, 2, 5, 6 and 7 have been tried live by
+> Shayan and are a clear improvement (scrolling "much better, with room for
+> improvement"); nothing has been measured in Instruments. Step 4, step 3
+> and the stale-row-state fix are verified by a clean build and the package
+> test suite (549 tests) only — they still need a live check.
 
 ## 1. Symptom
 
