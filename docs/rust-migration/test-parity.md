@@ -6,17 +6,17 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 
 | Swift file | Swift tests | Rust file | Rust tests | Notes |
 |---|---|---|---|---|
-| `AppTimingTests.swift` | 2 |  |  |  |
-| `ConnectionAllocatorTests.swift` | 6 |  |  |  |
+| `AppTimingTests.swift` | 2 | `app_timing_tests.rs` | 2 |  |
+| `ConnectionAllocatorTests.swift` | 6 | `connection_allocator_tests.rs` | 6 |  |
 | `ContrastRatioTests.swift` | 6 |  |  |  |
 | `DomainModelTests.swift` | 9 |  |  |  |
 | `DownloadItemTests.swift` | 9 |  |  |  |
 | `FileComponentTests.swift` | 7 |  |  |  |
 | `FormatChoiceTests.swift` | 3 |  |  |  |
 | `MediaFormatTests.swift` | 9 |  |  |  |
-| `RangeSetClaimTests.swift` | 10 |  |  |  |
-| `RangeSetTests.swift` | 11 |  |  |  |
-| `SmokeTests.swift` | 1 |  |  |  |
+| `RangeSetClaimTests.swift` | 10 | `range_set_claim_tests.rs` | 11 | +1 seeded property test (2,000 claim/complete/release steps) |
+| `RangeSetTests.swift` | 11 | `range_set_tests.rs` | 12 | +1 wire-shape test |
+| `SmokeTests.swift` | 1 | `smoke_tests.rs` | 1 |  |
 | `ThemeCatalogTests.swift` | 5 |  |  |  |
 | `ThemeTests.swift` | 1 |  |  |  |
 | **Total SDMCoreTests** | **79** |  |  |  |
