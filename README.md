@@ -56,6 +56,12 @@ A macOS download manager with segmented (multi-connection) transfers, robust res
 
 Open `SDM.xcodeproj` in Xcode and build the `SDM` scheme.
 
+A fresh clone needs Rust ([rustup](https://rustup.rs)) and one run of
+`scripts/build-rust-core.sh` before the project opens cleanly: it produces
+`SDMKit/Artifacts/SDMRust.xcframework` and the generated Swift bindings the
+`SDMRust` package target compiles. The `SDM` scheme re-runs it as a build
+pre-action.
+
 The vendored `*.lzfse` blobs under `SDM/Resources/vendor/` are stored with
 **Git LFS** — run `git lfs install` once before cloning, or `git lfs pull`
 after, so they materialize.

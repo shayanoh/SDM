@@ -9,7 +9,9 @@ import AppKit
 import SDMCore
 import SDMEngine
 import SDMGrabber
+import SDMRust
 import SwiftUI
+import os
 
 /// Exists for one reason: to flush durable state on quit.
 ///
@@ -121,6 +123,8 @@ struct SDMApp: App {
     @Environment(\.openWindow) private var openWindow
 
     init() {
+        Logger(subsystem: "app.sdm", category: "rust-core")
+            .debug("Rust core \(coreVersion().version, privacy: .public)")
         let notification = NotificationManager()
         let managed = ManagedBinariesController(
             notify: { body in Task { @MainActor in notification.postInfo(body) } })

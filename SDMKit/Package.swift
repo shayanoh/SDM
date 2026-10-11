@@ -11,7 +11,20 @@ let package = Package(
         .library(name: "SDMResolve", targets: ["SDMResolve"]),
     ],
     targets: [
-        .target(name: "SDMCore", resources: [.process("Resources")]),
+        .target(
+            name: "SDMCore", dependencies: ["SDMRust"],
+            resources: [.process("Resources")]),
+        .binaryTarget(name: "SDMRustFFI", path: "Artifacts/SDMRust.xcframework"),
+        .target(
+            name: "SDMRust",
+            dependencies: ["SDMRustFFI"],
+            swiftSettings: [.swiftLanguageMode(.v5)],
+            linkerSettings: [
+                .linkedFramework("Security"),
+                .linkedFramework("SystemConfiguration"),
+                .linkedFramework("CoreFoundation"),
+            ]
+        ),
         .target(
             name: "SDMEngine",
             dependencies: ["SDMCore", "SDMResolve"],
@@ -21,6 +34,7 @@ let package = Package(
         ),
         .target(name: "SDMGrabber", dependencies: ["SDMCore", "SDMResolve"]),
         .target(name: "SDMResolve", dependencies: ["SDMCore"]),
+        .testTarget(name: "SDMRustTests", dependencies: ["SDMRust"]),
         .testTarget(name: "SDMCoreTests", dependencies: ["SDMCore"]),
         .testTarget(name: "SDMEngineTests", dependencies: ["SDMEngine", "SDMResolve"]),
         .testTarget(name: "SDMGrabberTests", dependencies: ["SDMGrabber", "SDMResolve"]),

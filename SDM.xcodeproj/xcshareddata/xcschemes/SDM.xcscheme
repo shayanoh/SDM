@@ -6,6 +6,24 @@
       parallelizeBuildables = "YES"
       buildImplicitDependencies = "YES"
       buildArchitectures = "Automatic">
+      <PreActions>
+         <ExecutionAction
+            ActionType = "Xcode.IDEStandardExecutionActionsCore.ExecutionActionType.ShellScriptAction">
+            <ActionContent
+               title = "Build Rust core"
+               scriptText = "if [ &quot;$CONFIGURATION&quot; = &quot;Release&quot; ]; then&#10;  &quot;$SRCROOT/scripts/build-rust-core.sh&quot; release&#10;else&#10;  &quot;$SRCROOT/scripts/build-rust-core.sh&quot; debug&#10;fi&#10;">
+               <EnvironmentBuildable>
+                  <BuildableReference
+                     BuildableIdentifier = "primary"
+                     BlueprintIdentifier = "5F02DCF03020DAA0009E61DC"
+                     BuildableName = "SDM.app"
+                     BlueprintName = "SDM"
+                     ReferencedContainer = "container:SDM.xcodeproj">
+                  </BuildableReference>
+               </EnvironmentBuildable>
+            </ActionContent>
+         </ExecutionAction>
+      </PreActions>
       <BuildActionEntries>
          <BuildActionEntry
             buildForTesting = "YES"
