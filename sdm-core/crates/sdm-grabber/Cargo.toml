@@ -1,0 +1,12 @@
+[package]
+name = "sdm-grabber"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+sdm-core = { version = "0.1.0", path = "../sdm-core" }
+sdm-resolve = { version = "0.1.0", path = "../sdm-resolve" }
+
+[lints]
+workspace = true

@@ -1,0 +1,23 @@
+[package]
+name = "sdm-ffi"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+sdm-core = { version = "0.1.0", path = "../sdm-core" }
+sdm-engine = { version = "0.1.0", path = "../sdm-engine" }
+sdm-grabber = { version = "0.1.0", path = "../sdm-grabber" }
+sdm-resolve = { version = "0.1.0", path = "../sdm-resolve" }
+tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros"] }
+uniffi = { version = "0.32.2", features = ["tokio"] }
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros"] }
+
+[lib]
+name = "sdm_ffi"
+crate-type = ["lib", "staticlib", "cdylib"]

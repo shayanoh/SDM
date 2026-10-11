@@ -1,0 +1,11 @@
+[package]
+name = "sdm-resolve"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+sdm-core = { version = "0.1.0", path = "../sdm-core" }
+
+[lints]
+workspace = true
