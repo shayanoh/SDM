@@ -1,0 +1,8 @@
+{
+  "ffmpegVersion" : "7.1",
+  "lastCheckTick" : 4242,
+  "lastError" : "offline: timed out",
+  "qjsVersion" : "2025-09-13",
+  "ytDlpChannel" : "nightly",
+  "ytDlpVersion" : "2026.09.01.123456"
+}

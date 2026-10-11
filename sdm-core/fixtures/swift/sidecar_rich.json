@@ -1,0 +1,28 @@
+{
+  "bootSessionID" : "11111111-2222-4333-8444-555555555555",
+  "completed" : {
+    "ranges" : [
+      {
+        "end" : 1048576,
+        "start" : 0
+      },
+      {
+        "end" : 5000000000,
+        "start" : 4294967296
+      }
+    ]
+  },
+  "durableCompleted" : {
+    "ranges" : [
+      {
+        "end" : 524288,
+        "start" : 0
+      }
+    ]
+  },
+  "formatVersion" : 1,
+  "resolvedURL" : "https://mirror2.example.org/big.iso?token=abc",
+  "sourceURL" : "https://download.example.org/pub/big.iso",
+  "totalBytes" : 8589934592,
+  "validator" : "\"etag-xyz\""
+}

@@ -1,0 +1,171 @@
+{
+  "durationSeconds" : 212.5,
+  "extractor" : "youtube",
+  "formats" : [
+    {
+      "container" : {
+        "mp4" : {
+
+        }
+      },
+      "delivery" : "direct",
+      "filesize" : 50000000,
+      "height" : 1080,
+      "id" : "137",
+      "kind" : "videoOnly",
+      "tbr" : 4500.5,
+      "url" : "https://rr1.googlevideo.com/videoplayback?id=137",
+      "vcodec" : {
+        "h264" : {
+
+        }
+      },
+      "width" : 1920
+    },
+    {
+      "container" : {
+        "mp4" : {
+
+        }
+      },
+      "delivery" : "direct",
+      "filesizeApprox" : 30000000,
+      "height" : 1080,
+      "id" : "399",
+      "kind" : "videoOnly",
+      "tbr" : 2500.25,
+      "url" : "https://rr1.googlevideo.com/videoplayback?id=399",
+      "vcodec" : {
+        "av1" : {
+
+        }
+      },
+      "width" : 1920
+    },
+    {
+      "container" : {
+        "webm" : {
+
+        }
+      },
+      "delivery" : "direct",
+      "filesize" : 40000000,
+      "filesizeApprox" : 41000000,
+      "height" : 1080,
+      "id" : "248",
+      "kind" : "videoOnly",
+      "tbr" : 3000,
+      "url" : "https://rr1.googlevideo.com/videoplayback?id=248",
+      "vcodec" : {
+        "vp9" : {
+
+        }
+      },
+      "width" : 1920
+    },
+    {
+      "acodec" : {
+        "opus" : {
+
+        }
+      },
+      "container" : {
+        "webm" : {
+
+        }
+      },
+      "delivery" : "direct",
+      "filesize" : 5000000,
+      "id" : "251",
+      "kind" : "audioOnly",
+      "tbr" : 130,
+      "url" : "https://rr1.googlevideo.com/videoplayback?id=251"
+    },
+    {
+      "acodec" : {
+        "aac" : {
+
+        }
+      },
+      "container" : {
+        "m4a" : {
+
+        }
+      },
+      "delivery" : "direct",
+      "id" : "140",
+      "kind" : "audioOnly",
+      "url" : "https://rr1.googlevideo.com/videoplayback?id=140"
+    },
+    {
+      "acodec" : {
+        "aac" : {
+
+        }
+      },
+      "container" : {
+        "mp4" : {
+
+        }
+      },
+      "delivery" : "direct",
+      "filesize" : 12345678,
+      "height" : 360,
+      "id" : "18",
+      "kind" : "progressive",
+      "tbr" : 500,
+      "url" : "https://rr1.googlevideo.com/videoplayback?id=18",
+      "vcodec" : {
+        "h264" : {
+
+        }
+      },
+      "width" : 640
+    },
+    {
+      "acodec" : {
+        "other" : {
+          "_0" : "ac-3"
+        }
+      },
+      "container" : {
+        "other" : {
+          "_0" : "mkv"
+        }
+      },
+      "delivery" : "hls",
+      "height" : 720,
+      "id" : "hls-720",
+      "kind" : "progressive",
+      "tbr" : 2000,
+      "url" : "https://cdn.example.net/master.m3u8",
+      "vcodec" : {
+        "other" : {
+          "_0" : "hevc"
+        }
+      },
+      "width" : 1280
+    },
+    {
+      "container" : {
+        "other" : {
+          "_0" : "ogv"
+        }
+      },
+      "delivery" : "dash",
+      "height" : 480,
+      "id" : "dash-1",
+      "kind" : "videoOnly",
+      "url" : "https://cdn.example.net/manifest.mpd",
+      "vcodec" : {
+        "other" : {
+          "_0" : "vp8"
+        }
+      },
+      "width" : 854
+    }
+  ],
+  "sourceURL" : "https://www.youtube.com/watch?v=abc123",
+  "title" : "Clip: a \"title\" / ü",
+  "videoID" : "abc123"
+}

@@ -34,6 +34,8 @@ let package = Package(
         ),
         .target(name: "SDMGrabber", dependencies: ["SDMCore", "SDMResolve"]),
         .target(name: "SDMResolve", dependencies: ["SDMCore"]),
+        .executableTarget(
+            name: "FixtureDump", dependencies: ["SDMCore", "SDMEngine", "SDMResolve"]),
         .testTarget(name: "SDMRustTests", dependencies: ["SDMRust"]),
         .testTarget(name: "SDMCoreTests", dependencies: ["SDMCore"]),
         .testTarget(name: "SDMEngineTests", dependencies: ["SDMEngine", "SDMResolve"]),
