@@ -20,7 +20,7 @@ SwiftUI app on top through generated bindings, and compare against the Swift
 core.
 
 - [x] Branch and roadmap
-- [ ] Design spec approved (`docs/superpowers/specs/2026-10-12-rust-core-design.md`)
+- [x] Design spec (`docs/superpowers/specs/2026-10-12-rust-core-design.md`) and plan (`docs/superpowers/plans/2026-10-12-rust-core.md`)
 - [ ] 1.0 Walking skeleton: Cargo workspace, UniFFI bindings, XCFramework, the
       app calling one Rust function, building in Xcode and with `build.sh`
 - [ ] 1.1 `SDMCore` port: domain models, `RangeSet`, themes — with tests
