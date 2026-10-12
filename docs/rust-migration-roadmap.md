@@ -28,7 +28,7 @@ core.
       site registry, managed binaries, wholesale downloader — with tests
 - [ ] 1.3 `SDMEngine` port: transport, `FakeOrigin`, download task, scheduler,
       persistence, engine, muxing, wholesale task — with tests
-      (in progress: plan Tasks 11–13 of 11–19 implemented)
+      (in progress: plan Tasks 11–15 of 11–19 implemented and reviewed)
 - [ ] 1.4 `SDMGrabber` port: extraction, probing, verdicts, clustering, session
       — with tests
 - [ ] 1.5 Binding surface and Swift adapter: the app's controllers run on the
@@ -36,11 +36,11 @@ core.
 - [ ] 1.6 App builds in Xcode (Debug and universal Release), manual smoke test
 - [ ] 1.7 Performance comparison against `main`, results recorded below
 
-### Status and how to resume (updated 2026-10-13)
+### Status and how to resume (updated 2026-10-12)
 
-Plan Tasks 1–13 of 27 are implemented and committed (last commit `cab722c`).
-Tasks 1–10 are reviewed; Tasks 11–13 are implemented but not yet reviewed
-(review gate C comes after Task 15). **Next: Task 14, the download task.**
+Plan Tasks 1–15 of 27 are implemented, reviewed and committed; review gate C
+(Tasks 11–15) is done and its fixes are in `b747e83`. **Next: Task 16, the
+engine core**, then Tasks 17–19 and review gate D.
 
 The app does not run on the Rust core yet (that is Task 24) and there are no
 benchmark numbers yet (Task 26). Xcode Debug builds with the Rust skeleton
@@ -72,11 +72,21 @@ Made during execution (the design decisions D1–D8 are in the spec):
 - LZFSE inflation uses the pure-Rust `lzfse_rust` crate, checked against a
   real vendored `ffmpeg` blob.
 
-Open questions for review gate C:
+Settled at review gate C:
 
-- The reqwest transport has no cookie jar; check what `URLSessionTransport`
-  does with cookies.
-- Whether Foundation's atomic write fsyncs (the Rust state store does not).
+- The reqwest transport keeps an in-memory cookie store per transport, as the
+  Swift transport's ephemeral `URLSession` does.
+- Atomic writes (state file, resume sidecar) `fsync` the temp file before the
+  rename, as Foundation's `.atomic` write does (plain `fsync`, not
+  `F_FULLFSYNC`).
+- A network failure keeps its cause (`TransportError::Network`), so the
+  message shown after retries run out says what failed. Retry classification
+  is the same in both cores.
+- **Deliberate difference from the Swift core:** pausing an HLS/DASH
+  (wholesale) download keeps its partial files and progress in Rust. The Swift
+  core intends the same but sweeps them: `YtDlpWholesaleDownloader` throws
+  `WholesaleError.cancelled` while `WholesaleComponentTask` only treats
+  `CancellationError` as a pause. That is a bug on `main`, not fixed here.
 
 ### Measurements
 
