@@ -49,7 +49,7 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | `RemovalTests.swift` | 12 |  |  |  |
 | `ReorderingTests.swift` | 10 |  |  |  |
 | `ResegmentationTests.swift` | 6 |  |  |  |
-| `ResumeSidecarTests.swift` | 8 |  |  |  |
+| `ResumeSidecarTests.swift` | 8 | `resume_sidecar_tests.rs` | 11 | +3 Rust-only: Swift-fixture round-trip (`loads_sidecar_written_by_swift`), `resumable_ranges` boot-session rule, `current_boot_session_id` (macOS). `matches` takes `Option<&str>`. |
 | `ResumeTests.swift` | 9 |  |  |  |
 | `RetryPolicyTests.swift` | 10 | `retry_policy_tests.rs` | 10 | `classify` takes `&dyn Error` and downcasts, like Swift's `as?` casts. |
 | `RoutingTransport.swift` | 0 |  |  |  |
@@ -58,9 +58,9 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | `SnapshotAggregatesTests.swift` | 17 | `snapshot_aggregates_tests.rs` | 17 |  |
 | (Rust-only) | 0 | `engine_snapshot_tests.rs` | 3 | Pins `PartialEq` / `content_eq` for the added `aggregate`, `revision`, `figures`, `generation` fields. |
 | `SnapshotReuseTests.swift` | 12 |  |  |  |
-| `SparseFileTests.swift` | 5 |  |  |  |
+| `SparseFileTests.swift` | 5 | `sparse_file_tests.rs` | 5 |  |
 | `SpeedSamplerTests.swift` | 14 | `speed_sampler_tests.rs` | 14 |  |
-| `StateStoreTests.swift` | 14 |  |  |  |
+| `StateStoreTests.swift` | 14 | `state_store_tests.rs` | 16 | +2 Rust-only: `loads_state_written_by_swift` (rich, minimal, legacy flat), `wrong_format_version_loads_as_empty_and_is_left_in_place`. Literal-JSON tests use r-strings; encoder-based corruption tests substitute in `serde_json` output. |
 | `TestSupport.swift` | 0 |  |  |  |
 | `URLRefreshTests.swift` | 3 |  |  |  |
 | `URLSessionTransportTests.swift` | 12 |  |  |  |
