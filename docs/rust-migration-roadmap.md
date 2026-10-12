@@ -21,13 +21,14 @@ core.
 
 - [x] Branch and roadmap
 - [x] Design spec (`docs/superpowers/specs/2026-10-12-rust-core-design.md`) and plan (`docs/superpowers/plans/2026-10-12-rust-core.md`)
-- [ ] 1.0 Walking skeleton: Cargo workspace, UniFFI bindings, XCFramework, the
+- [x] 1.0 Walking skeleton: Cargo workspace, UniFFI bindings, XCFramework, the
       app calling one Rust function, building in Xcode and with `build.sh`
-- [ ] 1.1 `SDMCore` port: domain models, `RangeSet`, themes — with tests
-- [ ] 1.2 `SDMResolve` port: process runner, yt-dlp JSON, format selection,
+- [x] 1.1 `SDMCore` port: domain models, `RangeSet`, themes — with tests
+- [x] 1.2 `SDMResolve` port: process runner, yt-dlp JSON, format selection,
       site registry, managed binaries, wholesale downloader — with tests
 - [ ] 1.3 `SDMEngine` port: transport, `FakeOrigin`, download task, scheduler,
       persistence, engine, muxing, wholesale task — with tests
+      (in progress: plan Tasks 11–13 of 11–19 implemented)
 - [ ] 1.4 `SDMGrabber` port: extraction, probing, verdicts, clustering, session
       — with tests
 - [ ] 1.5 Binding surface and Swift adapter: the app's controllers run on the
@@ -35,9 +36,47 @@ core.
 - [ ] 1.6 App builds in Xcode (Debug and universal Release), manual smoke test
 - [ ] 1.7 Performance comparison against `main`, results recorded below
 
+### Status and how to resume (updated 2026-10-13)
+
+Plan Tasks 1–13 of 27 are implemented and committed (last commit `cab722c`).
+Tasks 1–10 are reviewed; Tasks 11–13 are implemented but not yet reviewed
+(review gate C comes after Task 15). **Next: Task 14, the download task.**
+
+The app does not run on the Rust core yet (that is Task 24) and there are no
+benchmark numbers yet (Task 26). Xcode Debug builds with the Rust skeleton
+linked in; the universal release build of the Rust library succeeds.
+
+To resume: read the execution ledger at
+`.superpowers/sdd/2026-10-12-rust-core/progress.md` (git-ignored, on this
+machine only). Its last section, "HAND-OFF", lists the next steps in order, the
+notes each remaining task needs, and the shared instruction files the
+implementer and reviewer agents are given. Execution follows
+`superpowers:subagent-driven-development` with Sonnet agents and reviews
+batched at the plan's gates.
+
 ### Decisions
 
-_None yet._
+Made during execution (the design decisions D1–D8 are in the spec):
+
+- Swift's implicit task cancellation is an explicit `CancellationToken`
+  parameter on the trait methods that observe it (`ProcessRunner::run` /
+  `run_streaming`, `WholesaleDownloader::download`, `LinkResolver::refresh`).
+  A cancelled process call returns only after the child has exited.
+- URLs that are persisted or forwarded keep their original string
+  (`SourceUrl`), including refreshed URLs and the URLs passed to yt-dlp. It
+  does not imitate Foundation re-encoding `%20` in strings that also contain
+  non-ASCII.
+- Release builds keep integer overflow checks on, as Swift does.
+- reqwest 0.13 with features `rustls,http2,system-proxy` (plus `stream` in the
+  engine): rustls, the OS trust store, no OpenSSL.
+- LZFSE inflation uses the pure-Rust `lzfse_rust` crate, checked against a
+  real vendored `ffmpeg` blob.
+
+Open questions for review gate C:
+
+- The reqwest transport has no cookie jar; check what `URLSessionTransport`
+  does with cookies.
+- Whether Foundation's atomic write fsyncs (the Rust state store does not).
 
 ### Measurements
 
