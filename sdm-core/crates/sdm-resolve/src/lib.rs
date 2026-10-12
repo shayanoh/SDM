@@ -1,14 +1,10 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! yt-dlp resolution and the subprocess seam.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+mod process_runner;
+mod system_process_runner;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+#[cfg(feature = "testing")]
+pub mod testing;
+
+pub use process_runner::{ProcessOutput, ProcessRunError, ProcessRunner};
+pub use system_process_runner::SystemProcessRunner;

@@ -45,7 +45,7 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | `MuxerTests.swift` | 6 |  |  |  |
 | `NonResumableRestartTests.swift` | 2 |  |  |  |
 | `PackageHistoryTests.swift` | 2 |  |  |  |
-| `ProcessRunnerSupport.swift` | 0 |  |  |  |
+| `ProcessRunnerSupport.swift` | 0 | `testing.rs` (`FakeProcessRunner`, `ok`, `fail`) | 0 | Shared with the `SDMResolveTests` copy; one Rust double behind the `testing` feature. Not tests. |
 | `RemovalTests.swift` | 12 |  |  |  |
 | `ReorderingTests.swift` | 10 |  |  |  |
 | `ResegmentationTests.swift` | 6 |  |  |  |
@@ -107,8 +107,8 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | `ManagedBinariesTypesTests.swift` | 4 |  |  |  |
 | `ManagedBinariesUpdateTests.swift` | 7 |  |  |  |
 | `SiteRegistryTests.swift` | 4 |  |  |  |
-| `Support.swift` | 0 |  |  |  |
-| `SystemProcessRunnerTests.swift` | 8 |  |  |  |
+| `Support.swift` | 0 | `testing.rs` (`FakeProcessRunner`, `ok`, `fail`) | 0 | `FakeBinaryFetcher`, `fixtureData`/`fixtureDump` and `URL.tmp` are left for the tasks that port `BinaryFetching` / `YtDlpDump`. Not tests. |
+| `SystemProcessRunnerTests.swift` | 8 | `system_process_runner_tests.rs` | 8 | `cancellation_terminates_the_process` cancels by dropping the future (no task handle to cancel) and checks SIGTERM via a `trap` marker. Extra, not ported: `process_runner_tests.rs` (3 tests: default `run_streaming`, fake, signal exit code). |
 | `WholesaleProgressParserTests.swift` | 8 |  |  |  |
 | `YtDlpJSONTests.swift` | 8 |  |  |  |
 | `YtDlpResolverTests.swift` | 27 |  |  |  |
