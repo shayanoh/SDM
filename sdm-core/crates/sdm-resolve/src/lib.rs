@@ -8,6 +8,8 @@ mod site_registry;
 mod system_process_runner;
 mod wholesale_progress_parser;
 mod yt_dlp_json;
+mod yt_dlp_resolver;
+mod yt_dlp_wholesale_downloader;
 
 #[cfg(feature = "testing")]
 pub mod testing;
@@ -20,3 +22,5 @@ pub use site_registry::{HostMatch, SitePattern, SiteRegistry};
 pub use system_process_runner::SystemProcessRunner;
 pub use wholesale_progress_parser::WholesaleProgressParser;
 pub use yt_dlp_json::{YtDlpDump, YtDlpEntry, YtDlpFormat, YtDlpParser};
+pub use yt_dlp_resolver::{Classifier, YtDlpResolver};
+pub use yt_dlp_wholesale_downloader::YtDlpWholesaleDownloader;

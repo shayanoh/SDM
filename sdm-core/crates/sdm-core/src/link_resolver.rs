@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use thiserror::Error;
+use tokio_util::sync::CancellationToken;
 use url::Url;
 
 use crate::resolved_media::ResolvedTarget;
@@ -43,6 +44,10 @@ pub enum ResolveError {
     Timeout,
     #[error("yt-dlp failed: {stderr_tail}")]
     YtDlpFailed { stderr_tail: String },
+    /// Twin of Swift's `CancellationError` escaping `refresh` (the resolver
+    /// does not catch it): the `cancel` token passed to `refresh` fired.
+    #[error("cancelled")]
+    Cancelled,
 }
 
 /// The extension seam for extractor-backed sites. Generic HTTP has no
@@ -59,9 +64,16 @@ pub trait LinkResolver: Send + Sync {
     /// Mid-download URL refresh for one expired component: re-resolve
     /// `source_url` (the item's grabbed URL) and hand back a fresh direct URL
     /// for `format_id`.
+    ///
+    /// `cancel` stands in for Swift's implicit task cancellation: the engine
+    /// runs this inside the item's job, so pausing or stopping the item
+    /// cancels it and kills the in-flight yt-dlp. A cancelled refresh returns
+    /// `ResolveError::Cancelled`. (`resolve` takes no token: nothing in the
+    /// Swift app ever cancels one.)
     async fn refresh(
         &self,
         source_url: &Url,
         format_id: &str,
+        cancel: &CancellationToken,
     ) -> Result<RefreshedFormat, ResolveError>;
 }

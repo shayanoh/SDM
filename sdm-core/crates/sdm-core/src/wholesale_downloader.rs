@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use thiserror::Error;
+use tokio_util::sync::CancellationToken;
 use url::Url;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,11 +70,16 @@ pub trait WholesaleDownloader: Send + Sync {
     /// Download `page_url` wholesale to `destination` — a final file, already
     /// muxed. Emits progress. Honors cancellation by terminating the child
     /// process; the caller deletes partial output.
+    ///
+    /// `cancel` stands in for Swift's implicit task cancellation: cancelling
+    /// it terminates the child and the call returns
+    /// `WholesaleError::Cancelled`.
     async fn download(
         &self,
         page_url: &Url,
         format_selector: &str,
         destination: &Path,
         on_progress: Arc<dyn Fn(WholesaleProgress) + Send + Sync>,
+        cancel: &CancellationToken,
     ) -> Result<(), WholesaleError>;
 }

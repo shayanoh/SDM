@@ -111,9 +111,9 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | `SystemProcessRunnerTests.swift` | 8 | `system_process_runner_tests.rs` | 11 | 8 Swift tests ported (`cancellation_terminates_the_process` cancels a `CancellationToken`, the stand-in for task cancellation). Extra, not ported: 3 in `system_process_runner_tests.rs` (`cancellation_applies_to_run_too`, `already_cancelled_token_returns_cancelled`, `dropping_the_future_still_terminates_the_child`) and `process_runner_tests.rs` (3: default `run_streaming`, fake, signal exit code). |
 | `WholesaleProgressParserTests.swift` | 8 | `wholesale_progress_parser_tests.rs` | 8 |  |
 | `YtDlpJSONTests.swift` | 8 | `yt_dlp_json_tests.rs` | 9 | 8 ported + 1 added test pinning `JSONDecoder` tolerance (float-for-int, null, unknown keys, type mismatches). |
-| `YtDlpResolverTests.swift` | 27 |  |  |  |
-| `YtDlpSmokeTests.swift` | 1 |  |  |  |
-| `YtDlpWholesaleDownloaderTests.swift` | 5 |  |  |  |
+| `YtDlpResolverTests.swift` | 27 | `yt_dlp_resolver_tests.rs` | 28 | +1: `refresh_surfaces_cancellation_from_the_runner` (cancellation token seam). |
+| `YtDlpSmokeTests.swift` | 1 | `yt_dlp_smoke_tests.rs` | 1 | Skips with `eprintln!` when yt-dlp is not installed. |
+| `YtDlpWholesaleDownloaderTests.swift` | 5 | `yt_dlp_wholesale_downloader_tests.rs` | 6 | +1: `runner_cancellation_and_timeout_map_to_wholesale_errors`. |
 | `Fixtures/playlist_flat.json` | 0 |  |  |  |
 | `Fixtures/playlist_soundcloud.json` | 0 |  |  |  |
 | `Fixtures/single_but_type_playlist.json` | 0 |  |  |  |

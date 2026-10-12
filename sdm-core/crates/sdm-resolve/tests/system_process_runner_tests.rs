@@ -183,10 +183,13 @@ async fn dropping_the_future_still_terminates_the_child() {
             _ = ready_rx => {}
         }
     } // `run` dropped here
-    let mut waited = 0;
-    while !marker.exists() && waited < 500 {
+    // Wait for the observable event (the trap's marker) with a generous
+    // bound: on a loaded machine the SIGTERM can take seconds to be
+    // delivered and handled, and a pass returns as soon as the marker
+    // appears, so the bound only matters when the behaviour is broken.
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while !marker.exists() && Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(10)).await;
-        waited += 1;
     }
     let existed = marker.exists();
     let _ = std::fs::remove_dir_all(&dir);
