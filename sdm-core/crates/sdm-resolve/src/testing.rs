@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use tokio_util::sync::CancellationToken;
 
 use crate::{ProcessOutput, ProcessRunError, ProcessRunner};
 
@@ -54,6 +55,7 @@ impl ProcessRunner for FakeProcessRunner {
         executable: &Path,
         arguments: &[String],
         _timeout: Duration,
+        _cancel: &CancellationToken,
     ) -> Result<ProcessOutput, ProcessRunError> {
         self.calls.lock().unwrap().push(Call {
             executable: executable.to_path_buf(),

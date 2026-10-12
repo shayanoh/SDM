@@ -10,6 +10,7 @@ libc = "0.2.190"
 sdm-core = { version = "0.1.0", path = "../sdm-core" }
 thiserror = "2.0.21"
 tokio = { version = "1.53.2", features = ["process", "io-util", "time", "rt", "macros", "sync"] }
+tokio-util = "0.7.20"
 
 [features]
 # Test doubles (scripted process runners) for this crate's and dependents' tests.

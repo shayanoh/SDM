@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProcessOutput {
@@ -17,8 +18,16 @@ pub enum ProcessRunError {
     LaunchFailed(String),
     #[error("timed out")]
     TimedOut,
+    /// Twin of Swift throwing `CancellationError`: Rust has no ambient
+    /// cancellation error, so cancelling the `cancel` token surfaces here.
+    #[error("cancelled")]
+    Cancelled,
 }
 
+/// `cancel` stands in for Swift's implicit task cancellation: cancelling it
+/// terminates the child, and the call returns `Cancelled` only after the
+/// child has exited (or the bounded drain has elapsed).
+///
 /// Injected everywhere a subprocess is run, so tests never spawn the real
 /// `yt-dlp`/`ffmpeg`. Parent spec §4.5 / §10.2.
 #[async_trait]
@@ -28,13 +37,14 @@ pub trait ProcessRunner: Send + Sync {
         executable: &Path,
         arguments: &[String],
         timeout: Duration,
+        cancel: &CancellationToken,
     ) -> Result<ProcessOutput, ProcessRunError>;
 
     /// Runs the child and forwards each completed line of stdout **or**
     /// stderr as it arrives (for progress parsing). Returns the exit code;
-    /// a non-zero code is not an error here. Honors cancellation (dropping
-    /// the returned future) and `timeout` by terminating the child
-    /// (`ProcessRunError::TimedOut` on timeout). Parent spec
+    /// a non-zero code is not an error here. Honors `cancel` (Swift's task
+    /// cancellation) and `timeout` by terminating the child
+    /// (`ProcessRunError::Cancelled` / `ProcessRunError::TimedOut`). Parent spec
     /// `2026-09-03-multi-site-resolver-design.md` §6.6.
     ///
     /// Buffered fallback: run to completion, then replay the output
@@ -46,8 +56,9 @@ pub trait ProcessRunner: Send + Sync {
         arguments: &[String],
         timeout: Duration,
         on_line: Arc<dyn Fn(String) + Send + Sync>,
+        cancel: &CancellationToken,
     ) -> Result<i32, ProcessRunError> {
-        let out = self.run(executable, arguments, timeout).await?;
+        let out = self.run(executable, arguments, timeout, cancel).await?;
         for chunk in [&out.stdout, &out.stderr] {
             for line in split_lines_omitting_empty(&String::from_utf8_lossy(chunk)) {
                 on_line(line);

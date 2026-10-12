@@ -108,7 +108,7 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | `ManagedBinariesUpdateTests.swift` | 7 |  |  |  |
 | `SiteRegistryTests.swift` | 4 |  |  |  |
 | `Support.swift` | 0 | `testing.rs` (`FakeProcessRunner`, `ok`, `fail`) | 0 | `FakeBinaryFetcher`, `fixtureData`/`fixtureDump` and `URL.tmp` are left for the tasks that port `BinaryFetching` / `YtDlpDump`. Not tests. |
-| `SystemProcessRunnerTests.swift` | 8 | `system_process_runner_tests.rs` | 8 | `cancellation_terminates_the_process` cancels by dropping the future (no task handle to cancel) and checks SIGTERM via a `trap` marker. Extra, not ported: `process_runner_tests.rs` (3 tests: default `run_streaming`, fake, signal exit code). |
+| `SystemProcessRunnerTests.swift` | 8 | `system_process_runner_tests.rs` | 11 | 8 Swift tests ported (`cancellation_terminates_the_process` cancels a `CancellationToken`, the stand-in for task cancellation). Extra, not ported: 3 in `system_process_runner_tests.rs` (`cancellation_applies_to_run_too`, `already_cancelled_token_returns_cancelled`, `dropping_the_future_still_terminates_the_child`) and `process_runner_tests.rs` (3: default `run_streaming`, fake, signal exit code). |
 | `WholesaleProgressParserTests.swift` | 8 |  |  |  |
 | `YtDlpJSONTests.swift` | 8 |  |  |  |
 | `YtDlpResolverTests.swift` | 27 |  |  |  |

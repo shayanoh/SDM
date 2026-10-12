@@ -6,6 +6,8 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use tokio_util::sync::CancellationToken;
+
 use sdm_resolve::testing::{FakeProcessRunner, fail, ok, ok_with_stderr};
 use sdm_resolve::{ProcessRunner, SystemProcessRunner};
 
@@ -21,6 +23,7 @@ async fn default_run_streaming_replays_stdout_then_stderr_lines() {
             &[],
             Duration::from_secs(1),
             Arc::new(move |l| sink.lock().unwrap().push(l)),
+            &CancellationToken::new(),
         )
         .await
         .unwrap();
@@ -38,7 +41,12 @@ async fn fake_records_calls_and_first_match_wins() {
     ];
     let args = vec!["--dump".to_string(), "x".to_string()];
     let out = fake
-        .run(Path::new("/bin/tool"), &args, Duration::from_secs(1))
+        .run(
+            Path::new("/bin/tool"),
+            &args,
+            Duration::from_secs(1),
+            &CancellationToken::new(),
+        )
         .await
         .unwrap();
     assert_eq!(out.stdout, b"one");
@@ -47,6 +55,7 @@ async fn fake_records_calls_and_first_match_wins() {
             Path::new("/bin/tool"),
             &["boom".to_string()],
             Duration::from_secs(1),
+            &CancellationToken::new(),
         )
         .await
         .unwrap();
@@ -64,6 +73,7 @@ async fn signalled_child_reports_the_signal_number() {
             Path::new("/bin/sh"),
             &["-c".to_string(), "kill -9 $$".to_string()],
             Duration::from_secs(5),
+            &CancellationToken::new(),
         )
         .await
         .unwrap();

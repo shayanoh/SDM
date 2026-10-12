@@ -9,6 +9,8 @@ use async_trait::async_trait;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::{Child, Command};
 use tokio::sync::Notify;
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
 use crate::{ProcessOutput, ProcessRunError, ProcessRunner};
 
@@ -92,6 +94,7 @@ impl ProcessRunner for SystemProcessRunner {
         executable: &Path,
         arguments: &[String],
         timeout: Duration,
+        cancel: &CancellationToken,
     ) -> Result<ProcessOutput, ProcessRunError> {
         // Read the pipes on background tasks so a large output can never
         // deadlock against a full pipe buffer while the process runs.
@@ -103,6 +106,7 @@ impl ProcessRunner for SystemProcessRunner {
             executable,
             arguments,
             timeout,
+            cancel,
             Arc::new(move |chunk| out_sink.lock().unwrap().extend_from_slice(chunk)),
             Arc::new(move |chunk| err_sink.lock().unwrap().extend_from_slice(chunk)),
         )
@@ -122,6 +126,7 @@ impl ProcessRunner for SystemProcessRunner {
         arguments: &[String],
         timeout: Duration,
         on_line: Arc<dyn Fn(String) + Send + Sync>,
+        cancel: &CancellationToken,
     ) -> Result<i32, ProcessRunError> {
         let streamer = Arc::new(LineStreamer::new(on_line));
         let out_streamer = streamer.clone();
@@ -130,6 +135,7 @@ impl ProcessRunner for SystemProcessRunner {
             executable,
             arguments,
             timeout,
+            cancel,
             Arc::new(move |chunk| out_streamer.feed(chunk)),
             Arc::new(move |chunk| err_streamer.feed(chunk)),
         )
@@ -140,13 +146,13 @@ impl ProcessRunner for SystemProcessRunner {
 }
 
 /// Spawns the child, pumps both pipes into the sinks, and races its exit
-/// against `timeout`. Dropping the returned future (the Rust form of
-/// cancelling the Swift task) sends SIGTERM to the child and reaps it in
-/// the background.
+/// against `timeout` and `cancel`. Cancellation sends SIGTERM, gives the
+/// child a bounded window to exit, and returns `Cancelled`.
 async fn execute(
     executable: &Path,
     arguments: &[String],
     timeout: Duration,
+    cancel: &CancellationToken,
     on_stdout: ChunkSink,
     on_stderr: ChunkSink,
 ) -> Result<i32, ProcessRunError> {
@@ -170,36 +176,76 @@ async fn execute(
         tokio::spawn(pump(stderr, stop_err.clone(), on_stderr)),
     ];
 
+    // Swift launches before looking at cancellation, so an already-cancelled
+    // token launches the child and then terminates it straight away.
     let child = guard.child.as_mut().expect("child present");
     let exited: Option<std::io::Result<ExitStatus>> = tokio::select! {
         biased;
         status = child.wait() => Some(status),
-        _ = tokio::time::sleep(timeout) => None,
-    };
-
-    let result = match exited {
-        Some(status) => status
-            .map(|s| s.code().or_else(|| s.signal()).unwrap_or(-1))
-            .map_err(|e| ProcessRunError::LaunchFailed(e.to_string())),
-        None => {
+        _ = cancel.cancelled() => None,
+        _ = tokio::time::sleep(timeout) => {
             // Timed out: terminate, then wait for the child to be gone.
             guard.terminate();
             let child = guard.child.as_mut().expect("child present");
             let _ = child.wait().await;
-            Err(ProcessRunError::TimedOut)
+            guard.child = None;
+            stop_and_join(&stop_out, &stop_err, pumps).await;
+            return Err(ProcessRunError::TimedOut);
         }
     };
-    // The child is reaped; nothing left for the guard to do.
-    guard.child = None;
 
-    // Close the pipes: take whatever is already buffered, do not wait for
-    // EOF (a grandchild may still hold the write end open).
+    let result = match exited {
+        Some(_) if cancel.is_cancelled() => {
+            // Exited, but cancelled before we looked (`Task.isCancelled`).
+            drain_after_terminate(&mut guard).await;
+            Err(ProcessRunError::Cancelled)
+        }
+        Some(status) => status
+            .map(|s| s.code().or_else(|| s.signal()).unwrap_or(-1))
+            .map_err(|e| ProcessRunError::LaunchFailed(e.to_string())),
+        None => {
+            guard.terminate();
+            drain_after_terminate(&mut guard).await;
+            Err(ProcessRunError::Cancelled)
+        }
+    };
+    guard.child = None;
+    stop_and_join(&stop_out, &stop_err, pumps).await;
+    result
+}
+
+/// How long a cancelled child gets to exit on its own after SIGTERM so it
+/// can flush resume state (yt-dlp's `.ytdl` / `.part`) before a rescheduled
+/// run touches the same files.
+const DRAIN_AFTER_TERMINATE: Duration = Duration::from_secs(3);
+
+/// Waits up to `DRAIN_AFTER_TERMINATE` for the child to exit. If it does
+/// not, it is handed to a background task that reaps it (it is not killed
+/// further, as in Swift).
+async fn drain_after_terminate(guard: &mut ChildGuard) {
+    let Some(child) = guard.child.as_mut() else {
+        return;
+    };
+    if tokio::time::timeout(DRAIN_AFTER_TERMINATE, child.wait())
+        .await
+        .is_err()
+        && let Some(mut child) = guard.child.take()
+        && let Ok(handle) = tokio::runtime::Handle::try_current()
+    {
+        handle.spawn(async move {
+            let _ = child.wait().await;
+        });
+    }
+}
+
+/// Closes the pipes: take whatever is already buffered, do not wait for EOF
+/// (a grandchild may still hold the write end open).
+async fn stop_and_join(stop_out: &Notify, stop_err: &Notify, pumps: [JoinHandle<()>; 2]) {
     stop_out.notify_one();
     stop_err.notify_one();
     for pump in pumps {
         let _ = pump.await;
     }
-    result
 }
 
 /// Reads `reader` into `sink` until EOF or until `stop` fires, after which
@@ -230,9 +276,11 @@ async fn pump<R: AsyncRead + Unpin>(mut reader: R, stop: Arc<Notify>, sink: Chun
     }
 }
 
-/// Owns the child until it has been reaped. If dropped while the child is
-/// still running (the caller cancelled), SIGTERM it — as Swift's `onCancel`
-/// does — and reap it in the background so it cannot linger as a zombie.
+/// Owns the child until it has been reaped. Backstop only: explicit
+/// cancellation goes through the `CancellationToken`. If the future is
+/// dropped anyway while the child is still running, SIGTERM it and reap it
+/// in the background so it cannot linger as a zombie (the caller cannot
+/// await anything on this path).
 struct ChildGuard {
     child: Option<Child>,
 }
