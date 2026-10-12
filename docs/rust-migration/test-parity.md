@@ -33,7 +33,7 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | `DurableStateTests.swift` | 5 |  |  |  |
 | `EngineRetryTests.swift` | 6 |  |  |  |
 | `FakeOriginTests.swift` | 8 | `fake_origin_tests.rs` | 10 | 8 ported. +2 for the switches the Swift suite never exercises (`truncate_after_bytes`, `chunk_size`). |
-| `FakeWholesaleDownloader.swift` | 0 |  |  |  |
+| `FakeWholesaleDownloader.swift` | 0 | `support/fake_wholesale_downloader.rs` | 0 | Test support; no tests. |
 | `HostileServerTests.swift` | 5 | `hostile_server_tests.rs` | 5 |  |
 | `HysteresisTests.swift` | 1 |  |  |  |
 | `LaunchStateTests.swift` | 3 |  |  |  |
@@ -42,7 +42,7 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | `MinSegmentSizeTests.swift` | 3 |  |  |  |
 | `MultiComponentDownloadTests.swift` | 7 |  |  |  |
 | `MuxAssemblyTests.swift` | 4 |  |  |  |
-| `MuxerTests.swift` | 6 |  |  |  |
+| `MuxerTests.swift` | 6 | `muxer_tests.rs` | 6 | All 6 ported; `real_ffmpeg_muxes_two_tiny_streams` is `#[ignore]` (the Rust suite never runs a real `ffmpeg`; Swift ran it when one was installed), so 5 run. |
 | `NonResumableRestartTests.swift` | 2 |  |  |  |
 | `PackageHistoryTests.swift` | 2 |  |  |  |
 | `ProcessRunnerSupport.swift` | 0 | `testing.rs` (`FakeProcessRunner`, `ok`, `fail`) | 0 | Shared with the `SDMResolveTests` copy; one Rust double behind the `testing` feature. Not tests. |
@@ -57,6 +57,7 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | `SmokeTests.swift` | 1 | `smoke_tests.rs` | 1 |  |
 | `SnapshotAggregatesTests.swift` | 17 | `snapshot_aggregates_tests.rs` | 17 |  |
 | (Rust-only) | 0 | `churn_tests.rs` | 1 | `byte_identity_under_randomized_churn`: 40 seeds x 8 MB under worker-count changes, pauses, drops of the task and a dropping/truncating origin (Review Focus 3). |
+| (Rust-only) | 0 | `wholesale_component_task_tests.rs` | 5 | `WholesaleComponentTask` is reached only through the engine in Swift: progress synthesis, `pause` waiting for the downloader, failure sweep, success sweep, missing output file. |
 | (Rust-only) | 0 | `engine_snapshot_tests.rs` | 3 | Pins `PartialEq` / `content_eq` for the added `aggregate`, `revision`, `figures`, `generation` fields. |
 | `SnapshotReuseTests.swift` | 12 |  |  |  |
 | `SparseFileTests.swift` | 5 | `sparse_file_tests.rs` | 5 |  |
