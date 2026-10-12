@@ -5,8 +5,28 @@ version.workspace = true
 publish.workspace = true
 
 [dependencies]
+async-trait = "0.1.92"
+bytes = "1.12.1"
+futures = "0.3.34"
 sdm-core = { version = "0.1.0", path = "../sdm-core" }
 sdm-resolve = { version = "0.1.0", path = "../sdm-resolve" }
+serde = "1.0.229"
+serde_json = "1.0.154"
+thiserror = "2.0.21"
+tokio = { version = "1.53.2", features = ["rt", "sync", "time", "macros", "fs"] }
+tokio-util = "0.7.20"
+tracing = "0.1.44"
+url = "2.5.8"
+uuid = "1.28.0"
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+rand = "0.10.3"
+tempfile = "3.27.0"
+tokio = { version = "1.53.2", features = ["rt-multi-thread", "test-util"] }
+
+[features]
+# Routes `engine_log!` to `tracing::debug!`. Mirrors Swift's `SDM_ENGINE_LOGGING`.
+engine-logging = []

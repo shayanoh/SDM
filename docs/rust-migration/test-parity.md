@@ -51,21 +51,22 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | `ResegmentationTests.swift` | 6 |  |  |  |
 | `ResumeSidecarTests.swift` | 8 |  |  |  |
 | `ResumeTests.swift` | 9 |  |  |  |
-| `RetryPolicyTests.swift` | 10 |  |  |  |
+| `RetryPolicyTests.swift` | 10 | `retry_policy_tests.rs` | 10 | `classify` takes `&dyn Error` and downcasts, like Swift's `as?` casts. |
 | `RoutingTransport.swift` | 0 |  |  |  |
-| `SchedulerTests.swift` | 12 |  |  |  |
-| `SmokeTests.swift` | 1 |  |  |  |
-| `SnapshotAggregatesTests.swift` | 17 |  |  |  |
+| `SchedulerTests.swift` | 12 | `scheduler_tests.rs` | 12 | Fixture table ported entry for entry. |
+| `SmokeTests.swift` | 1 | `smoke_tests.rs` | 1 |  |
+| `SnapshotAggregatesTests.swift` | 17 | `snapshot_aggregates_tests.rs` | 17 |  |
+| (Rust-only) | 0 | `engine_snapshot_tests.rs` | 3 | Pins `PartialEq` / `content_eq` for the added `aggregate`, `revision`, `figures`, `generation` fields. |
 | `SnapshotReuseTests.swift` | 12 |  |  |  |
 | `SparseFileTests.swift` | 5 |  |  |  |
-| `SpeedSamplerTests.swift` | 14 |  |  |  |
+| `SpeedSamplerTests.swift` | 14 | `speed_sampler_tests.rs` | 14 |  |
 | `StateStoreTests.swift` | 14 |  |  |  |
 | `TestSupport.swift` | 0 |  |  |  |
 | `URLRefreshTests.swift` | 3 |  |  |  |
 | `URLSessionTransportTests.swift` | 12 |  |  |  |
 | `UpdateSettingsTests.swift` | 1 |  |  |  |
 | `WholesaleDownloadTests.swift` | 8 |  |  |  |
-| `YtDlpArtifactsTests.swift` | 3 |  |  |  |
+| `YtDlpArtifactsTests.swift` | 3 | `yt_dlp_artifacts_tests.rs` | 3 |  |
 | **Total SDMEngineTests** | **256** |  |  |  |
 
 ## SDMGrabberTests
