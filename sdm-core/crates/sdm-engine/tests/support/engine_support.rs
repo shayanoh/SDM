@@ -13,7 +13,7 @@ use futures::StreamExt;
 use sdm_core::{ByteRange, DownloadItem, DownloadPackage, SourceUrl};
 use sdm_engine::{
     DownloadEngine, EngineSettings, HttpTransport, InMemoryStateStore, ItemSnapshot, RangeRequest,
-    RangeResponse, RetryPolicy, TransportError, Trash,
+    RangeResponse, RetryPolicy, StateStore, TransportError, Trash,
 };
 use tokio::sync::Notify;
 use uuid::Uuid;
@@ -246,6 +246,25 @@ pub fn new_engine(
     settings: EngineSettings,
 ) -> DownloadEngine {
     new_engine_with_trash(transport, settings, Arc::new(ScratchTrash::new()))
+}
+
+/// [`new_engine`] over a state store the test holds on to, so it can read what
+/// the engine saved or build a second engine over the same store.
+pub fn new_engine_with_store(
+    transport: impl HttpTransport + 'static,
+    store: Arc<dyn StateStore>,
+    settings: EngineSettings,
+) -> DownloadEngine {
+    DownloadEngine::new(
+        Arc::new(transport),
+        store,
+        settings,
+        RetryPolicy::new(),
+        None,
+        None,
+        None,
+    )
+    .with_trash(Arc::new(ScratchTrash::new()))
 }
 
 /// [`new_engine`] with a trash the test can inspect.

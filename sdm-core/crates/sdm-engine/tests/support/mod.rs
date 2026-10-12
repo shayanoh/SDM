@@ -26,8 +26,8 @@ use url::Url;
 
 pub use engine_support::{
     Gate, GatePhase, GatedOrigin, ScratchTrash, engine_settings, example_item, make_gated_engine,
-    new_engine, new_engine_with_trash, package_of, running_count, snapshot_item, wait_for_progress,
-    wait_until_async,
+    new_engine, new_engine_with_store, new_engine_with_trash, package_of, running_count,
+    snapshot_item, wait_for_progress, wait_until_async,
 };
 pub use fake_muxer::FakeMuxer;
 pub use fake_resolver::FakeResolver;
@@ -35,7 +35,7 @@ pub use fake_wholesale_downloader::FakeWholesaleDownloader;
 pub use loopback_server::{
     LoopbackBody, LoopbackRequest, LoopbackResponse, LoopbackServer, payload_handler,
 };
-pub use routing_transport::RoutingTransport;
+pub use routing_transport::{HostTransport, RoutingTransport};
 
 /// How long a loopback test may take before it fails instead of hanging.
 pub const TEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);

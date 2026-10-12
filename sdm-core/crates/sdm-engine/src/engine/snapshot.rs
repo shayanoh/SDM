@@ -82,22 +82,11 @@ impl DownloadEngine {
                 global_recent_speed,
                 cached_revision.unwrap_or(0),
             );
-            // Hand back the previous value when nothing in it changed, so its
-            // revision is the same as last time. Checked by comparing the
-            // freshly built value against the cached one — never by tracking
-            // what was mutated — so it cannot go stale. `content_eq`, not
-            // `==`: `PartialEq` ignores `aggregate`, and an ETA that moved
-            // while the items stayed equal still has to reach the UI.
-            let snapshot = match state.package_snapshot_cache.get(&candidate.id) {
-                Some(cached) if cached.content_eq(&candidate) => cached.clone(),
-                _ => {
-                    state.last_package_revision += 1;
-                    PackageSnapshot {
-                        revision: state.last_package_revision,
-                        ..candidate
-                    }
-                }
-            };
+            let snapshot = settle_revision(
+                state.package_snapshot_cache.get(&candidate.id),
+                candidate,
+                &mut state.last_package_revision,
+            );
             refreshed_cache.insert(snapshot.id, snapshot.clone());
             package_snapshots.push(snapshot);
         }
@@ -139,6 +128,30 @@ impl DownloadEngine {
                     .map(|sampler| (*id, sampler.history().to_vec()))
             })
             .collect()
+    }
+}
+
+/// Hands back the previous value when nothing in the freshly built package
+/// changed, so its revision is the same as last time; otherwise stamps the
+/// next revision on it. Checked by comparing the new value against the cached
+/// one — never by tracking what was mutated — so it cannot go stale.
+/// `content_eq`, not `==`: `PartialEq` ignores `aggregate`, and an ETA that
+/// moved while the items stayed equal still has to reach the UI. (The
+/// candidate carries the cached revision, so `content_eq` compares the rest.)
+fn settle_revision(
+    cached: Option<&PackageSnapshot>,
+    candidate: PackageSnapshot,
+    last_revision: &mut u64,
+) -> PackageSnapshot {
+    match cached {
+        Some(cached) if cached.content_eq(&candidate) => cached.clone(),
+        _ => {
+            *last_revision += 1;
+            PackageSnapshot {
+                revision: *last_revision,
+                ..candidate
+            }
+        }
     }
 }
 
@@ -269,4 +282,74 @@ fn item_snapshot(
         .collect();
     snapshot.metadata = item.metadata.clone();
     snapshot
+}
+
+#[cfg(test)]
+mod tests {
+    use sdm_core::{RangeSet, SourceUrl};
+
+    use super::*;
+
+    fn package(global_recent_speed: f64, revision: u64) -> PackageSnapshot {
+        let running = ItemSnapshot::new(
+            Uuid::nil(),
+            SourceUrl::new("https://example.com/a.bin").unwrap(),
+            "a.bin",
+            Some(1000),
+            RangeSet::new(),
+            ItemState::Running,
+            true,
+            Some(true),
+            1,
+            1,
+            10.0,
+            vec![10.0],
+        );
+        let queued = ItemSnapshot::new(
+            Uuid::from_u128(1),
+            SourceUrl::new("https://example.com/b.bin").unwrap(),
+            "b.bin",
+            Some(1000),
+            RangeSet::new(),
+            ItemState::Queued,
+            true,
+            None,
+            0,
+            1,
+            0.0,
+            vec![],
+        );
+        PackageSnapshot::new(
+            Uuid::nil(),
+            "p",
+            Priority::Normal,
+            vec![running, queued],
+            global_recent_speed,
+            revision,
+        )
+    }
+
+    /// The package's items are equal and only its ETA moved (the queued
+    /// remainder is divided by the global rate): it still gets a new
+    /// revision, while an identical rebuild keeps the old one.
+    #[test]
+    fn a_changed_aggregate_gets_a_new_revision_and_an_unchanged_package_keeps_it() {
+        let mut last = 7;
+        let cached = package(100.0, 7);
+
+        let same = settle_revision(Some(&cached), package(100.0, 7), &mut last);
+        assert_eq!(same.revision, 7);
+        assert_eq!(last, 7);
+
+        let slower = package(50.0, 7);
+        assert_eq!(slower, cached, "only the aggregate differs");
+        assert_ne!(slower.aggregate.eta, cached.aggregate.eta);
+        let revised = settle_revision(Some(&cached), slower, &mut last);
+        assert_eq!(revised.revision, 8);
+        assert_eq!(last, 8);
+        assert_eq!(revised.aggregate.eta, package(50.0, 0).aggregate.eta);
+
+        let fresh = settle_revision(None, package(100.0, 0), &mut last);
+        assert_eq!(fresh.revision, 9);
+    }
 }

@@ -30,13 +30,13 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | `DownloadEngineTests.swift` | 15 | `download_engine_tests.rs` | 15 |  |
 | `DownloadTaskTests.swift` | 8 | `download_task_tests.rs` | 8 | `start()` returns `DownloadError`, which wraps the transport error (`DownloadError::Transport`). |
 | `DurableResumeTests.swift` | 8 | `durable_resume_tests.rs` | 8 | 5 sidecar-only tests plus 3 `DownloadTask` tests. |
-| `DurableStateTests.swift` | 5 |  |  |  |
+| `DurableStateTests.swift` | 5 | `durable_state_tests.rs` | 5 | The two JSON-store tests use `JsonStateStore` over a real file; the real-restart test drives two engines over one store and folder. |
 | `EngineRetryTests.swift` | 6 | `engine_retry_tests.rs` | 6 |  |
 | `FakeOriginTests.swift` | 8 | `fake_origin_tests.rs` | 10 | 8 ported. +2 for the switches the Swift suite never exercises (`truncate_after_bytes`, `chunk_size`). |
 | `FakeWholesaleDownloader.swift` | 0 | `support/fake_wholesale_downloader.rs` | 0 | Test support; no tests. |
 | `HostileServerTests.swift` | 5 | `hostile_server_tests.rs` | 5 |  |
 | `HysteresisTests.swift` | 1 | `hysteresis_tests.rs` | 1 |  |
-| `LaunchStateTests.swift` | 3 |  |  |  |
+| `LaunchStateTests.swift` | 3 | `launch_state_tests.rs` | 3 |  |
 | `ManualRetryTests.swift` | 4 | `manual_retry_tests.rs` | 4 |  |
 | `MetadataSnapshotTests.swift` | 1 | `metadata_snapshot_tests.rs` | 1 |  |
 | `MinSegmentSizeTests.swift` | 3 | `min_segment_size_tests.rs` | 3 |  |
@@ -52,25 +52,28 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | `ResumeSidecarTests.swift` | 8 | `resume_sidecar_tests.rs` | 11 | +3 Rust-only: Swift-fixture round-trip (`loads_sidecar_written_by_swift`), `resumable_ranges` boot-session rule, `current_boot_session_id` (macOS). `matches` takes `Option<&str>`. |
 | `ResumeTests.swift` | 9 | `resume_tests.rs` | 9 | `pausingMidFlightNeverRecordsUnwrittenBytes` stalls the origin after a few chunks (`StallingOrigin`) so "mid-flight" is deterministic. |
 | `RetryPolicyTests.swift` | 10 | `retry_policy_tests.rs` | 10 | `classify` takes `&dyn Error` and downcasts, like Swift's `as?` casts. |
-| `RoutingTransport.swift` | 0 |  |  |  |
+| `RoutingTransport.swift` | 0 | `support/routing_transport.rs` | 0 | Test support; no tests. Also holds `HostTransport` (one `FakeOrigin` per host), used by the engine churn test. |
 | `SchedulerTests.swift` | 12 | `scheduler_tests.rs` | 12 | Fixture table ported entry for entry. |
 | `SmokeTests.swift` | 1 | `smoke_tests.rs` | 1 |  |
 | `SnapshotAggregatesTests.swift` | 17 | `snapshot_aggregates_tests.rs` | 17 |  |
 | (Rust-only) | 0 | `churn_tests.rs` | 1 | `byte_identity_under_randomized_churn`: 40 seeds x 8 MB under worker-count changes, pauses, drops of the task and a dropping/truncating origin (Review Focus 3). |
 | (Rust-only) | 0 | `wholesale_component_task_tests.rs` | 5 | `WholesaleComponentTask` is reached only through the engine in Swift: progress synthesis, `pause` waiting for the downloader, failure sweep, success sweep, missing output file. |
+| (Rust-only) | 0 | `engine_churn_tests.rs` | 1 | `engine_byte_identity_under_churn`: 20 seeds x 6 items of 2-6 MB in 2 packages over a dropping `FakeOrigin` per item; segment-count changes, stop/start, priority changes, reorders and one shutdown + new-engine `restore()` interleaved with `tick()`; every output hashes to its payload and no `.incomplete` / `.sdmpart` is left (Review Focus 3). About 86 s in a debug build. |
+| (Rust-only) | 0 | `src/engine/state.rs` (unit tests) | 2 | `every_snapshot_input_bumps_the_generation` (every `&mut` accessor and each helper that writes through one) and its converse for reads. |
+| (Rust-only) | 0 | `src/engine/snapshot.rs` (unit test) | 1 | A package whose aggregate (ETA) changed with equal items gets a new revision; an identical rebuild keeps it. |
 | (Rust-only) | 0 | `engine_snapshot_tests.rs` | 3 | Pins `PartialEq` / `content_eq` for the added `aggregate`, `revision`, `figures`, `generation` fields. |
-| (Rust-only) | 0 | `engine_interruption_tests.rs` | 5 | Paths Swift's tests do not reach: a mux cut short by a stop or a shutdown is not recorded as a failure, a wholesale item that is stopped or caught by a shutdown lands stopped without charging a retry attempt, and the snapshot `generation` / `revision` counters stay put when nothing changed. |
-| `SnapshotReuseTests.swift` | 12 |  |  |  |
+| (Rust-only) | 0 | `engine_interruption_tests.rs` | 6 | Paths Swift's tests do not reach: a mux cut short by a stop or a shutdown is not recorded as a failure, a wholesale item that is stopped or caught by a shutdown lands stopped without charging a retry attempt, and the snapshot `generation` / `revision` counters stay put when nothing changed. +1 in Task 19: a stop that races the end of a transfer must not leave the item stopped beside a finished file (the engine bug the churn test found). |
+| `SnapshotReuseTests.swift` | 12 | `snapshot_reuse_tests.rs` | 13 | 12 ported. The two storage-identity tests assert `generation` (engine) and `revision` (package) equality or difference instead of buffer identity. +1 Rust-only: `an_idle_engine_serves_the_same_generation` (100 idle ticks leave `generation` and every `revision` alone). |
 | `SparseFileTests.swift` | 5 | `sparse_file_tests.rs` | 5 |  |
 | `SpeedSamplerTests.swift` | 14 | `speed_sampler_tests.rs` | 14 |  |
 | `StateStoreTests.swift` | 14 | `state_store_tests.rs` | 16 | +2 Rust-only: `loads_state_written_by_swift` (rich, minimal, legacy flat), `wrong_format_version_loads_as_empty_and_is_left_in_place`. Literal-JSON tests use r-strings; encoder-based corruption tests substitute in `serde_json` output. |
-| `TestSupport.swift` | 0 |  |  |  |
+| `TestSupport.swift` | 0 | `support/mod.rs`, `support/engine_support.rs` | 0 | Test support; no tests (`Gate`, `GatedOrigin`, `test_payload`, `make_scratch_directory`, engine constructors including `new_engine_with_store`). |
 | `URLRefreshTests.swift` | 3 | `url_refresh_tests.rs` | 5 | +2 Rust-only: stopping an item during its refresh ends the refresh (resolver honours the token) and a refresh that returns after a stop installs no new task (resolver ignores it); both leave the stale component URL in place. `FakeResolver` is in `support/fake_resolver.rs`. |
 | `URLSessionTransportTests.swift` | 12 | `reqwest_transport_tests.rs` | 22 | 12 ported (the `HTTPURLResponse` helpers become `HeaderMap` helpers; `defaultConfigurationNeverTouchesTheSharedCache` becomes a loopback test that a cacheable response is refetched, since reqwest has no cache to configure). +4 Review Focus 4 (redirect and final URL, body cut short, lying `Content-Length`, origin ignoring `Range`). +1 cookie replay across a redirect hop (Gate C). +5 loopback: 206/`Content-Range`/validator, error status returned not thrown, refused connection, dropping the body stream closes the connection, dropping the fetch before headers closes the connection. |
 | `UpdateSettingsTests.swift` | 1 | `update_settings_tests.rs` | 1 |  |
 | `WholesaleDownloadTests.swift` | 8 | `wholesale_download_tests.rs` | 8 | The preemption test waits for the preempted wholesale item to land `Queued` (the cancelled downloader call unwinds at once in Rust), where Swift asserts it straight after the ticks. No test asserted the swept-scratch behaviour, so nothing was changed to the wholesale-resume spec. |
 | `YtDlpArtifactsTests.swift` | 3 | `yt_dlp_artifacts_tests.rs` | 3 |  |
-| **Total SDMEngineTests** | **256** |  |  |  |
+| **Total SDMEngineTests** | **256** |  | **298** | Rust column sums every row above, Rust-only rows included. |
 
 ## SDMGrabberTests
 

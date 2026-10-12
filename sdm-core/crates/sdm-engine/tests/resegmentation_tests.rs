@@ -173,8 +173,21 @@ async fn raising_from_one_worker_steals_half_of_the_sole_in_flight_claim_without
     wait_until(|| task.active_worker_count() >= 1).await;
 
     task.set_worker_count(2);
-    // The steal has happened once the second worker has run.
-    wait_until(|| task.peak_worker_count() == 2).await;
+    // The steal has happened once the second worker has run *and* requested
+    // the half it took. `peak_worker_count` alone is not enough: it counts the
+    // worker from the moment it starts, and if the gate opened before that
+    // worker's request went out, the first worker could finish the whole file
+    // first and the second would find nothing left to steal.
+    wait_until(|| {
+        task.peak_worker_count() == 2
+            && origin
+                .requested_ranges()
+                .iter()
+                .filter(|range| range.length() > 1)
+                .count()
+                >= 2
+    })
+    .await;
     gate.open();
 
     assert_eq!(std::fs::read(finished(handle).await).unwrap(), payload);

@@ -271,3 +271,65 @@ async fn unchanged_snapshots_keep_their_generation_and_revisions() {
     assert!(third.packages[1].revision > second.packages[1].revision);
     assert!(third.generation > second.generation);
 }
+
+/// A stop (or disable) that lands just as a transfer finishes must not undo
+/// the finish. The component tasks have already moved their files into place
+/// by then, so landing the item `Stopped` left a finished file at the
+/// destination with no sidecar behind it; the next start re-downloaded and
+/// failed permanently with "A file already exists at the destination". Found
+/// by `engine_byte_identity_under_churn`.
+///
+/// The stop is fired the moment the last byte is recorded, which is as close
+/// to the window as a test outside the engine can get; whichever side of the
+/// finish it lands on, the item must end `Completed` with the right bytes.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_stop_that_races_the_end_of_a_transfer_never_poisons_the_next_start() {
+    let payload = test_payload(300_000);
+    for round in 0..150 {
+        let dir = make_scratch_directory();
+        let engine = support::new_engine(
+            FakeOrigin::with_behavior(
+                payload.clone(),
+                FakeOriginBehavior {
+                    chunk_size: 8192,
+                    ..Default::default()
+                },
+            ),
+            engine_settings(1, 2, 8, dir.path()).with_min_segment_size_bytes(64 * 1024),
+        );
+        let item = support::example_item("a.bin");
+        let id = item.id;
+        engine
+            .add(DownloadPackage::new("Batch").with_items(vec![item]))
+            .await;
+
+        // Until every byte is recorded (or the item is already done), then stop.
+        within(async {
+            loop {
+                let snapshot = snapshot_item(id, &engine).await.unwrap();
+                if snapshot.state == ItemState::Completed {
+                    break;
+                }
+                if snapshot.total_bytes == Some(payload.len() as i64)
+                    && snapshot.completed.total_bytes() == payload.len() as i64
+                {
+                    engine.stop_item(id).await;
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+
+        engine.resume_all().await;
+        within(engine.run_until_idle()).await.unwrap();
+        let landed = snapshot_item(id, &engine).await.unwrap().state;
+        assert_eq!(landed, ItemState::Completed, "round {round}");
+        assert_eq!(
+            std::fs::read(dir.path().join("Batch").join("a.bin")).unwrap(),
+            payload,
+            "round {round}"
+        );
+        within(engine.shutdown()).await;
+    }
+}

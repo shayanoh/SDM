@@ -84,8 +84,8 @@ impl Inner {
             .get(&item_id)
             .map_or(RetireIntent::None, |runner| runner.retire_intent);
         let landing: Option<ItemState> = match (retire_intent, first_error) {
-            (RetireIntent::Preempted, _) => Some(ItemState::Queued),
-            (RetireIntent::UserStopped, _) => None,
+            (RetireIntent::Preempted, Some(_)) => Some(ItemState::Queued),
+            (RetireIntent::UserStopped, Some(_)) => None,
             (RetireIntent::None, Some(failure)) => {
                 // Ask the *live* runners how far this attempt got —
                 // `item.completed` is not written back until `finish_item()`
@@ -114,7 +114,16 @@ impl Inner {
                 let progressed = attempt_completed > started_from;
                 Some(self.failure_state(&mut state, failure.as_error(), item_id, progressed))
             }
-            (RetireIntent::None, None) => match self.assemble(item_id, &cancel).await {
+            // Every component ran to the end — nothing was cut short, whatever
+            // the intent. Swift lands a stop or a preemption that arrives just
+            // as the transfer finishes as `.stopped` / `.queued` (`nil` /
+            // `.queued`), though the component tasks have already finalized
+            // their files into place; the next start then finds a finished
+            // file at the destination with no sidecar or `.incomplete` behind
+            // it, re-downloads, and fails permanently with "A file already
+            // exists at the destination". So a finished run is assembled and
+            // lands as a finished run does, as the `None` intent always did.
+            (_, None) => match self.assemble(item_id, &cancel).await {
                 Assembled::Landed(landed) => {
                     if landed == ItemState::Completed {
                         let mut state = self.lock();

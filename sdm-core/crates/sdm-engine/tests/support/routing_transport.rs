@@ -41,3 +41,32 @@ impl HttpTransport for RoutingTransport {
         }
     }
 }
+
+/// Dispatches a fetch to one of any number of `FakeOrigin`s by request host,
+/// for tests that need a different payload per item. An unknown host fails the
+/// fetch with a 404-shaped transport error rather than serving the wrong
+/// bytes. Cloning shares the same origins.
+#[derive(Clone, Default)]
+pub struct HostTransport {
+    origins: std::sync::Arc<std::collections::HashMap<String, FakeOrigin>>,
+}
+
+impl HostTransport {
+    pub fn new(origins: impl IntoIterator<Item = (String, FakeOrigin)>) -> Self {
+        Self {
+            origins: std::sync::Arc::new(origins.into_iter().collect()),
+        }
+    }
+}
+
+#[async_trait]
+impl HttpTransport for HostTransport {
+    async fn fetch(&self, request: RangeRequest) -> Result<RangeResponse, TransportError> {
+        let origin = request
+            .url
+            .host_str()
+            .and_then(|host| self.origins.get(host))
+            .unwrap_or_else(|| panic!("no origin for {}", request.url));
+        origin.fetch(request).await
+    }
+}

@@ -418,3 +418,130 @@ impl EngineState {
         self.global_sampler_mut().record(delta);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use sdm_core::SourceUrl;
+
+    use super::*;
+
+    fn state() -> EngineState {
+        EngineState::new(EngineSettings::new(1, 1, 8, PathBuf::from("/nonexistent")))
+    }
+
+    /// Runs `write` and asserts the generation moved.
+    fn assert_bumps(name: &str, state: &mut EngineState, write: impl FnOnce(&mut EngineState)) {
+        let before = state.snapshot_generation();
+        write(state);
+        assert_ne!(
+            state.snapshot_generation(),
+            before,
+            "{name} did not bump the snapshot generation"
+        );
+    }
+
+    /// Every way to write a snapshot input moves the generation: each `&mut`
+    /// accessor the moment it is handed out, and each helper that writes
+    /// through one. (The fields themselves are private, so the accessors are
+    /// the only way in; a new input needs a line here and a bumping accessor.)
+    #[test]
+    fn every_snapshot_input_bumps_the_generation() {
+        let mut state = state();
+        let id = Uuid::new_v4();
+
+        assert_bumps("set_settings", &mut state, |s| {
+            s.set_settings(EngineSettings::new(2, 3, 8, PathBuf::from("/nonexistent")))
+        });
+        assert_bumps("assembling_mut", &mut state, |s| {
+            s.assembling_mut();
+        });
+        assert_bumps("packages_mut", &mut state, |s| {
+            s.packages_mut();
+        });
+        assert_bumps("runners_mut", &mut state, |s| {
+            s.runners_mut();
+        });
+        assert_bumps("samplers_mut", &mut state, |s| {
+            s.samplers_mut();
+        });
+        assert_bumps("global_sampler_mut", &mut state, |s| {
+            s.global_sampler_mut();
+        });
+        assert_bumps("segment_overrides_mut", &mut state, |s| {
+            s.segment_overrides_mut();
+        });
+        assert_bumps("failed_attempts_mut", &mut state, |s| {
+            s.failed_attempts_mut();
+        });
+        assert_bumps("retry_hold_ticks_mut", &mut state, |s| {
+            s.retry_hold_ticks_mut();
+        });
+        assert_bumps("last_failure_mut", &mut state, |s| {
+            s.last_failure_mut();
+        });
+        assert_bumps("checkpoint_failures_mut", &mut state, |s| {
+            s.checkpoint_failures_mut();
+        });
+        assert_bumps("missing_files_mut", &mut state, |s| {
+            s.missing_files_mut();
+        });
+
+        // The helpers that write inputs.
+        let item = DownloadItem::http(
+            SourceUrl::new("https://example.com/a.bin").unwrap(),
+            "a.bin",
+        );
+        let item_id = item.id;
+        state
+            .packages_mut()
+            .push(DownloadPackage::new("p").with_items(vec![item]));
+        assert_bumps("mutate_item", &mut state, |s| {
+            s.mutate_item(item_id, |item| item.is_enabled = false)
+        });
+        assert_bumps("renumber_positions", &mut state, |s| {
+            s.renumber_positions(0)
+        });
+        assert_bumps("renumber_all_positions", &mut state, |s| {
+            s.renumber_all_positions()
+        });
+        assert_bumps("clear_item_bookkeeping", &mut state, |s| {
+            s.clear_item_bookkeeping(id)
+        });
+        state.samplers_mut().insert(id, SpeedSampler::new());
+        assert_bumps("record_progress", &mut state, |s| {
+            s.record_progress(100, id)
+        });
+        // `refresh_missing_files` bumps only when the answer changed: a
+        // completed item whose file is not on disk.
+        state.mutate_item(item_id, |item| item.state = ItemState::Completed);
+        assert_bumps("refresh_missing_files", &mut state, |s| {
+            s.refresh_missing_files()
+        });
+    }
+
+    /// The flip side: reads and an unchanged `refresh_missing_files` leave the
+    /// generation alone, so an idle tick does not invalidate the snapshot.
+    #[test]
+    fn reads_and_an_unchanged_file_check_do_not_bump_the_generation() {
+        let mut state = state();
+        let before = state.snapshot_generation();
+        let _ = (
+            state.settings(),
+            state.packages(),
+            state.runners(),
+            state.samplers(),
+            state.global_sampler(),
+            state.failed_attempts(),
+            state.retry_hold_ticks(),
+            state.last_failure(),
+            state.checkpoint_failures(),
+            state.missing_files(),
+            state.assembling(),
+            state.segment_count(Uuid::new_v4()),
+        );
+        state.refresh_missing_files();
+        assert_eq!(state.snapshot_generation(), before);
+    }
+}
