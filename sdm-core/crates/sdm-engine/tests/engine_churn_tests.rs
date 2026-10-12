@@ -11,6 +11,11 @@
 //! worker unwinds at once (so a stopped item may be running again by the time
 //! the controller looks), and a mux or wholesale download interrupted by a
 //! stop is not a failure (neither is in play here).
+//!
+//! Reproducing a failure: the seed printed on failure fixes the controller's
+//! choices (which action, which item, how many bytes), but when each action
+//! lands depends on real worker scheduling under a multi-thread runtime, so
+//! the same seed may need several reruns to fail again.
 mod support;
 
 use std::future::Future;

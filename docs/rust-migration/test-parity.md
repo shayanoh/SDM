@@ -41,12 +41,13 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | `MetadataSnapshotTests.swift` | 1 | `metadata_snapshot_tests.rs` | 1 |  |
 | `MinSegmentSizeTests.swift` | 3 | `min_segment_size_tests.rs` | 3 |  |
 | `MultiComponentDownloadTests.swift` | 7 | `multi_component_download_tests.rs` | 7 | The 5-seed `@Test(arguments:)` churn test is one Rust test looping over the seeds. |
-| `MuxAssemblyTests.swift` | 4 | `mux_assembly_tests.rs` | 4 | `FakeMuxer` is in `support/fake_muxer.rs`. |
+| `MuxAssemblyTests.swift` | 4 | `mux_assembly_tests.rs` | 5 | `FakeMuxer` is in `support/fake_muxer.rs`. +1 Rust-only: `a_stop_during_the_mux_does_not_poison_the_next_start` (a stop that interrupts the mux, then a restart: the item goes straight to the mux with no new origin request instead of re-downloading part 0 and failing with "already exists"). Deliberate improvement over Swift, which has the same bug; `context_for` hands a mux item whose finalized parts are all on disk no download contexts. |
 | `MuxerTests.swift` | 6 | `muxer_tests.rs` | 6 | All 6 ported; `real_ffmpeg_muxes_two_tiny_streams` is `#[ignore]` (the Rust suite never runs a real `ffmpeg`; Swift ran it when one was installed), so 5 run. |
 | `NonResumableRestartTests.swift` | 2 | `non_resumable_restart_tests.rs` | 2 |  |
 | `PackageHistoryTests.swift` | 2 | `package_history_tests.rs` | 2 |  |
 | `ProcessRunnerSupport.swift` | 0 | `testing.rs` (`FakeProcessRunner`, `ok`, `fail`) | 0 | Shared with the `SDMResolveTests` copy; one Rust double behind the `testing` feature. Not tests. |
-| `RemovalTests.swift` | 12 | `removal_tests.rs` | 16 | 12 ported; 4 added: removing / resetting an item whose runner is still unwinding, `move_items` ignoring a repeated id, `move_items_to_new_package`. Files go to a scratch `Trash` double, not the real Trash. |
+| `RemovalTests.swift` | 12 | `removal_tests.rs` | 16 | 12 ported; 4 added: removing / resetting an item right after stopping it, `move_items` ignoring a repeated id, `move_items_to_new_package`. Files go to a scratch `Trash` double, not the real Trash. |
+| (Rust-only) | 0 | `removal_race_tests.rs` | 3 | `remove_item`, `remove_package` and `reset_download` park at their trash step while a `tick()` runs: nothing restarts the item and nothing reaches the origin (Swift's actor made the sequence atomic; here a transient `removing` set hides the item from the scheduler). The reset test also checks the item restarts and completes afterwards. |
 | `ReorderingTests.swift` | 10 | `reordering_tests.rs` | 10 |  |
 | `ResegmentationTests.swift` | 6 | `resegmentation_tests.rs` | 6 | The `@Test(arguments:)` seed table is one test looping over the same 6 seeds. `multipleWorkersNeverWriteOverlappingBytes` is `#[cfg(debug_assertions)]` like Swift's `#if DEBUG` `writeLog` (so it is absent from a `--release` run). The two raise tests hold their bodies at a `WorkerGate` (see the report) instead of racing the transfer. |
 | `ResumeSidecarTests.swift` | 8 | `resume_sidecar_tests.rs` | 11 | +3 Rust-only: Swift-fixture round-trip (`loads_sidecar_written_by_swift`), `resumable_ranges` boot-session rule, `current_boot_session_id` (macOS). `matches` takes `Option<&str>`. |
@@ -60,7 +61,7 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | (Rust-only) | 0 | `wholesale_component_task_tests.rs` | 5 | `WholesaleComponentTask` is reached only through the engine in Swift: progress synthesis, `pause` waiting for the downloader, failure sweep, success sweep, missing output file. |
 | (Rust-only) | 0 | `engine_churn_tests.rs` | 1 | `engine_byte_identity_under_churn`: 20 seeds x 6 items of 2-6 MB in 2 packages over a dropping `FakeOrigin` per item; segment-count changes, stop/start, priority changes, reorders and one shutdown + new-engine `restore()` interleaved with `tick()`; every output hashes to its payload and no `.incomplete` / `.sdmpart` is left (Review Focus 3). About 86 s in a debug build. |
 | (Rust-only) | 0 | `src/engine/state.rs` (unit tests) | 2 | `every_snapshot_input_bumps_the_generation` (every `&mut` accessor and each helper that writes through one) and its converse for reads. |
-| (Rust-only) | 0 | `src/engine/snapshot.rs` (unit test) | 1 | A package whose aggregate (ETA) changed with equal items gets a new revision; an identical rebuild keeps it. |
+| (Rust-only) | 0 | `src/engine/snapshot.rs` (unit tests) | 2 | A package whose aggregate (ETA) changed with equal items gets a new revision; an identical rebuild keeps it. `idle_ticks_do_not_touch_any_snapshot_input`: a stopped plus a finished item, 100 idle ticks leave the internal `snapshot_generation` alone (the published `generation` cannot show an idle tick that rebuilds to equal content, so the ported identity tests no longer pin the fast path). |
 | (Rust-only) | 0 | `engine_snapshot_tests.rs` | 3 | Pins `PartialEq` / `content_eq` for the added `aggregate`, `revision`, `figures`, `generation` fields. |
 | (Rust-only) | 0 | `engine_interruption_tests.rs` | 6 | Paths Swift's tests do not reach: a mux cut short by a stop or a shutdown is not recorded as a failure, a wholesale item that is stopped or caught by a shutdown lands stopped without charging a retry attempt, and the snapshot `generation` / `revision` counters stay put when nothing changed. +1 in Task 19: a stop that races the end of a transfer must not leave the item stopped beside a finished file (the engine bug the churn test found). |
 | `SnapshotReuseTests.swift` | 12 | `snapshot_reuse_tests.rs` | 13 | 12 ported. The two storage-identity tests assert `generation` (engine) and `revision` (package) equality or difference instead of buffer identity. +1 Rust-only: `an_idle_engine_serves_the_same_generation` (100 idle ticks leave `generation` and every `revision` alone). |
@@ -73,7 +74,7 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | `UpdateSettingsTests.swift` | 1 | `update_settings_tests.rs` | 1 |  |
 | `WholesaleDownloadTests.swift` | 8 | `wholesale_download_tests.rs` | 8 | The preemption test waits for the preempted wholesale item to land `Queued` (the cancelled downloader call unwinds at once in Rust), where Swift asserts it straight after the ticks. No test asserted the swept-scratch behaviour, so nothing was changed to the wholesale-resume spec. |
 | `YtDlpArtifactsTests.swift` | 3 | `yt_dlp_artifacts_tests.rs` | 3 |  |
-| **Total SDMEngineTests** | **256** |  | **298** | Rust column sums every row above, Rust-only rows included. |
+| **Total SDMEngineTests** | **256** |  | **303** | Rust column sums every row above, Rust-only rows included. |
 
 ## SDMGrabberTests
 

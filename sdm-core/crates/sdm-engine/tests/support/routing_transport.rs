@@ -62,11 +62,13 @@ impl HostTransport {
 #[async_trait]
 impl HttpTransport for HostTransport {
     async fn fetch(&self, request: RangeRequest) -> Result<RangeResponse, TransportError> {
-        let origin = request
+        let Some(origin) = request
             .url
             .host_str()
             .and_then(|host| self.origins.get(host))
-            .unwrap_or_else(|| panic!("no origin for {}", request.url));
+        else {
+            return Err(TransportError::Http { status: 404 });
+        };
         origin.fetch(request).await
     }
 }

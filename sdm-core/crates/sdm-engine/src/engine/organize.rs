@@ -4,6 +4,7 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use sdm_core::{DownloadItem, DownloadPackage, ItemState, RangeSet};
 use uuid::Uuid;
@@ -118,6 +119,36 @@ fn relocate_item_files(item: &DownloadItem, source_folder: &Path, destination_fo
     for (from, to) in sources.iter().zip(&destinations) {
         if from.exists() {
             let _ = std::fs::rename(from, to);
+        }
+    }
+}
+
+/// Keeps items out of the scheduler (`EngineState::removing`) while a removal
+/// or reset works on their files. Dropping it lifts the guard, so an early
+/// return or a cancelled future cannot leave an item unschedulable forever;
+/// the operations drop it explicitly before their final `reconcile()`.
+struct RemovalGuard {
+    inner: Arc<Inner>,
+    ids: Vec<Uuid>,
+}
+
+impl RemovalGuard {
+    /// Marks `ids` as being removed. `state` is the locked state of the scope
+    /// that decided the operation, so the marking is atomic with the decision.
+    fn new(inner: &Arc<Inner>, state: &mut EngineState, ids: Vec<Uuid>) -> Self {
+        state.removing.extend(ids.iter().copied());
+        Self {
+            inner: Arc::clone(inner),
+            ids,
+        }
+    }
+}
+
+impl Drop for RemovalGuard {
+    fn drop(&mut self) {
+        let mut state = self.inner.lock();
+        for id in &self.ids {
+            state.removing.remove(id);
         }
     }
 }
@@ -423,15 +454,17 @@ impl DownloadEngine {
     /// their downloaded bytes with it.
     pub async fn remove_item(&self, item_id: Uuid, delete_file: bool) {
         let inner = &self.inner;
-        let (item, folder) = {
-            let state = inner.lock();
+        let (item, folder, guard) = {
+            let mut state = inner.lock();
             let Some((package, item)) = state.find_item(item_id) else {
                 return;
             };
-            (
+            let found = (
                 item.clone(),
                 state.settings().download_folder.join(&package.name),
-            )
+            );
+            let guard = RemovalGuard::new(inner, &mut state, vec![item_id]);
+            (found.0, found.1, guard)
         };
 
         inner.stop_runner_if_running(item_id).await;
@@ -459,6 +492,7 @@ impl DownloadEngine {
             state.clear_item_bookkeeping(item_id);
             became_empty
         };
+        drop(guard);
         if delete_file && package_became_empty {
             inner.remove_folder_if_empty(&folder);
         }
@@ -473,8 +507,8 @@ impl DownloadEngine {
     /// to removing them one at a time.
     pub async fn remove_package(&self, package_id: Uuid, delete_files: bool) {
         let inner = &self.inner;
-        let (package, folder) = {
-            let state = inner.lock();
+        let (package, folder, guard) = {
+            let mut state = inner.lock();
             let Some(package) = state
                 .packages()
                 .iter()
@@ -482,10 +516,13 @@ impl DownloadEngine {
             else {
                 return;
             };
-            (
+            let found = (
                 package.clone(),
                 state.settings().download_folder.join(&package.name),
-            )
+            );
+            let ids = found.0.items.iter().map(|item| item.id).collect();
+            let guard = RemovalGuard::new(inner, &mut state, ids);
+            (found.0, found.1, guard)
         };
         for item in &package.items {
             inner.stop_runner_if_running(item.id).await;
@@ -512,6 +549,7 @@ impl DownloadEngine {
                 .packages_mut()
                 .retain(|existing| existing.id != package_id);
         }
+        drop(guard);
         inner.persist().await;
         inner.reconcile().await;
     }
@@ -532,16 +570,18 @@ impl DownloadEngine {
     /// backstop, not the normal path.
     pub async fn reset_download(&self, item_id: Uuid) {
         let inner = &self.inner;
-        let (item, folder, prior_state) = {
-            let state = inner.lock();
+        let (item, folder, prior_state, guard) = {
+            let mut state = inner.lock();
             let Some((package, item)) = state.find_item(item_id) else {
                 return;
             };
-            (
+            let found = (
                 item.clone(),
                 state.settings().download_folder.join(&package.name),
                 item.state.clone(),
-            )
+            );
+            let guard = RemovalGuard::new(inner, &mut state, vec![item_id]);
+            (found.0, found.1, found.2, guard)
         };
 
         inner.stop_runner_if_running(item_id).await;
@@ -584,6 +624,8 @@ impl DownloadEngine {
                 };
             });
         }
+        // Schedulable again; the `reconcile()` below is what may restart it.
+        drop(guard);
         inner.persist().await;
         inner.reconcile().await;
     }

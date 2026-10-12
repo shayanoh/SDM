@@ -352,4 +352,64 @@ mod tests {
         let fresh = settle_revision(None, package(100.0, 0), &mut last);
         assert_eq!(fresh.revision, 9);
     }
+
+    /// Pins the idle fast path itself. The published `generation` stays equal
+    /// even after a full rebuild with equal content, so the black-box identity
+    /// tests cannot see an idle tick that writes a snapshot input; the
+    /// internal counter can. A stopped item and a finished item, a settle
+    /// period, then 100 ticks (each followed by a read) must not move it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn idle_ticks_do_not_touch_any_snapshot_input() {
+        use std::sync::Arc;
+
+        use crate::fake_origin::FakeOrigin;
+        use crate::state_store::InMemoryStateStore;
+        use crate::{DownloadEngine, EngineSettings, RetryPolicy};
+        use sdm_core::{DownloadItem, DownloadPackage};
+
+        let dir = tempfile::tempdir().unwrap();
+        let engine = DownloadEngine::new(
+            Arc::new(FakeOrigin::new(vec![7u8; 64])),
+            Arc::new(InMemoryStateStore::new()),
+            EngineSettings::new(1, 1, 8, dir.path().to_path_buf()),
+            RetryPolicy::new(),
+            None,
+            None,
+            None,
+        );
+        let source = SourceUrl::new("https://example.com/f.bin").unwrap();
+        let finished = DownloadItem::http(source.clone(), "done.bin");
+        let mut stopped = DownloadItem::http(source, "stopped.bin");
+        stopped.state = ItemState::Stopped;
+        engine
+            .add(DownloadPackage::new("P").with_items(vec![finished, stopped]))
+            .await;
+        tokio::time::timeout(std::time::Duration::from_secs(20), engine.run_until_idle())
+            .await
+            .expect("the engine settled")
+            .unwrap();
+        let states: Vec<ItemState> = engine
+            .snapshot()
+            .await
+            .packages
+            .iter()
+            .flat_map(|package| package.items.iter().map(|item| item.state.clone()))
+            .collect();
+        assert_eq!(states, [ItemState::Completed, ItemState::Stopped]);
+
+        for _ in 0..10 {
+            engine.tick().await;
+            engine.snapshot().await;
+        }
+        let settled = engine.inner.lock().snapshot_generation();
+        for round in 0..100 {
+            engine.tick().await;
+            engine.snapshot().await;
+            assert_eq!(
+                engine.inner.lock().snapshot_generation(),
+                settled,
+                "idle tick {round} wrote a snapshot input"
+            );
+        }
+    }
 }

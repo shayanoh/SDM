@@ -282,6 +282,11 @@ async fn unchanged_snapshots_keep_their_generation_and_revisions() {
 /// The stop is fired the moment the last byte is recorded, which is as close
 /// to the window as a test outside the engine can get; whichever side of the
 /// finish it lands on, the item must end `Completed` with the right bytes.
+///
+/// This is a statistical race test, not a deterministic pin: it fires the stop
+/// over many rounds and can pass without ever landing inside the window. It
+/// failed on the unfixed engine at round 0, but a pass proves less than it
+/// looks like.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_stop_that_races_the_end_of_a_transfer_never_poisons_the_next_start() {
     let payload = test_payload(300_000);

@@ -297,7 +297,7 @@ impl DownloadEngine {
                 .map(|runner| runner.components.clone())
         };
         if let Some(components) = components {
-            let per_component = (count / components.len()).max(1);
+            let per_component = (count / components.len().max(1)).max(1);
             for component in &components {
                 component.set_worker_count(per_component);
             }

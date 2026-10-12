@@ -88,6 +88,13 @@ pub(crate) struct EngineState {
     pub(super) ticks_until_file_check: usize,
     pub(super) is_shut_down: bool,
     pub(super) has_restored: bool,
+    /// Items a removal or reset is in the middle of. Between stopping the old
+    /// runner and finishing the file work the item sits `Queued` with no
+    /// runner, and a `reconcile()` landing in that window would start a new
+    /// task on the files being trashed. `schedulable_packages` hides these
+    /// from the scheduler. Not a snapshot input and not persisted: nothing
+    /// outside the scheduler reads it.
+    pub(super) removing: HashSet<Uuid>,
     /// The last snapshot built, and the generation it was built at.
     pub(super) last_snapshot: Option<EngineSnapshot>,
     pub(super) last_snapshot_generation: u64,
@@ -127,6 +134,7 @@ impl EngineState {
             ticks_until_file_check: 0,
             is_shut_down: false,
             has_restored: false,
+            removing: HashSet::new(),
             last_snapshot: None,
             last_snapshot_generation: 0,
             package_snapshot_cache: HashMap::new(),

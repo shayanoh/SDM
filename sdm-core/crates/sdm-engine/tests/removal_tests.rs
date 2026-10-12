@@ -255,8 +255,11 @@ async fn reorder_packages_applies_the_given_order() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn adding_a_package_after_a_reorder_does_not_jump_ahead_in_scheduling_order() {
     let dir = make_scratch_directory();
+    // Gated so whichever item is running stays running: the assertion below
+    // is about scheduling order, not about how fast a transfer completes.
+    let gate = WorkerGate::new();
     let engine = new_engine(
-        sdm_engine::FakeOrigin::new(test_payload(20_000)),
+        WorkerGatedOrigin::new(test_payload(20_000), gate.clone()),
         engine_settings(1, 1, 8, dir.path()),
     );
     let first_id = Uuid::new_v4();
@@ -319,6 +322,9 @@ async fn adding_a_package_after_a_reorder_does_not_jump_ahead_in_scheduling_orde
         .map(|item| item.filename.clone())
         .collect();
     assert_eq!(running, ["b.bin"]);
+
+    gate.open();
+    within(engine.run_until_idle()).await.unwrap();
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -435,11 +441,12 @@ async fn disabling_a_running_item_stops_it_and_enabling_alone_does_not_resume_it
     engine.start_item(item_id).await;
     assert_resumed(&snapshot_item(item_id, &engine).await.unwrap().state);
 
-    // The old (cancelled, but not yet unwound) runner is still occupying the
-    // item's slot in `runners`, so nothing new starts until it actually
-    // finishes — which only happens once the gate opens. `run_until_idle()`
-    // drains that old runner first, reconciles again, and only then starts the
-    // fresh attempt that reaches completion.
+    // Depending on whether the cancelled runner has unwound yet, the item is
+    // still `Queued` behind it or already `Running` again (a cancelled
+    // worker drops its parked fetch at once; see `assert_resumed`). Either
+    // way, opening the gate lets whatever is running finish, and
+    // `run_until_idle()` drains the old runner, reconciles again, and runs
+    // the fresh attempt to completion.
     gate.open();
     within(engine.run_until_idle()).await.unwrap();
     assert_eq!(
@@ -451,11 +458,14 @@ async fn disabling_a_running_item_stops_it_and_enabling_alone_does_not_resume_it
 
 // MARK: - Beyond the Swift suite
 
-/// A runner that was user-stopped is still unwinding (parked at the gate) when
-/// the item is removed. `remove_item` must wait for the job to finish, so its
-/// late landing cannot write state back onto the removed item.
+/// An item is removed right after the user stopped it, while the gate still
+/// holds its download. Whether the stopped runner has fully unwound by then is
+/// up to the engine (a cancelled worker drops its parked fetch at once);
+/// either way nothing of the item may survive the removal: no list entry, no
+/// late landing written back onto it, no file. (The guarantee that the removal
+/// waits for the runner is pinned by `removal_race_tests.rs`.)
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn removing_an_item_whose_runner_is_still_unwinding_leaves_nothing_behind() {
+async fn removing_an_item_right_after_stopping_it_leaves_nothing_behind() {
     let dir = make_scratch_directory();
     let gate = Gate::new();
     let engine = make_gated_engine(
@@ -484,10 +494,10 @@ async fn removing_an_item_whose_runner_is_still_unwinding_leaves_nothing_behind(
     assert!(!dir.path().join("Batch").join("a.bin.incomplete").exists());
 }
 
-/// The same overlap for a reset: the unwinding job lands before the reset
-/// clears the item, so none of the old run's bytes survive.
+/// The same for a reset right after a stop: none of the old run's bytes
+/// survive, whether or not its runner had unwound when the reset began.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn resetting_an_item_whose_runner_is_still_unwinding_discards_its_progress() {
+async fn resetting_an_item_right_after_stopping_it_discards_its_progress() {
     let dir = make_scratch_directory();
     let gate = Gate::new();
     let engine = make_gated_engine(

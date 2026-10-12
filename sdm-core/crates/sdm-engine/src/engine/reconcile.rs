@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use sdm_core::{
-    ComponentOrigin, ConnectionAllocator, ConnectionBudget, ConnectionDemand, DownloadPackage,
-    ItemState, RangeSet, SourceUrl,
+    Assembly, ComponentOrigin, ConnectionAllocator, ConnectionBudget, ConnectionDemand,
+    DownloadPackage, ItemState, RangeSet, SourceUrl,
 };
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -190,7 +190,9 @@ impl Inner {
                 .get(&item_id)
                 .copied()
                 .unwrap_or(run_context.segments);
-            let per_component = (total_segments / run_context.contexts.len()).max(1);
+            // No contexts (a mux item with every part downloaded) means no
+            // workers to split the budget between.
+            let per_component = (total_segments / run_context.contexts.len().max(1)).max(1);
             let item_page_url = state
                 .find_item(item_id)
                 .map(|(_, item)| item.source_url.clone());
@@ -235,7 +237,7 @@ impl Inner {
             })
             .filter_map(|(id, runner)| {
                 allocated_segments.get(id).map(|allocated| {
-                    let per_component = (allocated / runner.components.len()).max(1);
+                    let per_component = (allocated / runner.components.len().max(1)).max(1);
                     (runner.components.clone(), per_component)
                 })
             })
@@ -352,11 +354,13 @@ fn connection_demands(state: &EngineState, item_ids: &HashSet<Uuid>) -> Vec<Conn
 /// pure function of its input, which is what makes spec §6 table-testable.
 fn schedulable_packages(state: &EngineState) -> Vec<DownloadPackage> {
     let mut held = state.packages().to_vec();
-    if state.retry_hold_ticks().is_empty() {
+    if state.retry_hold_ticks().is_empty() && state.removing.is_empty() {
         return held;
     }
     for item in held.iter_mut().flat_map(|package| package.items.iter_mut()) {
-        if state.retry_hold_ticks().contains_key(&item.id) {
+        // An item being removed or reset must not be started under the code
+        // that is trashing its files (see `EngineState::removing`).
+        if state.retry_hold_ticks().contains_key(&item.id) || state.removing.contains(&item.id) {
             item.is_enabled = false;
         }
     }
@@ -459,7 +463,20 @@ fn context_for(state: &EngineState, item_id: Uuid) -> Result<Option<ItemRunConte
     // (`is_complete` on a component needs a known size; an unprobed component
     // is not complete, so this only bites a truly finished item that lost its
     // runner.)
-    if contexts.is_empty() {
+    //
+    // The exception is a mux item whose finalized parts are all on disk: a
+    // stop that interrupts the mux leaves exactly that, with no sidecar. A
+    // context for component 0 would make the run re-download part 0 from zero
+    // and then fail permanently with "A file already exists at the
+    // destination" when it finalizes over the existing part. Such an item
+    // gets no contexts at all, so `run_item` has nothing to fan out and goes
+    // straight to `assemble`. (Deliberate improvement over Swift, which has
+    // this bug; see the parity ledger.)
+    let parts_ready_to_mux = item.assembly == Assembly::Mux
+        && item.components.iter().all(|component| {
+            component.is_complete() && folder.join(&component.part_filename).exists()
+        });
+    if contexts.is_empty() && !parts_ready_to_mux {
         let first = &item.components[0];
         contexts.push(ComponentContext {
             component_index: 0,
