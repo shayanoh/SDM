@@ -3,12 +3,12 @@
 //!
 //! # What `URLSessionTransport` configures or relies on, and the twin here
 //!
-//! * **Session kind.** `.ephemeral`: no disk cache, no persisted cookies.
-//!   Twin: reqwest has no cache and, built without its `cookies` feature, no
-//!   cookie jar. DIFFERENCE: an ephemeral `URLSession` keeps an in-memory
-//!   cookie jar for the session's life, so an origin that sets a cookie on
-//!   the probe and expects it back on the segment requests works there and
-//!   does not here.
+//! * **Session kind.** `.ephemeral`: no disk cache, no persisted cookies, but
+//!   an in-memory cookie jar for the session's life, so an origin that sets a
+//!   cookie on the probe (or on a redirect hop) and expects it back works.
+//!   Twin: reqwest has no cache; `cookie_store(true)` gives the same
+//!   in-memory jar, shared by every request of this transport and replayed
+//!   across redirect hops (pinned by a test). Nothing is persisted.
 //! * **Cache policy.** `reloadIgnoringLocalCacheData`, `urlCache = nil`, so a
 //!   multi-gigabyte body is never considered for caching. Twin: nothing is
 //!   cached and no conditional headers are sent; pinned by tests that fetch
@@ -64,7 +64,10 @@
 //!   completion without one. Twin: every reqwest failure before or during the
 //!   body (refused, reset, timed out, a body shorter than its
 //!   `Content-Length`, too many redirects, a parse failure) is
-//!   `ConnectionDropped`, which the retry policy also treats as transient.
+//!   `TransportError::Network { description }`, carrying the whole cause
+//!   chain (the `localizedDescription` twin the engine shows after its last
+//!   retry); the retry policy treats it as transient, like
+//!   `ConnectionDropped` (which remains for a client that failed to build).
 //!   `MalformedResponse` is never produced: reqwest only ever yields HTTP
 //!   responses, and hyper reports an unparsable one as a send error.
 //! * **Cancellation.** The stream's `onTermination` cancels the task, and
@@ -115,6 +118,7 @@ impl ReqwestTransport {
     pub fn with_builder(builder: reqwest::ClientBuilder) -> Self {
         let client = builder
             .user_agent("SDM")
+            .cookie_store(true)
             .redirect(Policy::limited(MAX_REDIRECTS))
             .referer(false)
             .connect_timeout(IDLE_TIMEOUT)
@@ -187,6 +191,21 @@ fn header_text<'a>(headers: &'a HeaderMap, name: &reqwest::header::HeaderName) -
     headers.get(name).and_then(|value| value.to_str().ok())
 }
 
+/// Wraps a reqwest failure with its whole cause chain ("error sending request
+/// for url (..): client error (Connect): tcp connect error: Connection
+/// refused"), since reqwest's own `Display` stops at the outermost layer.
+fn network_error(error: reqwest::Error) -> TransportError {
+    use std::error::Error;
+    let mut description = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        description.push_str(": ");
+        description.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    TransportError::Network { description }
+}
+
 #[async_trait]
 impl HttpTransport for ReqwestTransport {
     async fn fetch(&self, request: RangeRequest) -> Result<RangeResponse, TransportError> {
@@ -198,17 +217,14 @@ impl HttpTransport for ReqwestTransport {
         if let Some(value) = Self::range_header_value(request.range) {
             builder = builder.header(reqwest::header::RANGE, value);
         }
-        let response = builder
-            .send()
-            .await
-            .map_err(|_| TransportError::ConnectionDropped)?;
+        let response = builder.send().await.map_err(network_error)?;
 
         let status_code = response.status().as_u16();
         let headers = response.headers().clone();
         let resolved_url = response.url().clone();
         let body = response
             .bytes_stream()
-            .map(|chunk| chunk.map_err(|_| TransportError::ConnectionDropped));
+            .map(|chunk| chunk.map_err(network_error));
 
         Ok(RangeResponse {
             status_code,

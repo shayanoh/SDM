@@ -62,9 +62,9 @@ impl RetryPolicy {
     pub fn classify(&self, error: &(dyn Error + 'static)) -> FailureKind {
         if let Some(transport) = error.downcast_ref::<TransportError>() {
             return match transport {
-                TransportError::ConnectionDropped | TransportError::MalformedResponse => {
-                    FailureKind::Transient
-                }
+                TransportError::ConnectionDropped
+                | TransportError::Network { .. }
+                | TransportError::MalformedResponse => FailureKind::Transient,
                 TransportError::Http { status } => Self::classify_status(*status),
             };
         }

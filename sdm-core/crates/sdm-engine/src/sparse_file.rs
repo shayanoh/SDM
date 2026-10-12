@@ -55,7 +55,7 @@ fn errno_of(error: &io::Error) -> i32 {
 /// `fsync(2)`, not `File::sync_all`: on macOS std's `sync_all`/`sync_data`
 /// issue `fcntl(F_FULLFSYNC)`, a much stronger and slower flush than the
 /// plain `fsync` Swift calls.
-fn fsync(file: &File) -> io::Result<()> {
+pub(crate) fn fsync(file: &File) -> io::Result<()> {
     // SAFETY: `file` owns an open descriptor for the duration of the call.
     let result = unsafe { libc::fsync(file.as_raw_fd()) };
     if result == 0 {

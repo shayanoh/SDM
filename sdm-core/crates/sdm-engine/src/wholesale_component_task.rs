@@ -99,7 +99,7 @@ impl WholesaleComponentTask {
     pub async fn start(&self) -> Result<PathBuf, WholesaleError> {
         let inner = &self.inner;
         {
-            let mut running = inner.running.lock().unwrap();
+            let mut running = inner.running.lock().unwrap_or_else(|e| e.into_inner());
             if inner.cancel.is_cancelled() {
                 return Err(WholesaleError::Cancelled);
             }
@@ -127,6 +127,19 @@ impl WholesaleComponentTask {
             // the synthesized progress so the next run resumes via
             // `--continue`. A real failure sweeps the scratch so the retry
             // starts clean.
+            //
+            // DELIBERATE DEVIATION from the Swift source. Swift's
+            // `WholesaleComponentTask.start` recognises only
+            // `CancellationError` as a pause, but the real
+            // `YtDlpWholesaleDownloader` converts cancellation to
+            // `WholesaleError.cancelled` (lines 85-86), so in the shipping app
+            // a pause falls into the failure branch and sweeps the scratch
+            // and resets progress (only the Swift test fake throws
+            // `CancellationError`). That contradicts the wholesale-resume
+            // spec §2.3 ("on cancellation it keeps everything"), which is what
+            // this port follows: `WholesaleError::Cancelled` plays the role of
+            // `CancellationError` here. Controller ruling; see the Task 15
+            // report.
             if error == WholesaleError::Cancelled {
                 return Err(WholesaleError::Cancelled);
             }
@@ -154,7 +167,7 @@ impl WholesaleComponentTask {
     pub async fn pause(&self) {
         let inner = &self.inner;
         {
-            let _running = inner.running.lock().unwrap();
+            let _running = inner.running.lock().unwrap_or_else(|e| e.into_inner());
             inner.cancel.cancel();
         }
         loop {
@@ -163,7 +176,7 @@ impl WholesaleComponentTask {
             // Registered before `running` is read, so a stop in between
             // cannot be missed.
             notified.as_mut().enable();
-            if !*inner.running.lock().unwrap() {
+            if !*inner.running.lock().unwrap_or_else(|e| e.into_inner()) {
                 return;
             }
             notified.await;
@@ -224,7 +237,7 @@ impl WholesaleComponentTask {
 
 impl Inner {
     fn lock_progress(&self) -> MutexGuard<'_, ProgressState> {
-        self.progress.lock().unwrap()
+        self.progress.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     // MARK: - Cleanup
@@ -266,7 +279,7 @@ struct RunningGuard<'a> {
 
 impl Drop for RunningGuard<'_> {
     fn drop(&mut self) {
-        *self.inner.running.lock().unwrap() = false;
+        *self.inner.running.lock().unwrap_or_else(|e| e.into_inner()) = false;
         self.inner.stopped.notify_waiters();
     }
 }

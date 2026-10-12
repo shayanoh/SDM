@@ -2,7 +2,7 @@ mod support;
 
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use sdm_core::ByteRange;
-use sdm_engine::{HttpTransport, RangeRequest, ReqwestTransport, TransportError};
+use sdm_engine::{HttpTransport, RangeRequest, ReqwestTransport, RetryPolicy, TransportError};
 use support::{
     LoopbackBody, LoopbackResponse, LoopbackServer, collect_body, collect_body_until_error,
     payload_handler, test_payload, test_source_url,
@@ -279,7 +279,10 @@ async fn a_body_cut_short_surfaces_connection_dropped() {
         assert_eq!(response.total_size, Some(1000));
         let (received, error) = collect_body_until_error(response).await;
 
-        assert_eq!(error, Some(TransportError::ConnectionDropped));
+        assert!(
+            matches!(error, Some(TransportError::Network { .. })),
+            "{error:?}"
+        );
         // Whatever arrived before the cut is a faithful prefix.
         assert!(received.len() <= 400);
         assert_eq!(received, payload[..received.len()]);
@@ -309,7 +312,10 @@ async fn a_lying_content_length_is_reported_as_received() {
         assert_eq!(response.total_size, Some(5000));
         // ...and the shortfall shows up only when the body runs out.
         let (received, error) = collect_body_until_error(response).await;
-        assert_eq!(error, Some(TransportError::ConnectionDropped));
+        assert!(
+            matches!(error, Some(TransportError::Network { .. })),
+            "{error:?}"
+        );
         assert_eq!(received, payload[..received.len()]);
     })
     .await;
@@ -391,7 +397,7 @@ fn test_url(server: &LoopbackServer, path: &str) -> url::Url {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn a_refused_connection_is_connection_dropped() {
+async fn a_refused_connection_names_its_cause_and_is_transient() {
     support::within(async {
         // Bind and release a port: nothing listens there any more.
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -404,7 +410,14 @@ async fn a_refused_connection_is_connection_dropped() {
             .fetch(RangeRequest::new(url, None))
             .await
             .expect_err("nothing is listening");
-        assert_eq!(error, TransportError::ConnectionDropped);
+        assert!(matches!(error, TransportError::Network { .. }), "{error:?}");
+        // The cause survives into the text the engine shows the user.
+        let text = error.to_string().to_lowercase();
+        assert!(text.contains("refused"), "cause missing from: {text}");
+        assert_eq!(
+            RetryPolicy::new().classify(&error),
+            sdm_engine::FailureKind::Transient
+        );
     })
     .await;
 }
@@ -484,6 +497,43 @@ async fn dropping_the_fetch_before_the_response_head_cancels_the_request() {
         // ...and the origin sees the connection close.
         let mut rest = Vec::new();
         assert_eq!(socket.read_to_end(&mut rest).await.unwrap(), 0);
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_cookie_set_on_a_redirect_hop_is_replayed_on_the_next_hop() {
+    support::within(async {
+        let server = LoopbackServer::start(move |request| match request.target.as_str() {
+            "/start" => {
+                LoopbackResponse::redirect(302, "/check").header("Set-Cookie", "sid=abc123; Path=/")
+            }
+            "/check"
+                if request
+                    .header("cookie")
+                    .is_some_and(|c| c.contains("sid=abc123")) =>
+            {
+                LoopbackResponse::ok(b"welcome".to_vec())
+            }
+            _ => LoopbackResponse::new(403),
+        })
+        .await;
+        let transport = loopback_transport();
+
+        let response = transport
+            .fetch(RangeRequest::new(server.url("/start"), None))
+            .await
+            .unwrap();
+        assert_eq!(response.status_code, 200);
+        assert_eq!(response.resolved_url, server.url("/check"));
+        assert_eq!(collect_body(response).await.unwrap(), b"welcome");
+
+        // The jar lives as long as the transport: a later request carries it too.
+        let later = transport
+            .fetch(RangeRequest::new(server.url("/check"), None))
+            .await
+            .unwrap();
+        assert_eq!(later.status_code, 200);
     })
     .await;
 }

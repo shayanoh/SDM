@@ -58,6 +58,13 @@ impl fmt::Debug for RangeResponse {
 pub enum TransportError {
     #[error("connection dropped")]
     ConnectionDropped,
+    /// A failure inside the network stack (refused, reset, timed out, TLS,
+    /// too many redirects, a body shorter than its `Content-Length`), with the
+    /// underlying error's message. Twin of the raw `URLError` URLSession
+    /// throws, whose `localizedDescription` the engine shows once retries are
+    /// exhausted. Classified like `ConnectionDropped`: transient.
+    #[error("{description}")]
+    Network { description: String },
     #[error("HTTP {status}")]
     Http { status: u16 },
     #[error("malformed response")]

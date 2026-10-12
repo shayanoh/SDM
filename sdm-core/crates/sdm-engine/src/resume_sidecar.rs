@@ -198,8 +198,11 @@ fn read_boot_session_id() -> Option<String> {
 }
 
 /// Replaces `path` with `data` atomically: writes a temporary file in the
-/// same directory, then renames it over the destination (what Foundation's
-/// `Data.write(to:options: .atomic)` does). A failed write removes the
+/// same directory, syncs it, then renames it over the destination (what
+/// Foundation's `Data.write(to:options: .atomic)` does; it calls plain
+/// `fsync(2)` on the temporary file before the rename, so a power cut cannot
+/// leave a zero-length destination). The sync is `fsync`, not `sync_all`,
+/// which is the stronger `F_FULLFSYNC` on macOS. A failed write removes the
 /// temporary file and leaves any existing destination untouched.
 pub(crate) fn write_atomically(path: &Path, data: &[u8]) -> io::Result<()> {
     use std::io::Write;
@@ -225,6 +228,7 @@ pub(crate) fn write_atomically(path: &Path, data: &[u8]) -> io::Result<()> {
             .mode(0o666) // the umask reduces this to the usual 0644
             .open(&temp_path)?;
         file.write_all(data)?;
+        crate::sparse_file::fsync(&file)?;
         drop(file);
         std::fs::rename(&temp_path, path)
     })();

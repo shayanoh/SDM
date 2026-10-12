@@ -95,6 +95,7 @@ async fn run_attempt(
     rng: &mut SeededGenerator,
     steps: u64,
     allow_disruption: bool,
+    worker_changes: &mut usize,
 ) -> AttemptEnd {
     let mut start = Some(Box::pin(task.start()));
     for _ in 0..steps {
@@ -106,7 +107,10 @@ async fn run_attempt(
             _ = wait_for_progress(task, target) => {}
         }
         match action {
-            Action::SetWorkers(count) => task.set_worker_count(count),
+            Action::SetWorkers(count) => {
+                task.set_worker_count(count);
+                *worker_changes += 1;
+            }
             Action::Pause => {
                 task.pause();
                 let result = start.take().expect("the run is still in hand").await;
@@ -161,6 +165,8 @@ fn check_sidecar(destination: &Path, payload: &[u8]) -> Result<(), String> {
 #[derive(Debug, Default, Clone, Copy)]
 struct Tally {
     attempts: usize,
+    /// `set_worker_count` calls that landed while the download was running.
+    worker_changes: usize,
     failed: usize,
     paused: usize,
     killed: usize,
@@ -169,6 +175,7 @@ struct Tally {
 impl Tally {
     fn add(&mut self, other: Tally) {
         self.attempts += other.attempts;
+        self.worker_changes += other.worker_changes;
         self.failed += other.failed;
         self.paused += other.paused;
         self.killed += other.killed;
@@ -206,7 +213,7 @@ async fn run_seed(seed: u64, payload: Bytes, expected: Sha256) -> Result<Tally, 
         ));
         let steps = rng.in_range(if chaotic { 1 } else { 0 }, 5);
         tally.attempts += 1;
-        match run_attempt(&task, &mut rng, steps, chaotic).await {
+        match run_attempt(&task, &mut rng, steps, chaotic, &mut tally.worker_changes).await {
             AttemptEnd::Finished(path) => {
                 let finished = std::fs::read(&path).map_err(|error| error.to_string())?;
                 if Sha256::new().chain_update(&finished).finalize() != expected.clone().finalize() {
@@ -263,6 +270,10 @@ async fn byte_identity_under_randomized_churn() {
     }
     println!("churn over {SEEDS} seeds: {total:?}");
     // The property is only worth something if the disruptions happened.
+    assert!(
+        total.worker_changes > 0,
+        "no worker-count change ever landed: {total:?}"
+    );
     assert!(total.failed > 0, "no attempt ever failed: {total:?}");
     assert!(total.paused > 0, "no attempt was ever paused: {total:?}");
     assert!(total.killed > 0, "no attempt was ever killed: {total:?}");

@@ -880,6 +880,15 @@ impl Inner {
     }
 
     async fn run_workers(self: &Arc<Self>) -> Result<(), DownloadError> {
+        let mut group = WorkerGroup {
+            set: JoinSet::new(),
+            inner: self.clone(),
+        };
+        // One lock scope from the `is_paused` check through spawning the
+        // initial workers and the sentinel, as the Swift actor runs them with
+        // no suspension in between. Splitting it would let `pause()` (which
+        // sets the target to 0) land after the target reset and before the
+        // spawn: no worker would start and the sentinel would park forever.
         {
             let mut state = self.lock();
             // A pause that arrived while `prepare()` was suspended must not
@@ -898,14 +907,6 @@ impl Inner {
             state.target_worker_count = state.configuration.worker_count;
             state.wake_closed = false;
             state.pending_wake = false;
-        }
-
-        let mut group = WorkerGroup {
-            set: JoinSet::new(),
-            inner: self.clone(),
-        };
-        {
-            let mut state = self.lock();
             while state.live_worker_indices.len() < state.target_worker_count {
                 self.spawn_worker(&mut state, &mut group.set);
             }
@@ -955,7 +956,7 @@ impl Inner {
                 // sentinel returns and is not replaced; the group can then
                 // drain to empty and `join_next` yields `None`.
                 self.close_wake(&mut state);
-            } else if outcome == GroupOutcome::Sentinel {
+            } else if outcome == GroupOutcome::Sentinel && !self.cancel.is_cancelled() {
                 self.add_sentinel(&mut group.set);
             }
         }
@@ -986,7 +987,9 @@ impl Inner {
     }
 
     /// Suspends until `set_worker_count` raises the target or the download
-    /// finishes. Returns immediately if either already happened.
+    /// finishes, or the task is cancelled (so no pause path can strand the
+    /// drain loop behind a sentinel nobody will wake). Returns immediately if
+    /// any of them already happened.
     async fn await_worker_count_raise(&self) {
         loop {
             // Registered before the flags are read, so a signal in between
@@ -1004,7 +1007,10 @@ impl Inner {
                     return;
                 }
             }
-            notified.await;
+            tokio::select! {
+                () = &mut notified => {}
+                () = self.cancel.cancelled() => return,
+            }
         }
     }
 
@@ -1330,5 +1336,51 @@ impl State {
             }
         }
         best
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+    use crate::FakeOrigin;
+
+    fn task() -> DownloadTask {
+        DownloadTask::new(
+            Uuid::new_v4(),
+            SourceUrl::new("https://example.com/file.bin").unwrap(),
+            std::env::temp_dir().join("sdm-never-written.bin"),
+            Arc::new(FakeOrigin::new(vec![0; 16])),
+            DownloadTaskConfiguration::new(2, 4, 128, None),
+        )
+    }
+
+    /// The hang behind C2-F1: a `pause()` that lands after the target reset
+    /// and before the spawn leaves a sentinel parked with no worker to wake
+    /// it. The sentinel must give up as soon as the task is cancelled.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_sentinel_returns_once_the_task_is_cancelled() {
+        let task = task();
+        task.inner.pause();
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            task.inner.await_worker_count_raise(),
+        )
+        .await
+        .expect("the sentinel stayed parked after a pause");
+    }
+
+    /// A pause that arrives before `run_workers` is a no-op for it: nothing
+    /// is spawned, and it returns instead of waiting on a sentinel.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn run_workers_after_a_pause_spawns_nothing_and_returns() {
+        let task = task();
+        task.inner.pause();
+        tokio::time::timeout(Duration::from_secs(10), task.inner.run_workers())
+            .await
+            .expect("run_workers hung after a pause")
+            .unwrap();
+        assert_eq!(task.inner.lock().peak_live_worker_count, 0);
     }
 }

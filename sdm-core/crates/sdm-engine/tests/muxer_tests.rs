@@ -105,12 +105,25 @@ async fn mux_succeeds_on_zero_exit() {
         .expect("a zero exit is a success");
 }
 
-/// Swift gates this on a real `ffmpeg` being installed. The Rust suite never
-/// runs a real `ffmpeg`, so it is ignored; run it by hand with
-/// `cargo test -p sdm-engine --test muxer_tests -- --ignored`.
+/// Swift gates this on `ffmpeg` existing at `/usr/local/bin` or
+/// `/opt/homebrew/bin` (`.enabled(if: ffmpegOnDisk)`); so does this one,
+/// returning early with a note when neither exists.
+fn ffmpeg_on_disk() -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    ["/usr/local/bin/ffmpeg", "/opt/homebrew/bin/ffmpeg"]
+        .iter()
+        .any(|path| {
+            std::fs::metadata(path)
+                .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        })
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "runs a real ffmpeg, which the suite never does"]
 async fn real_ffmpeg_muxes_two_tiny_streams() {
+    if !ffmpeg_on_disk() {
+        println!("skipped: no ffmpeg at /usr/local/bin or /opt/homebrew/bin");
+        return;
+    }
     let dir = make_scratch_directory();
     let ffmpeg = BinaryLocator::new()
         .locate("ffmpeg")
