@@ -118,6 +118,7 @@ impl YtDlpResolver {
 
     async fn resolve_single(
         &self,
+        source: &SourceUrl,
         url: &Url,
         cancel: &CancellationToken,
     ) -> Result<ResolvedTarget, ResolveError> {
@@ -125,7 +126,7 @@ impl YtDlpResolver {
         let mut args = strings(&["-J", "--no-warnings", "--no-playlist"]);
         args.extend((self.cookie_source)().yt_dlp_arguments());
         args.extend(Self::per_site_arguments(url));
-        args.push(url.as_str().to_string());
+        args.push(source.as_str().to_string());
         let out = self
             .run_yt_dlp(&yt_dlp, &args, self.resolve_timeout, cancel)
             .await?;
@@ -139,6 +140,7 @@ impl YtDlpResolver {
 
     async fn resolve_playlist(
         &self,
+        source: &SourceUrl,
         url: &Url,
         cancel: &CancellationToken,
     ) -> Result<ResolvedTarget, ResolveError> {
@@ -146,7 +148,7 @@ impl YtDlpResolver {
         let mut args = strings(&["-J", "--flat-playlist", "--no-warnings"]);
         args.extend((self.cookie_source)().yt_dlp_arguments());
         args.extend(Self::per_site_arguments(url));
-        args.push(url.as_str().to_string());
+        args.push(source.as_str().to_string());
         let out = self
             .run_yt_dlp(&yt_dlp, &args, self.playlist_timeout, cancel)
             .await?;
@@ -175,7 +177,7 @@ impl YtDlpResolver {
             .iter()
             .map(|(source_url, video_id, title)| {
                 ResolvedMedia::new("", video_id.clone(), title.clone(), None, Vec::new())
-                    .with_source_url(SourceUrl::from_url(source_url))
+                    .with_source_url(source_url.clone())
             })
             .collect();
         Ok(ResolvedTarget::Playlist {
@@ -242,38 +244,44 @@ fn decode_dump(data: &[u8], context: &str) -> Result<YtDlpDump, ResolveError> {
 
 #[async_trait]
 impl LinkResolver for YtDlpResolver {
-    fn can_handle(&self, url: &Url) -> bool {
-        matches!(url.scheme().to_lowercase().as_str(), "http" | "https")
-            && SiteRegistry::match_url(url).is_some()
+    fn can_handle(&self, url: &SourceUrl) -> bool {
+        url.as_url().is_some_and(|url| {
+            matches!(url.scheme().to_lowercase().as_str(), "http" | "https")
+                && SiteRegistry::match_url(url).is_some()
+        })
     }
 
-    async fn resolve(&self, url: &Url) -> Result<ResolvedTarget, ResolveError> {
+    async fn resolve(&self, source: &SourceUrl) -> Result<ResolvedTarget, ResolveError> {
+        // No parsed form means no host or path to route on.
+        let Some(url) = source.as_url() else {
+            return Err(ResolveError::Unsupported);
+        };
         // Nothing in the Swift app cancels a resolve (the grabber's
         // `cancelChecks()` only stops new work launching), so no token is
         // exposed; the runner gets one that never fires.
         let cancel = CancellationToken::new();
         if self.looks_like_playlist(url) {
-            self.resolve_playlist(url, &cancel).await
+            self.resolve_playlist(source, url, &cancel).await
         } else {
-            self.resolve_single(url, &cancel).await
+            self.resolve_single(source, url, &cancel).await
         }
     }
 
     async fn refresh(
         &self,
-        source_url: &Url,
+        source_url: &SourceUrl,
         format_id: &str,
         cancel: &CancellationToken,
     ) -> Result<RefreshedFormat, ResolveError> {
-        if !self.can_handle(source_url) {
+        let Some(parsed) = source_url.as_url().filter(|_| self.can_handle(source_url)) else {
             return Err(ResolveError::Unsupported);
-        }
+        };
         let yt_dlp = self.require_yt_dlp()?;
         // `--no-playlist` so a `watch?v=…&list=…` source still resolves the
         // one video; yt-dlp normalizes youtu.be / shorts / tracking params.
         let mut args = strings(&["-J", "--no-warnings", "--no-playlist"]);
         args.extend((self.cookie_source)().yt_dlp_arguments());
-        args.extend(Self::per_site_arguments(source_url));
+        args.extend(Self::per_site_arguments(parsed));
         args.push(source_url.as_str().to_string());
         let out = self
             .run_yt_dlp(&yt_dlp, &args, self.resolve_timeout, cancel)
@@ -286,15 +294,8 @@ impl LinkResolver for YtDlpResolver {
             .find(|f| f.format_id.as_deref() == Some(format_id))
             .and_then(YtDlpParser::media_format)
             .ok_or(ResolveError::FormatGone)?;
-        let url = mapped
-            .url
-            .as_url()
-            .cloned()
-            .ok_or_else(|| ResolveError::YtDlpFailed {
-                stderr_tail: "refreshed format URL is not an absolute URL".to_string(),
-            })?;
         Ok(RefreshedFormat::new(
-            url,
+            mapped.url.clone(),
             mapped.filesize_effective(),
             format_id,
         ))

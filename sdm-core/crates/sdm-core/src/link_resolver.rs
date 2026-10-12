@@ -1,19 +1,21 @@
+use crate::resolved_media::ResolvedTarget;
+use crate::source_url::SourceUrl;
 use async_trait::async_trait;
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
-use url::Url;
-
-use crate::resolved_media::ResolvedTarget;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RefreshedFormat {
-    pub url: Url,
+    /// The fresh direct URL, exactly as yt-dlp reported it. It is written
+    /// into the item's component and persisted, so it keeps its original
+    /// string (a `url::Url` would lowercase the host and normalize it).
+    pub url: SourceUrl,
     pub filesize: Option<i64>,
     pub format_id: String,
 }
 
 impl RefreshedFormat {
-    pub fn new(url: Url, filesize: Option<i64>, format_id: impl Into<String>) -> Self {
+    pub fn new(url: SourceUrl, filesize: Option<i64>, format_id: impl Into<String>) -> Self {
         Self {
             url,
             filesize,
@@ -55,11 +57,15 @@ pub enum ResolveError {
 /// existing probe/download path." Parent spec §4.1.
 #[async_trait]
 pub trait LinkResolver: Send + Sync {
-    /// Cheap, synchronous, no I/O — a host/path check only.
-    fn can_handle(&self, url: &Url) -> bool;
+    /// Cheap, synchronous, no I/O — a host/path check only. A URL string the
+    /// `url` crate cannot parse (`SourceUrl::as_url` is `None`) has no host
+    /// to match and is not handled.
+    fn can_handle(&self, url: &SourceUrl) -> bool;
 
-    /// Grab-time resolution. May shell out; may take seconds.
-    async fn resolve(&self, url: &Url) -> Result<ResolvedTarget, ResolveError>;
+    /// Grab-time resolution. May shell out; may take seconds. A URL with no
+    /// parsed form is `ResolveError::Unsupported`. The URL's original string
+    /// is what reaches yt-dlp.
+    async fn resolve(&self, url: &SourceUrl) -> Result<ResolvedTarget, ResolveError>;
 
     /// Mid-download URL refresh for one expired component: re-resolve
     /// `source_url` (the item's grabbed URL) and hand back a fresh direct URL
@@ -72,7 +78,7 @@ pub trait LinkResolver: Send + Sync {
     /// Swift app ever cancels one.)
     async fn refresh(
         &self,
-        source_url: &Url,
+        source_url: &SourceUrl,
         format_id: &str,
         cancel: &CancellationToken,
     ) -> Result<RefreshedFormat, ResolveError>;

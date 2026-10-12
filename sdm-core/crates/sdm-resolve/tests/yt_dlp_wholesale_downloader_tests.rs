@@ -3,16 +3,15 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use sdm_core::{WholesaleDownloader, WholesaleError, WholesalePhase, WholesaleProgress};
+use sdm_core::{SourceUrl, WholesaleDownloader, WholesaleError, WholesalePhase, WholesaleProgress};
 use sdm_resolve::{
     BinaryLocator, CookieSource, ProcessOutput, ProcessRunError, ProcessRunner,
     YtDlpWholesaleDownloader,
 };
 use tokio_util::sync::CancellationToken;
-use url::Url;
 
-fn u(s: &str) -> Url {
-    Url::parse(s).unwrap()
+fn u(s: &str) -> SourceUrl {
+    SourceUrl::new(s).unwrap()
 }
 
 fn wholesale_locator(has_yt_dlp: bool) -> Arc<BinaryLocator> {
@@ -275,4 +274,76 @@ async fn runner_cancellation_and_timeout_map_to_wholesale_errors() {
             .await;
         assert_eq!(result, Err(expected));
     }
+}
+
+/// The complete yt-dlp argument vector, in order, with the page URL passed
+/// as its original string (upper-case host kept, as Swift's `absoluteString`
+/// does), the cookie arguments and the injected extra arguments in place.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn passes_the_complete_argument_vector_with_the_original_url() {
+    let dest = TempDest::new();
+    let runner = FakeStreamingRunner::new(&["sdm:downloading|1|1|NA|1|1"], 0, true);
+    let d = YtDlpWholesaleDownloader::new(
+        runner.clone(),
+        wholesale_locator(true),
+        Arc::new(|| CookieSource::Safari),
+        Arc::new(|| vec!["--sponsorblock-mark".to_string(), "none".to_string()]),
+    );
+    d.download(
+        &u("https://WWW.Example.COM/Watch?v=AbC"),
+        "bv*+ba/b",
+        &dest.0,
+        Arc::new(|_| {}),
+        &CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+
+    let expected: Vec<String> = [
+        "-f",
+        "bv*+ba/b",
+        "--no-playlist",
+        "--newline",
+        "--continue",
+        "--hls-prefer-native",
+        "--no-warnings",
+        "--progress-template",
+        "sdm:%(progress.status)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.fragment_index)s|%(progress.fragment_count)s",
+        "--merge-output-format",
+        "mp4",
+        "--ffmpeg-location",
+        "/bin",
+        "-o",
+        dest.0.to_str().unwrap(),
+        "--cookies-from-browser",
+        "safari",
+        "--sponsorblock-mark",
+        "none",
+        "https://WWW.Example.COM/Watch?v=AbC",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    assert_eq!(runner.last_arguments(), expected);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_url_with_no_parsed_form_still_downloads_with_its_string() {
+    let dest = TempDest::new();
+    let runner = FakeStreamingRunner::new(&[], 0, true);
+    let relative: SourceUrl = serde_json::from_str("\"a/b\"").unwrap();
+    downloader(runner.clone(), true)
+        .download(
+            &relative,
+            "b",
+            &dest.0,
+            Arc::new(|_| {}),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        runner.last_arguments().last().map(String::as_str),
+        Some("a/b")
+    );
 }

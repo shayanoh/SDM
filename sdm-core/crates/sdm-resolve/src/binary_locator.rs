@@ -55,6 +55,9 @@ impl BinaryLocator {
         self
     }
 
+    /// Replaces the executable check. [`Self::locate`] calls it while holding
+    /// the locator's lock, so the closure must not call back into this
+    /// locator (that would deadlock).
     pub fn with_is_executable(
         mut self,
         is_executable: impl Fn(&Path) -> bool + Send + Sync + 'static,
@@ -79,6 +82,8 @@ impl BinaryLocator {
         self.state.lock().unwrap().memo.clear();
     }
 
+    /// The path of `name`, memoized (misses too). The executable check runs
+    /// under the lock, so it must not call back into this locator.
     pub fn locate(&self, name: &str) -> Option<PathBuf> {
         let mut state = self.state.lock().unwrap();
         if let Some(cached) = state.memo.get(name) {

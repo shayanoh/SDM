@@ -102,19 +102,19 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | `BinaryLocatorTests.swift` | 5 | `binary_locator_tests.rs` | 5 |  |
 | `CookieSourceTests.swift` | 3 | `cookie_source_tests.rs` | 3 |  |
 | `FormatSelectorTests.swift` | 16 | `format_selector_tests.rs` | 16 |  |
-| `LZFSETests.swift` | 3 | `lzfse_tests.rs` | 4 | +1: `decodes_a_file_compressed_by_macos` (fixture made by `compression_tool`). |
+| `LZFSETests.swift` | 3 | `lzfse_tests.rs` | 5 | +2: `decodes_a_file_compressed_by_macos` (fixture made by `compression_tool`), `lzfse_decode_is_independent_of_the_size_hint`. |
 | `ManagedBinariesCadenceTests.swift` | 2 | `managed_binaries_cadence_tests.rs` | 2 |  |
 | `ManagedBinariesInflationTests.swift` | 4 | `managed_binaries_inflation_tests.rs` | 4 |  |
 | `ManagedBinariesTypesTests.swift` | 4 | `managed_binaries_types_tests.rs` | 6 | +2: `manifest_matches_the_swift_fixture_byte_for_byte`, `manifest_json_escapes_like_foundation`. |
 | `ManagedBinariesUpdateTests.swift` | 7 | `managed_binaries_update_tests.rs` | 7 |  |
 | `SiteRegistryTests.swift` | 4 | `site_registry_tests.rs` | 4 | The `@Test(arguments:)` table is one looping test. |
 | `Support.swift` | 0 | `testing.rs` (`FakeProcessRunner`, `ok`, `fail`) | 0 | `FakeBinaryFetcher` now in `testing.rs`; `fixture_data`/`fixture_dump` in `tests/support`; `URL.tmp` is `tempfile::tempdir`. Not tests. |
-| `SystemProcessRunnerTests.swift` | 8 | `system_process_runner_tests.rs` | 11 | 8 Swift tests ported (`cancellation_terminates_the_process` cancels a `CancellationToken`, the stand-in for task cancellation). Extra, not ported: 3 in `system_process_runner_tests.rs` (`cancellation_applies_to_run_too`, `already_cancelled_token_returns_cancelled`, `dropping_the_future_still_terminates_the_child`) and `process_runner_tests.rs` (3: default `run_streaming`, fake, signal exit code). |
+| `SystemProcessRunnerTests.swift` | 8 | `system_process_runner_tests.rs` | 12 | 8 Swift tests ported (`cancellation_terminates_the_process` cancels a `CancellationToken`, the stand-in for task cancellation). Extra, not ported: 3 in `system_process_runner_tests.rs` (`cancellation_applies_to_run_too`, `already_cancelled_token_returns_cancelled`, `dropping_the_future_still_terminates_the_child`), `child_environment_keeps_non_utf8_variables_untouched` (a Rust-only hazard: `std::env::vars` panics on non-UTF-8) and `process_runner_tests.rs` (3: default `run_streaming`, fake, signal exit code). |
 | `WholesaleProgressParserTests.swift` | 8 | `wholesale_progress_parser_tests.rs` | 8 |  |
 | `YtDlpJSONTests.swift` | 8 | `yt_dlp_json_tests.rs` | 9 | 8 ported + 1 added test pinning `JSONDecoder` tolerance (float-for-int, null, unknown keys, type mismatches). |
-| `YtDlpResolverTests.swift` | 27 | `yt_dlp_resolver_tests.rs` | 28 | +1: `refresh_surfaces_cancellation_from_the_runner` (cancellation token seam). |
+| `YtDlpResolverTests.swift` | 27 | `yt_dlp_resolver_tests.rs` | 32 | +1: `refresh_surfaces_cancellation_from_the_runner` (cancellation token seam). +3 argument-vector tests (single, playlist, refresh: complete ordered vector, upper-case host kept as given) and +1 `a_url_with_no_parsed_form_is_unsupported` (`SourceUrl` can lack a parsed form). |
 | `YtDlpSmokeTests.swift` | 1 | `yt_dlp_smoke_tests.rs` | 1 | Skips with `eprintln!` when yt-dlp is not installed. |
-| `YtDlpWholesaleDownloaderTests.swift` | 5 | `yt_dlp_wholesale_downloader_tests.rs` | 6 | +1: `runner_cancellation_and_timeout_map_to_wholesale_errors`. |
+| `YtDlpWholesaleDownloaderTests.swift` | 5 | `yt_dlp_wholesale_downloader_tests.rs` | 8 | +1: `runner_cancellation_and_timeout_map_to_wholesale_errors`. +2: `passes_the_complete_argument_vector_with_the_original_url`, `a_url_with_no_parsed_form_still_downloads_with_its_string`. |
 | `Fixtures/playlist_flat.json` | 0 |  |  |  |
 | `Fixtures/playlist_soundcloud.json` | 0 |  |  |  |
 | `Fixtures/single_but_type_playlist.json` | 0 |  |  |  |

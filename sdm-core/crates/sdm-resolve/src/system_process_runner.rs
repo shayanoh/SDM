@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
+use std::ffi::{OsStr, OsString};
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::os::unix::process::ExitStatusExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -15,8 +17,10 @@ use tokio_util::sync::CancellationToken;
 use crate::{ProcessOutput, ProcessRunError, ProcessRunner};
 
 /// `tokio::process` implementation. Unsandboxed target — this is
-/// allowed. Kills the child on timeout or cancellation (dropping the
-/// future).
+/// allowed. On timeout the child is terminated; on cancellation (the
+/// `CancellationToken`) it is sent SIGTERM and given a bounded window to
+/// exit. Dropping the future is only a backstop: the child is then
+/// SIGTERMed and reaped on a background task.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SystemProcessRunner;
 
@@ -36,16 +40,29 @@ impl SystemProcessRunner {
     /// directories (and the executable's own directory) prepended to `PATH`,
     /// and `HOME` guaranteed.
     ///
+    /// Names and values are carried as `OsString`s: the process environment
+    /// is not required to be UTF-8, and nothing in it is skipped or altered.
+    ///
     /// Public (hidden) only so the integration tests can reach it.
     #[doc(hidden)]
-    pub fn child_environment(executable: &Path) -> HashMap<String, String> {
-        let mut env: HashMap<String, String> = std::env::vars().collect();
-        let home = home_directory();
+    pub fn child_environment(executable: &Path) -> HashMap<OsString, OsString> {
+        Self::child_environment_from(executable, std::env::vars_os(), home_directory())
+    }
 
-        let mut tool_dirs = vec![
+    /// [`Self::child_environment`] over an explicit inherited environment and
+    /// home directory, so tests need not mutate the process's own.
+    #[doc(hidden)]
+    pub fn child_environment_from(
+        executable: &Path,
+        inherited: impl IntoIterator<Item = (OsString, OsString)>,
+        home: PathBuf,
+    ) -> HashMap<OsString, OsString> {
+        let mut env: HashMap<OsString, OsString> = inherited.into_iter().collect();
+
+        let mut tool_dirs: Vec<PathBuf> = vec![
             executable
                 .parent()
-                .map(|p| p.to_string_lossy().into_owned())
+                .map(Path::to_path_buf)
                 .unwrap_or_default(),
         ];
         for dir in [
@@ -60,28 +77,42 @@ impl SystemProcessRunner {
             "/usr/sbin",
             "/sbin",
         ] {
-            tool_dirs.push(dir.to_string());
+            tool_dirs.push(PathBuf::from(dir));
         }
-        tool_dirs.push(format!("{}/.local/bin", home.trim_end_matches('/')));
+        let mut home_bin = home.as_os_str().as_bytes().to_vec();
+        while home_bin.ends_with(b"/") {
+            home_bin.pop();
+        }
+        home_bin.extend_from_slice(b"/.local/bin");
+        tool_dirs.push(PathBuf::from(OsString::from_vec(home_bin)));
 
-        let existing: Vec<String> = env
-            .get("PATH")
-            .map(String::as_str)
-            .unwrap_or("")
-            .split(':')
-            .filter(|s| !s.is_empty())
-            .map(String::from)
-            .collect();
+        let existing: Vec<PathBuf> = env
+            .get(OsStr::new("PATH"))
+            .map(|p| {
+                p.as_bytes()
+                    .split(|&b| b == b':')
+                    .filter(|s| !s.is_empty())
+                    .map(|s| PathBuf::from(OsStr::from_bytes(s)))
+                    .collect()
+            })
+            .unwrap_or_default();
         let mut seen = HashSet::new();
-        let merged: Vec<String> = tool_dirs
+        let merged: Vec<PathBuf> = tool_dirs
             .into_iter()
             .chain(existing)
-            .filter(|d| seen.insert(d.clone()) && !d.is_empty())
+            .filter(|d| !d.as_os_str().is_empty() && seen.insert(d.clone()))
             .collect();
-        env.insert("PATH".to_string(), merged.join(":"));
+        let mut path = Vec::new();
+        for (index, dir) in merged.iter().enumerate() {
+            if index > 0 {
+                path.push(b':');
+            }
+            path.extend_from_slice(dir.as_os_str().as_bytes());
+        }
+        env.insert(OsString::from("PATH"), OsString::from_vec(path));
 
-        if env.get("HOME").is_none_or(|h| h.is_empty()) {
-            env.insert("HOME".to_string(), home);
+        if env.get(OsStr::new("HOME")).is_none_or(|h| h.is_empty()) {
+            env.insert(OsString::from("HOME"), home.into_os_string());
         }
         env
     }
@@ -288,10 +319,14 @@ struct ChildGuard {
 impl ChildGuard {
     fn terminate(&self) {
         if let Some(pid) = self.child.as_ref().and_then(Child::id) {
+            // A pid that does not fit `pid_t` cannot be a real child: skip.
+            let Ok(pid) = libc::pid_t::try_from(pid) else {
+                return;
+            };
             // SAFETY: `pid` is a child we have not yet reaped (`Child::id`
             // returns `None` once it has), so it cannot have been recycled.
             unsafe {
-                libc::kill(pid as libc::pid_t, libc::SIGTERM);
+                libc::kill(pid, libc::SIGTERM);
             }
         }
     }
@@ -314,10 +349,8 @@ impl Drop for ChildGuard {
     }
 }
 
-fn home_directory() -> String {
-    std::env::home_dir()
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "/".to_string())
+fn home_directory() -> PathBuf {
+    std::env::home_dir().unwrap_or_else(|| PathBuf::from("/"))
 }
 
 /// Splits a byte stream into `\n`-delimited lines, emitting each completed

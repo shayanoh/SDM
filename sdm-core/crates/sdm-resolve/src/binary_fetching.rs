@@ -24,12 +24,15 @@ pub trait BinaryFetching: Send + Sync {
     async fn data(&self, url: &Url) -> Result<Vec<u8>, BinaryFetchError>;
 }
 
+/// `URLRequest.timeoutInterval` in Swift: 60 s.
+const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+
 /// Twin of Swift `URLSessionBinaryFetcher`, on `reqwest` with rustls and the
 /// operating system's trust store.
 ///
 /// `URLRequest.timeoutInterval = 60` is an idle timeout (time without
-/// data), not a cap on the whole transfer, so this uses reqwest's
-/// `read_timeout` rather than `timeout`; the 35 MB `yt-dlp` download must
+/// data) and also bounds connecting, so this uses reqwest's `connect_timeout`
+/// and `read_timeout` rather than `timeout`; the 35 MB `yt-dlp` download must
 /// not be cut off at 60 s.
 pub struct ReqwestBinaryFetcher {
     /// A failed client build (TLS initialisation) is reported by every
@@ -43,12 +46,13 @@ impl ReqwestBinaryFetcher {
         Self::with_builder(reqwest::Client::builder())
     }
 
-    /// Applies the `SDM` user agent and the 60 s idle timeout to `builder`.
+    /// Applies the `SDM` user agent and the 60 s connect and idle timeouts to `builder`.
     /// Lets tests supply, for example, a builder with proxies disabled.
     pub fn with_builder(builder: reqwest::ClientBuilder) -> Self {
         let client = builder
             .user_agent("SDM")
-            .read_timeout(Duration::from_secs(60))
+            .connect_timeout(IDLE_TIMEOUT)
+            .read_timeout(IDLE_TIMEOUT)
             .build()
             .map_err(|e| e.to_string());
         Self { client }

@@ -64,6 +64,15 @@ async fn throws_launch_failed_for_missing_executable() {
     assert!(matches!(result, Err(ProcessRunError::LaunchFailed(_))));
 }
 
+/// What the test scripts do after printing `ready`: idle in short foreground
+/// sleeps. The scripts used to end in `sleep 10 & ...; wait`, but the shell
+/// (macOS `/bin/sh`, bash 3.2) can lose a SIGTERM that arrives between its
+/// `echo ready` and the moment it blocks in `wait`: the trap then never runs
+/// (or runs only when the sleep ends, or the shell crashes). The tests send
+/// the signal the instant they see `ready`, so under CPU load they hit that
+/// window. A loop of short sleeps bounds the trap's latency to one sleep.
+const IDLE_LOOP: &str = "while :; do sleep 0.05; done";
+
 fn marker_dir(tag: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("sdm-resolve-{tag}-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -80,8 +89,9 @@ async fn cancellation_terminates_the_process() {
     let marker = dir.join("terminated");
     let _ = std::fs::remove_file(&marker);
     let script = format!(
-        "trap 'kill $child; sleep 0.3; echo x > \"{}\"; exit 0' TERM; sleep 10 & child=$!; echo ready; wait",
-        marker.display()
+        "trap 'sleep 0.3; echo x > \"{}\"; exit 0' TERM; echo ready; {}",
+        marker.display(),
+        IDLE_LOOP
     );
 
     let runner = SystemProcessRunner::new();
@@ -157,8 +167,9 @@ async fn dropping_the_future_still_terminates_the_child() {
     let marker = dir.join("terminated");
     let _ = std::fs::remove_file(&marker);
     let script = format!(
-        "trap 'kill $child; echo x > \"{}\"; exit 0' TERM; sleep 10 & child=$!; echo ready; wait",
-        marker.display()
+        "trap 'echo x > \"{}\"; exit 0' TERM; echo ready; {}",
+        marker.display(),
+        IDLE_LOOP
     );
     let runner = SystemProcessRunner::new();
     let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<()>();
@@ -236,13 +247,63 @@ async fn run_streaming_times_out() {
     assert_eq!(result, Err(ProcessRunError::TimedOut));
 }
 
+fn os(s: &str) -> std::ffi::OsString {
+    std::ffi::OsString::from(s)
+}
+
+fn path_of(env: &std::collections::HashMap<std::ffi::OsString, std::ffi::OsString>) -> String {
+    env.get(std::ffi::OsStr::new("PATH"))
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
 #[test]
 fn child_environment_prepends_tool_dirs_and_guarantees_home() {
     let env = SystemProcessRunner::child_environment(Path::new("/opt/custom/bin/yt-dlp"));
-    let path = env.get("PATH").cloned().unwrap_or_default();
+    let path = path_of(&env);
     assert!(path.starts_with("/opt/custom/bin:"));
     assert!(path.contains("/opt/homebrew/bin"));
     assert!(path.contains("/usr/local/bin"));
     assert!(path.contains("/usr/bin"));
-    assert!(!env.get("HOME").cloned().unwrap_or_default().is_empty());
+    assert!(
+        !env.get(std::ffi::OsStr::new("HOME"))
+            .cloned()
+            .unwrap_or_default()
+            .is_empty()
+    );
+}
+
+#[test]
+fn child_environment_keeps_non_utf8_variables_untouched() {
+    use std::os::unix::ffi::{OsStrExt, OsStringExt};
+    let bad_value = std::ffi::OsString::from_vec(vec![b'v', 0xFF, 0xFE, b'x']);
+    let bad_name = std::ffi::OsString::from_vec(vec![b'N', 0xC3, 0x28]);
+    let bad_path_entry = std::ffi::OsString::from_vec(b"/weird/\xFF/bin".to_vec());
+    let mut path = std::ffi::OsString::from("/usr/bin:");
+    path.push(&bad_path_entry);
+    let inherited = vec![
+        (os("KEEP"), bad_value.clone()),
+        (bad_name.clone(), os("value")),
+        (os("PATH"), path),
+    ];
+    let env = SystemProcessRunner::child_environment_from(
+        Path::new("/opt/custom/bin/yt-dlp"),
+        inherited,
+        std::path::PathBuf::from("/Users/someone"),
+    );
+    assert_eq!(env.get(std::ffi::OsStr::new("KEEP")), Some(&bad_value));
+    assert_eq!(env.get(&bad_name), Some(&os("value")));
+    // The non-UTF-8 PATH entry survives byte for byte, and `/usr/bin` is not
+    // repeated.
+    let merged = env.get(std::ffi::OsStr::new("PATH")).unwrap().as_bytes();
+    let entries: Vec<&[u8]> = merged.split(|&b| b == b':').collect();
+    assert_eq!(entries[0], b"/opt/custom/bin");
+    assert!(entries.contains(&bad_path_entry.as_bytes()));
+    assert_eq!(entries.iter().filter(|e| **e == b"/usr/bin").count(), 1);
+    assert!(entries.contains(&&b"/Users/someone/.local/bin"[..]));
+    // HOME is supplied when the inherited environment has none.
+    assert_eq!(
+        env.get(std::ffi::OsStr::new("HOME")),
+        Some(&os("/Users/someone"))
+    );
 }

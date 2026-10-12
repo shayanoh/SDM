@@ -2,12 +2,11 @@ mod support;
 
 use std::sync::Arc;
 
-use sdm_core::{LinkResolver, MediaDelivery, ResolveError, ResolvedTarget};
+use sdm_core::{LinkResolver, MediaDelivery, ResolveError, ResolvedTarget, SourceUrl};
 use sdm_resolve::testing::{FakeProcessRunner, fail_default, ok};
 use sdm_resolve::{BinaryLocator, CookieSource, YtDlpResolver};
 use support::fixture_data;
 use tokio_util::sync::CancellationToken;
-use url::Url;
 
 fn make_locator(has_yt_dlp: bool) -> Arc<BinaryLocator> {
     Arc::new(
@@ -17,8 +16,8 @@ fn make_locator(has_yt_dlp: bool) -> Arc<BinaryLocator> {
     )
 }
 
-fn u(s: &str) -> Url {
-    Url::parse(s).unwrap()
+fn u(s: &str) -> SourceUrl {
+    SourceUrl::new(s).unwrap()
 }
 
 fn resolver(runner: FakeProcessRunner, has_yt_dlp: bool) -> YtDlpResolver {
@@ -265,12 +264,30 @@ async fn runner_timeout_becomes_resolve_timeout() {
 #[test]
 fn detects_playlist_and_channel_urls() {
     let r = resolver(FakeProcessRunner::new(), true);
-    assert!(r.looks_like_playlist(&u("https://www.youtube.com/playlist?list=PLabc")));
-    assert!(r.looks_like_playlist(&u("https://www.youtube.com/watch?v=abc&list=PLabc")));
-    assert!(r.looks_like_playlist(&u("https://www.youtube.com/@SomeCreator")));
-    assert!(r.looks_like_playlist(&u("https://www.youtube.com/channel/UCxyz/videos")));
-    assert!(!r.looks_like_playlist(&u("https://www.youtube.com/watch?v=abc")));
-    assert!(!r.looks_like_playlist(&u("https://youtu.be/abc")));
+    assert!(
+        r.looks_like_playlist(
+            u("https://www.youtube.com/playlist?list=PLabc")
+                .as_url()
+                .unwrap()
+        )
+    );
+    assert!(
+        r.looks_like_playlist(
+            u("https://www.youtube.com/watch?v=abc&list=PLabc")
+                .as_url()
+                .unwrap()
+        )
+    );
+    assert!(r.looks_like_playlist(u("https://www.youtube.com/@SomeCreator").as_url().unwrap()));
+    assert!(
+        r.looks_like_playlist(
+            u("https://www.youtube.com/channel/UCxyz/videos")
+                .as_url()
+                .unwrap()
+        )
+    );
+    assert!(!r.looks_like_playlist(u("https://www.youtube.com/watch?v=abc").as_url().unwrap()));
+    assert!(!r.looks_like_playlist(u("https://youtu.be/abc").as_url().unwrap()));
 }
 
 fn playlist_resolver(max: usize) -> YtDlpResolver {
@@ -355,9 +372,9 @@ async fn refresh_returns_fresh_url_for_same_format() {
         .unwrap();
     assert_eq!(refreshed.format_id, "137");
     assert_eq!(refreshed.filesize, Some(118_000_000));
-    // `RefreshedFormat.url` is a `url::Url`, which lowercases the host
-    // (Swift's `URL` keeps `sn-FRESH`); compare case-insensitively.
-    assert!(refreshed.url.as_str().contains("sn-fresh"));
+    // The refreshed URL is persisted, so it keeps the exact string yt-dlp
+    // reported (mixed-case host `sn-FRESH`), as Swift's `URL` does.
+    assert!(refreshed.url.as_str().contains("sn-FRESH"));
     let calls = runner.calls();
     let call = calls.first().expect("a call");
     assert!(
@@ -525,5 +542,122 @@ async fn splices_extra_arguments_into_playlist_and_refresh() {
         calls
             .iter()
             .all(|c| c.arguments.contains(&"--sponsorblock-mark".to_string()))
+    );
+}
+
+// MARK: - Complete yt-dlp argument vectors (original URL strings)
+
+/// A URL whose host is upper-case: `url::Url` would lowercase it, Swift's
+/// `absoluteString` keeps it, and that is what yt-dlp must be given.
+const UPPER_HOST_VIDEO: &str = "https://WWW.YouTube.com/watch?v=AbC";
+const UPPER_HOST_PLAYLIST: &str = "https://WWW.YouTube.com/playlist?list=PLtest";
+
+fn strings(items: &[&str]) -> Vec<String> {
+    items.iter().map(|s| s.to_string()).collect()
+}
+
+fn vector_resolver(runner: Arc<FakeProcessRunner>) -> YtDlpResolver {
+    YtDlpResolver::new(
+        runner,
+        make_locator(true),
+        Arc::new(|| CookieSource::Safari),
+        Arc::new(|| 50),
+        Arc::new(|| strings(&["--ffmpeg-location", "/x/bin"])),
+    )
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn single_resolve_passes_the_complete_argument_vector_with_the_original_url() {
+    let mut fake = FakeProcessRunner::new();
+    fake.responses = vec![("-J".into(), ok(fixture_data("video_muxed")))];
+    let runner = Arc::new(fake);
+    vector_resolver(runner.clone())
+        .resolve(&u(UPPER_HOST_VIDEO))
+        .await
+        .unwrap();
+    let calls = runner.calls();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(
+        calls[0].arguments,
+        strings(&[
+            "-J",
+            "--no-warnings",
+            "--no-playlist",
+            "--cookies-from-browser",
+            "safari",
+            UPPER_HOST_VIDEO,
+            "--ffmpeg-location",
+            "/x/bin",
+        ])
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn playlist_resolve_passes_the_complete_argument_vector_with_the_original_url() {
+    let mut fake = FakeProcessRunner::new();
+    fake.responses = vec![("--flat-playlist".into(), ok(fixture_data("playlist_flat")))];
+    let runner = Arc::new(fake);
+    vector_resolver(runner.clone())
+        .resolve(&u(UPPER_HOST_PLAYLIST))
+        .await
+        .unwrap();
+    let calls = runner.calls();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(
+        calls[0].arguments,
+        strings(&[
+            "-J",
+            "--flat-playlist",
+            "--no-warnings",
+            "--cookies-from-browser",
+            "safari",
+            UPPER_HOST_PLAYLIST,
+            "--ffmpeg-location",
+            "/x/bin",
+        ])
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn refresh_passes_the_complete_argument_vector_with_the_original_url() {
+    let mut fake = FakeProcessRunner::new();
+    fake.responses = vec![("-J".into(), ok(fixture_data("video_refresh_ok")))];
+    let runner = Arc::new(fake);
+    vector_resolver(runner.clone())
+        .refresh(&u(UPPER_HOST_VIDEO), "137", &CancellationToken::new())
+        .await
+        .unwrap();
+    let calls = runner.calls();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(
+        calls[0].arguments,
+        strings(&[
+            "-J",
+            "--no-warnings",
+            "--no-playlist",
+            "--cookies-from-browser",
+            "safari",
+            UPPER_HOST_VIDEO,
+            "--ffmpeg-location",
+            "/x/bin",
+        ])
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_url_with_no_parsed_form_is_unsupported() {
+    let relative: SourceUrl = serde_json::from_str("\"a/b\"").unwrap();
+    assert!(relative.as_url().is_none());
+    let r = resolver(FakeProcessRunner::new(), true);
+    assert!(!r.can_handle(&relative));
+    assert_eq!(
+        r.resolve(&relative).await.unwrap_err(),
+        ResolveError::Unsupported
+    );
+    assert_eq!(
+        r.refresh(&relative, "1", &CancellationToken::new())
+            .await
+            .unwrap_err(),
+        ResolveError::Unsupported
     );
 }

@@ -4,7 +4,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
-use url::Url;
+
+use crate::source_url::SourceUrl;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WholesalePhase {
@@ -76,7 +77,7 @@ pub trait WholesaleDownloader: Send + Sync {
     /// `WholesaleError::Cancelled`.
     async fn download(
         &self,
-        page_url: &Url,
+        page_url: &SourceUrl,
         format_selector: &str,
         destination: &Path,
         on_progress: Arc<dyn Fn(WholesaleProgress) + Send + Sync>,

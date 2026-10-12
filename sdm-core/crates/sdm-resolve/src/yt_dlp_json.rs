@@ -297,7 +297,7 @@ impl YtDlpParser {
     /// preferred, then `webpage_url` (present in a full `-J` playlist dump);
     /// relative values are resolved against the playlist URL. Entries with
     /// no usable URL are dropped. Parent spec §5.3.
-    pub fn flat_entries(dump: &YtDlpDump, relative_to: &Url) -> Vec<(Url, String, String)> {
+    pub fn flat_entries(dump: &YtDlpDump, relative_to: &Url) -> Vec<(SourceUrl, String, String)> {
         dump.entries
             .iter()
             .flatten()
@@ -313,7 +313,12 @@ impl YtDlpParser {
                     .clone()
                     .unwrap_or_else(|| last_path_component(&resolved));
                 let title = entry.title.clone().unwrap_or_else(|| id.clone());
-                Some((resolved, id, title))
+                // An absolute value is kept as yt-dlp wrote it: the entry's
+                // page URL is persisted, and Swift's `absoluteString` of an
+                // absolute reference is that string.
+                let source_url =
+                    SourceUrl::new(raw).unwrap_or_else(|_| SourceUrl::from_url(&resolved));
+                Some((source_url, id, title))
             })
             .collect()
     }

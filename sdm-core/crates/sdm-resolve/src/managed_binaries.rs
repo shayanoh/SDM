@@ -145,8 +145,18 @@ impl ManagedBinaries {
 
     /// Decode any bundled blob whose version differs from what the manifest
     /// records as installed. Cheap, safe to call on every launch.
+    ///
+    /// Blocking file reads, LZFSE decoding of tens of megabytes and `fsync`
+    /// run on tokio's blocking pool, not on an async worker. The caller still
+    /// resumes only once every blob has been handled, as in Swift.
     pub async fn provision_bundled_if_needed(&self) {
-        self.inner.provision_bundled_if_needed();
+        let inner = Arc::clone(&self.inner);
+        let joined = tokio::task::spawn_blocking(move || inner.provision_bundled_if_needed()).await;
+        if let Err(error) = joined
+            && error.is_panic()
+        {
+            std::panic::resume_unwind(error.into_panic());
+        }
     }
 
     // MARK: - Cadence

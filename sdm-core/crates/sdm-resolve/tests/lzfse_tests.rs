@@ -37,3 +37,17 @@ fn decodes_a_file_compressed_by_macos() {
     assert_eq!(plain.len(), 200_000);
     assert_eq!(lzfse::decode(&compressed).unwrap(), plain);
 }
+
+/// The size hint only reserves capacity: a hint that is far too small or far
+/// too large changes nothing about the decoded bytes.
+#[test]
+fn lzfse_decode_is_independent_of_the_size_hint() {
+    let original = pattern(200_000);
+    let compressed = lzfse::encode(&original).unwrap();
+    for hint in [0, 10, original.len(), usize::MAX] {
+        assert_eq!(
+            lzfse::decode_with_size_hint(&compressed, hint).unwrap(),
+            original
+        );
+    }
+}

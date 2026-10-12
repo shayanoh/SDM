@@ -3,9 +3,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
-use sdm_core::{ResolveError, WholesaleDownloader, WholesaleError, WholesaleProgress};
+use sdm_core::{ResolveError, SourceUrl, WholesaleDownloader, WholesaleError, WholesaleProgress};
 use tokio_util::sync::CancellationToken;
-use url::Url;
 
 use crate::yt_dlp_resolver::suffix_chars;
 use crate::{
@@ -57,7 +56,7 @@ impl YtDlpWholesaleDownloader {
 impl WholesaleDownloader for YtDlpWholesaleDownloader {
     async fn download(
         &self,
-        page_url: &Url,
+        page_url: &SourceUrl,
         format_selector: &str,
         destination: &Path,
         on_progress: Arc<dyn Fn(WholesaleProgress) + Send + Sync>,
@@ -105,7 +104,7 @@ impl WholesaleDownloader for YtDlpWholesaleDownloader {
         .iter()
         .map(|s| s.to_string())
         .collect();
-        if let Some(pattern) = SiteRegistry::match_url(page_url) {
+        if let Some(pattern) = page_url.as_url().and_then(SiteRegistry::match_url) {
             arguments.extend(pattern.extra_args.iter().cloned());
         }
         arguments.extend((self.cookie_source)().yt_dlp_arguments());
