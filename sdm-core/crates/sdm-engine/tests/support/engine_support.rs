@@ -3,9 +3,9 @@
 //! transport that honours it, and engine constructors.
 
 use std::future::Future;
-use std::path::Path;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -13,7 +13,7 @@ use futures::StreamExt;
 use sdm_core::{ByteRange, DownloadItem, DownloadPackage, SourceUrl};
 use sdm_engine::{
     DownloadEngine, EngineSettings, HttpTransport, InMemoryStateStore, ItemSnapshot, RangeRequest,
-    RangeResponse, RetryPolicy, TransportError,
+    RangeResponse, RetryPolicy, TransportError, Trash,
 };
 use tokio::sync::Notify;
 use uuid::Uuid;
@@ -178,6 +178,52 @@ impl HttpTransport for GatedOrigin {
     }
 }
 
+/// A [`Trash`] that moves things into a scratch directory of its own instead
+/// of the user's real Trash, and remembers what it was given. Every engine the
+/// helpers below build uses one, so no test can reach the real Trash.
+pub struct ScratchTrash {
+    directory: tempfile::TempDir,
+    counter: AtomicUsize,
+    trashed: Mutex<Vec<PathBuf>>,
+}
+
+impl ScratchTrash {
+    pub fn new() -> Self {
+        Self {
+            directory: tempfile::Builder::new()
+                .prefix("sdm-trash-")
+                .tempdir()
+                .expect("create a scratch trash directory"),
+            counter: AtomicUsize::new(0),
+            trashed: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Every path the engine asked to trash, in order.
+    pub fn trashed(&self) -> Vec<PathBuf> {
+        self.trashed.lock().unwrap().clone()
+    }
+}
+
+impl Default for ScratchTrash {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Trash for ScratchTrash {
+    fn trash(&self, path: &Path) -> std::io::Result<()> {
+        let slot = self.directory.path().join(format!(
+            "{}-{}",
+            self.counter.fetch_add(1, Ordering::SeqCst),
+            path.file_name().unwrap_or_default().to_string_lossy()
+        ));
+        std::fs::rename(path, slot)?;
+        self.trashed.lock().unwrap().push(path.to_path_buf());
+        Ok(())
+    }
+}
+
 /// Settings for the single-slot engines most tests want.
 pub fn engine_settings(
     max_concurrent: usize,
@@ -199,6 +245,15 @@ pub fn new_engine(
     transport: impl HttpTransport + 'static,
     settings: EngineSettings,
 ) -> DownloadEngine {
+    new_engine_with_trash(transport, settings, Arc::new(ScratchTrash::new()))
+}
+
+/// [`new_engine`] with a trash the test can inspect.
+pub fn new_engine_with_trash(
+    transport: impl HttpTransport + 'static,
+    settings: EngineSettings,
+    trash: Arc<ScratchTrash>,
+) -> DownloadEngine {
     DownloadEngine::new(
         Arc::new(transport),
         Arc::new(InMemoryStateStore::new()),
@@ -208,6 +263,7 @@ pub fn new_engine(
         None,
         None,
     )
+    .with_trash(trash)
 }
 
 /// Swift's `makeGatedEngine`: one slot, one segment.
@@ -233,6 +289,7 @@ pub fn make_gated_engine(
         None,
         None,
     )
+    .with_trash(Arc::new(ScratchTrash::new()))
 }
 
 /// One item's current snapshot, if the engine has it.

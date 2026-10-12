@@ -21,7 +21,7 @@ mod yt_dlp_artifacts;
 pub use download_task::{
     ComponentTelemetry, DownloadError, DownloadTask, DownloadTaskConfiguration,
 };
-pub use engine::{DownloadEngine, EngineError, EngineSettings};
+pub use engine::{DownloadEngine, EngineError, EngineSettings, SystemTrash, Trash};
 pub use engine_snapshot::{EngineSnapshot, ItemSnapshot, PackageSnapshot};
 pub use fake_origin::{FakeOrigin, FakeOriginBehavior};
 pub use http_transport::{BodyStream, HttpTransport, RangeRequest, RangeResponse, TransportError};

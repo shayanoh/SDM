@@ -262,6 +262,17 @@ impl EngineState {
         })
     }
 
+    /// Where the item sits: `(package index, item index)`.
+    pub(super) fn location_of(&self, item_id: Uuid) -> Option<(usize, usize)> {
+        self.packages.iter().enumerate().find_map(|(p, package)| {
+            package
+                .items
+                .iter()
+                .position(|item| item.id == item_id)
+                .map(|i| (p, i))
+        })
+    }
+
     pub(super) fn item_state(&self, item_id: Uuid) -> Option<ItemState> {
         self.find_item(item_id).map(|(_, item)| item.state.clone())
     }
@@ -310,6 +321,34 @@ impl EngineState {
         self.find_item(item_id)
             .map(|(_, item)| item.completed())
             .unwrap_or_default()
+    }
+
+    /// Renumbers a package's items to a contiguous `0..count` sequence
+    /// matching their array order — the same normalization `reorder_items`
+    /// already applies to a full reordering, needed here too since `Scheduler`
+    /// ranks directly on `item.position`, so an inserted item's position must
+    /// not collide with or fall out of order against its new siblings'.
+    pub(super) fn renumber_positions(&mut self, package_index: usize) {
+        for (index, item) in self.packages_mut()[package_index]
+            .items
+            .iter_mut()
+            .enumerate()
+        {
+            item.position = index as i64;
+        }
+    }
+
+    /// Forgets everything the engine tracks about an item that is gone.
+    pub(super) fn clear_item_bookkeeping(&mut self, item_id: Uuid) {
+        self.failed_attempts_mut().remove(&item_id);
+        self.retry_hold_ticks_mut().remove(&item_id);
+        self.last_failure_mut().remove(&item_id);
+        self.samplers_mut().remove(&item_id);
+        self.sampled_bytes.remove(&item_id);
+        self.checkpoint_failures_mut().remove(&item_id);
+        self.segment_overrides_mut().remove(&item_id);
+        self.attempt_start_bytes.remove(&item_id);
+        self.started_at_tick.remove(&item_id);
     }
 
     /// Renumbers every package's position, and every item's position within

@@ -46,8 +46,8 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | `NonResumableRestartTests.swift` | 2 | `non_resumable_restart_tests.rs` | 2 |  |
 | `PackageHistoryTests.swift` | 2 | `package_history_tests.rs` | 2 |  |
 | `ProcessRunnerSupport.swift` | 0 | `testing.rs` (`FakeProcessRunner`, `ok`, `fail`) | 0 | Shared with the `SDMResolveTests` copy; one Rust double behind the `testing` feature. Not tests. |
-| `RemovalTests.swift` | 12 |  |  |  |
-| `ReorderingTests.swift` | 10 |  |  |  |
+| `RemovalTests.swift` | 12 | `removal_tests.rs` | 16 | 12 ported; 4 added: removing / resetting an item whose runner is still unwinding, `move_items` ignoring a repeated id, `move_items_to_new_package`. Files go to a scratch `Trash` double, not the real Trash. |
+| `ReorderingTests.swift` | 10 | `reordering_tests.rs` | 10 |  |
 | `ResegmentationTests.swift` | 6 | `resegmentation_tests.rs` | 6 | The `@Test(arguments:)` seed table is one test looping over the same 6 seeds. `multipleWorkersNeverWriteOverlappingBytes` is `#[cfg(debug_assertions)]` like Swift's `#if DEBUG` `writeLog` (so it is absent from a `--release` run). The two raise tests hold their bodies at a `WorkerGate` (see the report) instead of racing the transfer. |
 | `ResumeSidecarTests.swift` | 8 | `resume_sidecar_tests.rs` | 11 | +3 Rust-only: Swift-fixture round-trip (`loads_sidecar_written_by_swift`), `resumable_ranges` boot-session rule, `current_boot_session_id` (macOS). `matches` takes `Option<&str>`. |
 | `ResumeTests.swift` | 9 | `resume_tests.rs` | 9 | `pausingMidFlightNeverRecordsUnwrittenBytes` stalls the origin after a few chunks (`StallingOrigin`) so "mid-flight" is deterministic. |

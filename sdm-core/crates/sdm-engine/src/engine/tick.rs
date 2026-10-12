@@ -41,7 +41,12 @@ impl DownloadEngine {
             for failure in failures {
                 state.checkpoint_failures_mut().insert(item_id, failure);
             }
-            state.record_progress(transferred, item_id);
+            // The item may have been removed while its bytes were being read
+            // above, outside the lock; recording then would resurrect its
+            // bookkeeping and credit the global sampler with a ghost.
+            if state.find_item(item_id).is_some() {
+                state.record_progress(transferred, item_id);
+            }
         }
 
         {

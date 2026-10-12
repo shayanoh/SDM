@@ -23,8 +23,9 @@ use tokio::sync::Notify;
 use url::Url;
 
 pub use engine_support::{
-    Gate, GatePhase, GatedOrigin, engine_settings, example_item, make_gated_engine, new_engine,
-    package_of, running_count, snapshot_item, wait_for_progress, wait_until_async,
+    Gate, GatePhase, GatedOrigin, ScratchTrash, engine_settings, example_item, make_gated_engine,
+    new_engine, new_engine_with_trash, package_of, running_count, snapshot_item, wait_for_progress,
+    wait_until_async,
 };
 pub use fake_wholesale_downloader::FakeWholesaleDownloader;
 pub use loopback_server::{

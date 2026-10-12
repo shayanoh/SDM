@@ -69,6 +69,7 @@
 //! synchronous), so it shares the one lock scope with the decision.
 
 mod lifecycle;
+mod organize;
 mod persist;
 mod reconcile;
 mod run;
@@ -95,6 +96,7 @@ use crate::retry_policy::RetryPolicy;
 use crate::state_store::StateStore;
 use crate::wholesale_component_task::WholesaleComponentTask;
 
+pub use organize::{SystemTrash, Trash};
 pub use settings::EngineSettings;
 use state::EngineState;
 
@@ -127,6 +129,9 @@ pub(crate) struct Inner {
     muxer: Option<Arc<dyn Muxer>>,
     wholesale_downloader: Option<Arc<dyn WholesaleDownloader>>,
     retry_policy: RetryPolicy,
+    /// Where removed and reset files go. Set once, by `with_trash`, before the
+    /// engine is shared.
+    trash: Arc<dyn Trash>,
     /// Spec §6.4: "An item started within the last ~5 s is not preempted,"
     /// expressed in ticks at `AppTiming::TICKS_PER_SECOND` rather than a raw
     /// tick count, so raising the heartbeat rate does not shrink the window.
@@ -382,10 +387,26 @@ impl DownloadEngine {
                 muxer,
                 wholesale_downloader,
                 retry_policy,
+                trash: Arc::new(SystemTrash),
                 hysteresis_window_ticks: sdm_core::AppTiming::TICKS_PER_SECOND * 5,
                 persist_gate: tokio::sync::Semaphore::new(1),
                 state: Mutex::new(EngineState::new(settings)),
             }),
         }
+    }
+
+    /// Replaces where removed and reset files go (the user's Trash by
+    /// default). Tests inject a [`Trash`] that moves them into a scratch
+    /// directory instead.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the engine is already shared — call it straight after `new`.
+    #[must_use]
+    pub fn with_trash(mut self, trash: Arc<dyn Trash>) -> Self {
+        Arc::get_mut(&mut self.inner)
+            .expect("with_trash must be called before the engine is shared")
+            .trash = trash;
+        self
     }
 }
