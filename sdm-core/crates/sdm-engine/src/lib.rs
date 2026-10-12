@@ -1,7 +1,7 @@
 //! The download engine: workers, scheduler, retry policy, snapshots.
 
-mod download_engine;
 mod download_task;
+mod engine;
 mod engine_logging;
 mod engine_snapshot;
 mod fake_origin;
@@ -18,10 +18,10 @@ mod state_store;
 mod wholesale_component_task;
 mod yt_dlp_artifacts;
 
-pub use download_engine::EngineError;
 pub use download_task::{
     ComponentTelemetry, DownloadError, DownloadTask, DownloadTaskConfiguration,
 };
+pub use engine::{DownloadEngine, EngineError, EngineSettings};
 pub use engine_snapshot::{EngineSnapshot, ItemSnapshot, PackageSnapshot};
 pub use fake_origin::{FakeOrigin, FakeOriginBehavior};
 pub use http_transport::{BodyStream, HttpTransport, RangeRequest, RangeResponse, TransportError};

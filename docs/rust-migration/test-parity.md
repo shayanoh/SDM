@@ -25,9 +25,9 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 
 | Swift file | Swift tests | Rust file | Rust tests | Notes |
 |---|---|---|---|---|
-| `CheckpointTickTests.swift` | 9 | `checkpoint_tick_tests.rs` | 8 | The 8 `DownloadTask`-only tests. The ninth (`checkpointFailureReachesTheEngineSnapshot`) drives a `DownloadEngine` and moves to Task 16. |
-| `ConnectionBudgetEngineTests.swift` | 2 |  |  |  |
-| `DownloadEngineTests.swift` | 15 |  |  |  |
+| `CheckpointTickTests.swift` | 9 | `checkpoint_tick_tests.rs` | 8 | The 8 `DownloadTask`-only tests. The ninth (`checkpointFailureReachesTheEngineSnapshot`) drives a `DownloadEngine` and is `checkpoint_tick_engine_tests.rs` (1). |
+| `ConnectionBudgetEngineTests.swift` | 2 | `connection_budget_engine_tests.rs` | 2 |  |
+| `DownloadEngineTests.swift` | 15 | `download_engine_tests.rs` | 15 |  |
 | `DownloadTaskTests.swift` | 8 | `download_task_tests.rs` | 8 | `start()` returns `DownloadError`, which wraps the transport error (`DownloadError::Transport`). |
 | `DurableResumeTests.swift` | 8 | `durable_resume_tests.rs` | 8 | 5 sidecar-only tests plus 3 `DownloadTask` tests. |
 | `DurableStateTests.swift` | 5 |  |  |  |
@@ -35,16 +35,16 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | `FakeOriginTests.swift` | 8 | `fake_origin_tests.rs` | 10 | 8 ported. +2 for the switches the Swift suite never exercises (`truncate_after_bytes`, `chunk_size`). |
 | `FakeWholesaleDownloader.swift` | 0 | `support/fake_wholesale_downloader.rs` | 0 | Test support; no tests. |
 | `HostileServerTests.swift` | 5 | `hostile_server_tests.rs` | 5 |  |
-| `HysteresisTests.swift` | 1 |  |  |  |
+| `HysteresisTests.swift` | 1 | `hysteresis_tests.rs` | 1 |  |
 | `LaunchStateTests.swift` | 3 |  |  |  |
 | `ManualRetryTests.swift` | 4 |  |  |  |
-| `MetadataSnapshotTests.swift` | 1 |  |  |  |
-| `MinSegmentSizeTests.swift` | 3 |  |  |  |
+| `MetadataSnapshotTests.swift` | 1 | `metadata_snapshot_tests.rs` | 1 |  |
+| `MinSegmentSizeTests.swift` | 3 | `min_segment_size_tests.rs` | 3 |  |
 | `MultiComponentDownloadTests.swift` | 7 |  |  |  |
 | `MuxAssemblyTests.swift` | 4 |  |  |  |
 | `MuxerTests.swift` | 6 | `muxer_tests.rs` | 6 | All 6 ported; `real_ffmpeg_muxes_two_tiny_streams` is `#[ignore]` (the Rust suite never runs a real `ffmpeg`; Swift ran it when one was installed), so 5 run. |
-| `NonResumableRestartTests.swift` | 2 |  |  |  |
-| `PackageHistoryTests.swift` | 2 |  |  |  |
+| `NonResumableRestartTests.swift` | 2 | `non_resumable_restart_tests.rs` | 2 |  |
+| `PackageHistoryTests.swift` | 2 | `package_history_tests.rs` | 2 |  |
 | `ProcessRunnerSupport.swift` | 0 | `testing.rs` (`FakeProcessRunner`, `ok`, `fail`) | 0 | Shared with the `SDMResolveTests` copy; one Rust double behind the `testing` feature. Not tests. |
 | `RemovalTests.swift` | 12 |  |  |  |
 | `ReorderingTests.swift` | 10 |  |  |  |
@@ -59,6 +59,7 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | (Rust-only) | 0 | `churn_tests.rs` | 1 | `byte_identity_under_randomized_churn`: 40 seeds x 8 MB under worker-count changes, pauses, drops of the task and a dropping/truncating origin (Review Focus 3). |
 | (Rust-only) | 0 | `wholesale_component_task_tests.rs` | 5 | `WholesaleComponentTask` is reached only through the engine in Swift: progress synthesis, `pause` waiting for the downloader, failure sweep, success sweep, missing output file. |
 | (Rust-only) | 0 | `engine_snapshot_tests.rs` | 3 | Pins `PartialEq` / `content_eq` for the added `aggregate`, `revision`, `figures`, `generation` fields. |
+| (Rust-only) | 0 | `engine_interruption_tests.rs` | 5 | Paths Swift's tests do not reach: a mux cut short by a stop or a shutdown is not recorded as a failure, a wholesale item that is stopped or caught by a shutdown lands stopped without charging a retry attempt, and the snapshot `generation` / `revision` counters stay put when nothing changed. |
 | `SnapshotReuseTests.swift` | 12 |  |  |  |
 | `SparseFileTests.swift` | 5 | `sparse_file_tests.rs` | 5 |  |
 | `SpeedSamplerTests.swift` | 14 | `speed_sampler_tests.rs` | 14 |  |
@@ -66,7 +67,7 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | `TestSupport.swift` | 0 |  |  |  |
 | `URLRefreshTests.swift` | 3 |  |  |  |
 | `URLSessionTransportTests.swift` | 12 | `reqwest_transport_tests.rs` | 22 | 12 ported (the `HTTPURLResponse` helpers become `HeaderMap` helpers; `defaultConfigurationNeverTouchesTheSharedCache` becomes a loopback test that a cacheable response is refetched, since reqwest has no cache to configure). +4 Review Focus 4 (redirect and final URL, body cut short, lying `Content-Length`, origin ignoring `Range`). +1 cookie replay across a redirect hop (Gate C). +5 loopback: 206/`Content-Range`/validator, error status returned not thrown, refused connection, dropping the body stream closes the connection, dropping the fetch before headers closes the connection. |
-| `UpdateSettingsTests.swift` | 1 |  |  |  |
+| `UpdateSettingsTests.swift` | 1 | `update_settings_tests.rs` | 1 |  |
 | `WholesaleDownloadTests.swift` | 8 |  |  |  |
 | `YtDlpArtifactsTests.swift` | 3 | `yt_dlp_artifacts_tests.rs` | 3 |  |
 | **Total SDMEngineTests** | **256** |  |  |  |

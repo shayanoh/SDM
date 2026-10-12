@@ -3,6 +3,7 @@
 //! blanket `allow`s below keep the rest from warning there.
 #![allow(dead_code, unused_imports)]
 
+mod engine_support;
 mod fake_wholesale_downloader;
 mod loopback_server;
 mod routing_transport;
@@ -21,6 +22,10 @@ use sdm_engine::{
 use tokio::sync::Notify;
 use url::Url;
 
+pub use engine_support::{
+    Gate, GatePhase, GatedOrigin, engine_settings, example_item, make_gated_engine, new_engine,
+    package_of, running_count, snapshot_item, wait_for_progress, wait_until_async,
+};
 pub use fake_wholesale_downloader::FakeWholesaleDownloader;
 pub use loopback_server::{
     LoopbackBody, LoopbackRequest, LoopbackResponse, LoopbackServer, payload_handler,

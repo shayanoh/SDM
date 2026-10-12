@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use sdm_core::WholesaleError;
 
-use crate::download_engine::EngineError;
 use crate::download_task::DownloadError;
+use crate::engine::EngineError;
 use crate::http_transport::TransportError;
 use crate::sparse_file::SparseFileError;
 

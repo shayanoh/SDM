@@ -1,0 +1,272 @@
+//! Building the engine snapshot the UI consumes.
+
+use std::collections::{HashMap, HashSet};
+
+use sdm_core::{AppTiming, ByteRange, ItemState, Priority, RangeSet};
+use uuid::Uuid;
+
+use super::DownloadEngine;
+use super::state::EngineState;
+use crate::engine_snapshot::{EngineSnapshot, ItemSnapshot, PackageSnapshot};
+use crate::snapshot_aggregates::average_recent_speed;
+use crate::speed_sampler::SpeedSampler;
+
+/// A package's items, snapshotted, before its aggregate (which needs the
+/// whole engine's recent speed) can be computed.
+struct PackageItems {
+    id: Uuid,
+    name: String,
+    priority: Priority,
+    items: Vec<ItemSnapshot>,
+}
+
+impl DownloadEngine {
+    pub async fn snapshot(&self) -> EngineSnapshot {
+        let max_attempts = self.inner.retry_policy.max_attempts;
+        let mut guard = self.inner.lock();
+        let state = &mut *guard;
+
+        // With no runner there is no live task state to ask, so the result is
+        // a function of the engine's own stored properties — and none of
+        // those has been written since the last build.
+        if state.runners().is_empty()
+            && let Some(last) = &state.last_snapshot
+            && state.last_snapshot_generation == state.snapshot_generation()
+        {
+            return last.clone();
+        }
+        // Read before the build: the build below is one lock scope, so nothing
+        // can bump the counter during it, but the cached build must be tagged
+        // with the generation its inputs were read at.
+        let built_at_generation = state.snapshot_generation();
+
+        let mut built_packages: Vec<PackageItems> = Vec::new();
+        for package in state.packages() {
+            let items = package
+                .items
+                .iter()
+                .map(|item| item_snapshot(state, item, max_attempts))
+                .collect();
+            built_packages.push(PackageItems {
+                id: package.id,
+                name: package.name.clone(),
+                priority: package.priority,
+                items,
+            });
+        }
+
+        // Spec §5.4: the global figure is the sum of the package figures,
+        // which are sums of the item figures, so the three can never
+        // disagree. The global sampler supplies only the graph history.
+        let global_bytes_per_second = built_packages.iter().fold(0.0, |sum, package| {
+            sum + package
+                .items
+                .iter()
+                .fold(0.0, |sum, item| sum + item.bytes_per_second)
+        });
+        let global_history = state.global_sampler().history().to_vec();
+        let global_recent_speed = average_recent_speed(&global_history, global_bytes_per_second);
+
+        let mut package_snapshots: Vec<PackageSnapshot> = Vec::new();
+        let mut refreshed_cache: HashMap<Uuid, PackageSnapshot> = HashMap::new();
+        for package in built_packages {
+            let cached_revision = state
+                .package_snapshot_cache
+                .get(&package.id)
+                .map(|cached| cached.revision);
+            let candidate = PackageSnapshot::new(
+                package.id,
+                package.name,
+                package.priority,
+                package.items,
+                global_recent_speed,
+                cached_revision.unwrap_or(0),
+            );
+            // Hand back the previous value when nothing in it changed, so its
+            // revision is the same as last time. Checked by comparing the
+            // freshly built value against the cached one — never by tracking
+            // what was mutated — so it cannot go stale. `content_eq`, not
+            // `==`: `PartialEq` ignores `aggregate`, and an ETA that moved
+            // while the items stayed equal still has to reach the UI.
+            let snapshot = match state.package_snapshot_cache.get(&candidate.id) {
+                Some(cached) if cached.content_eq(&candidate) => cached.clone(),
+                _ => {
+                    state.last_package_revision += 1;
+                    PackageSnapshot {
+                        revision: state.last_package_revision,
+                        ..candidate
+                    }
+                }
+            };
+            refreshed_cache.insert(snapshot.id, snapshot.clone());
+            package_snapshots.push(snapshot);
+        }
+        state.package_snapshot_cache = refreshed_cache;
+
+        let mut result = EngineSnapshot::new(
+            package_snapshots,
+            global_bytes_per_second,
+            global_history,
+            state.last_snapshot_serial,
+        );
+        // Same reuse one level up: an unchanged engine returns the very same
+        // snapshot value, `generation` included. Again `content_eq`, so a
+        // changed figure or aggregate counts as a change.
+        match &state.last_snapshot {
+            Some(last) if last.content_eq(&result) => result = last.clone(),
+            _ => {
+                state.last_snapshot_serial += 1;
+                result.generation = state.last_snapshot_serial;
+            }
+        }
+        state.last_snapshot = Some(result.clone());
+        state.last_snapshot_generation = built_at_generation;
+        result
+    }
+
+    /// Each requested item's full speed history — the sampler's whole
+    /// retained series, not the short tail a snapshot carries. For the one
+    /// place that draws a wide graph of a specific item: the details panel.
+    /// Items with no sampler are simply absent from the result.
+    pub async fn speed_histories(&self, item_ids: &HashSet<Uuid>) -> HashMap<Uuid, Vec<f64>> {
+        let state = self.inner.lock();
+        item_ids
+            .iter()
+            .filter_map(|id| {
+                state
+                    .samplers()
+                    .get(id)
+                    .map(|sampler| (*id, sampler.history().to_vec()))
+            })
+            .collect()
+    }
+}
+
+fn item_snapshot(
+    state: &EngineState,
+    item: &sdm_core::DownloadItem,
+    max_attempts: usize,
+) -> ItemSnapshot {
+    let mut completed = item.completed();
+    let mut total_bytes = item.total_bytes();
+    let mut active = 0;
+    let mut checkpoint_failure = state.checkpoint_failures().get(&item.id).cloned();
+    let mut wholesale_post_processing = false;
+    if let Some(runner) = state.runners().get(&item.id) {
+        // Per-component sizes: a running component's live probed size when it
+        // has one, the stored size otherwise. Bases and the item total are
+        // both derived from this one array so the concatenated progress and
+        // the total can't drift apart.
+        let mut sizes: Vec<Option<i64>> = item.components.iter().map(|c| c.total_bytes).collect();
+        let mut live_ranges: HashMap<usize, RangeSet> = HashMap::new();
+        for component_run in &runner.components {
+            let index = component_run.component_index;
+            if index >= sizes.len() {
+                continue;
+            }
+            let telemetry = component_run.telemetry();
+            if let Some(live) = telemetry.expected_total_bytes {
+                sizes[index] = Some(live);
+            }
+            live_ranges.insert(index, telemetry.completed_ranges);
+            active += telemetry.active_worker_count;
+            if let Some(failure) = telemetry.last_checkpoint_failure {
+                checkpoint_failure = Some(failure);
+            }
+            if telemetry.is_assembling {
+                wholesale_post_processing = true;
+            }
+        }
+
+        let mut union = RangeSet::new();
+        if sizes.iter().all(Option::is_some) {
+            let known: Vec<i64> = sizes.iter().map(|size| size.unwrap_or(0)).collect();
+            total_bytes = Some(known.iter().sum());
+            let mut bases = Vec::with_capacity(known.len());
+            let mut running = 0;
+            for size in &known {
+                bases.push(running);
+                running += size;
+            }
+            for (index, component) in item.components.iter().enumerate() {
+                let ranges = live_ranges.get(&index).unwrap_or(&component.completed);
+                for range in ranges.ranges() {
+                    union.insert(ByteRange::new(
+                        range.start + bases[index],
+                        range.end + bases[index],
+                    ));
+                }
+            }
+        } else {
+            // At least one size still unknown — best-effort: sum the live
+            // per-component progress without shifting (correct for a
+            // one-component item, an approximation otherwise until the probes
+            // land).
+            for (index, component) in item.components.iter().enumerate() {
+                let ranges = live_ranges.get(&index).unwrap_or(&component.completed);
+                for range in ranges.ranges() {
+                    union.insert(*range);
+                }
+            }
+        }
+        completed = union;
+    }
+
+    let default_sampler;
+    let sampler = match state.samplers().get(&item.id) {
+        Some(sampler) => sampler,
+        None => {
+            default_sampler = SpeedSampler::new();
+            &default_sampler
+        }
+    };
+    // Spec-adjacent UI need: a `Completed` item whose file has since been
+    // moved or deleted outside SDM should say so rather than silently claiming
+    // to be done. Scoped to `Completed` — any other state's file legitimately
+    // may not exist yet. Read from the periodically refreshed set, not checked
+    // here: see `refresh_missing_files()`.
+    let file_missing =
+        item.state == ItemState::Completed && state.missing_files().contains(&item.id);
+    let failed_attempts = state.failed_attempts().get(&item.id).copied();
+
+    let mut snapshot = ItemSnapshot::new(
+        item.id,
+        item.source_url.clone(),
+        item.filename(),
+        total_bytes,
+        completed,
+        item.state.clone(),
+        item.is_enabled,
+        item.is_resumable(),
+        active,
+        state.segment_count(item.id),
+        sampler.bytes_per_second(),
+        sampler.recent_history().to_vec(),
+    );
+    snapshot.checkpoint_failure = checkpoint_failure;
+    snapshot.remaining_attempts =
+        failed_attempts.map(|attempts| max_attempts.saturating_sub(attempts));
+    snapshot.failed_attempt_count = failed_attempts;
+    // Only meaningful while the item is still retrying — `failed_attempts` is
+    // the gate, and it is cleared on success, progress, and terminal failure
+    // alike.
+    snapshot.last_failure_reason = if failed_attempts.is_some() {
+        state.last_failure().get(&item.id).cloned()
+    } else {
+        None
+    };
+    snapshot.retry_hold_seconds = state
+        .retry_hold_ticks()
+        .get(&item.id)
+        .map(|ticks| ticks.div_ceil(AppTiming::TICKS_PER_SECOND));
+    snapshot.file_missing = file_missing;
+    snapshot.is_assembling = state.assembling().contains(&item.id) || wholesale_post_processing;
+    snapshot.assembly = item.assembly;
+    snapshot.part_filenames = item
+        .components
+        .iter()
+        .map(|component| component.part_filename.clone())
+        .collect();
+    snapshot.metadata = item.metadata.clone();
+    snapshot
+}
