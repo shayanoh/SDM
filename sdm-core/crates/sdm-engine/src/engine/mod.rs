@@ -68,10 +68,12 @@
 //! `refresh_resumability` does not suspend at all (the task getters are
 //! synchronous), so it shares the one lock scope with the decision.
 
+mod assemble;
 mod lifecycle;
 mod organize;
 mod persist;
 mod reconcile;
+mod refresh;
 mod run;
 mod settings;
 mod snapshot;
@@ -123,8 +125,7 @@ pub struct DownloadEngine {
 pub(crate) struct Inner {
     transport: Arc<dyn HttpTransport>,
     state_store: Arc<dyn StateStore>,
-    /// Read by the URL-refresh branch of `run_component`, which Task 18 adds.
-    #[allow(dead_code)]
+    /// Read by the URL-refresh branch of `run_component`.
     resolver: Option<Arc<dyn LinkResolver>>,
     muxer: Option<Arc<dyn Muxer>>,
     wholesale_downloader: Option<Arc<dyn WholesaleDownloader>>,
@@ -208,16 +209,6 @@ pub(crate) struct ComponentRun {
 }
 
 impl ComponentRun {
-    /// The `DownloadTask`, when this is a segmented component (the `403`
-    /// refresh path only applies there). Read by Task 18's refresh branch.
-    #[allow(dead_code)]
-    pub(crate) fn segmented_task(&self) -> Option<&Arc<DownloadTask>> {
-        match &self.worker {
-            ComponentWorker::Segmented(task) => Some(task),
-            ComponentWorker::Wholesale(_) => None,
-        }
-    }
-
     pub(crate) async fn start(&self) -> Result<PathBuf, ComponentFailure> {
         match &self.worker {
             ComponentWorker::Segmented(task) => {

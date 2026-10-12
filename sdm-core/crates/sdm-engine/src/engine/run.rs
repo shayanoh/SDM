@@ -3,29 +3,18 @@
 use std::error::Error;
 use std::sync::Arc;
 
-use sdm_core::{Assembly, DownloadItem, ItemState, MediaContainer, RangeSet, WholesaleError};
+use sdm_core::{ItemState, RangeSet, WholesaleError};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use super::assemble::Assembled;
 use super::state::EngineState;
-use super::{Cancelled, ComponentFailure, ComponentRun, Inner, RetireIntent};
+use super::{Cancelled, ComponentFailure, ComponentRun, ComponentWorker, Inner, RetireIntent};
 use crate::download_task::DownloadError;
 use crate::http_transport::TransportError;
-use crate::muxer::MuxError;
-use crate::resume_sidecar::ResumeSidecar;
 use crate::retry_policy::FailureKind;
 use crate::sparse_file::SparseFileError;
-
-/// How the assembly step ended.
-enum Assembled {
-    /// The item lands in this state.
-    Landed(ItemState),
-    /// The step was cut short by the job being cancelled — the item was
-    /// paused, preempted, or the engine is shutting down — rather than
-    /// failing, so it must not be recorded as a failure.
-    Interrupted,
-}
 
 impl Inner {
     /// Runs every component task of an item in parallel, then assembles.
@@ -45,14 +34,18 @@ impl Inner {
             return;
         };
 
-        // Fan out. Any throw is the first error we keep, and the siblings are
-        // paused. (A component failing with `UrlExpired` will be refreshed and
-        // restarted in place once Task 18 adds that branch to
-        // `run_component`.)
+        // Fan out. A component throwing `UrlExpired` is refreshed and
+        // restarted in place (`run_component`); any other throw is the first
+        // error we keep, and the siblings are paused.
         let mut group = JoinSet::new();
         for component in components {
             let inner = Arc::clone(self);
-            group.spawn(async move { inner.run_component(item_id, component).await });
+            let component_cancel = cancel.clone();
+            group.spawn(async move {
+                inner
+                    .run_component(item_id, run_id, &component_cancel, component)
+                    .await
+            });
         }
         let mut first_error: Option<ComponentFailure> = None;
         while let Some(joined) = group.join_next().await {
@@ -156,125 +149,35 @@ impl Inner {
     /// Runs one component's task to completion. Returns the failure, or
     /// `None` on success.
     ///
-    /// A wholesale component re-resolves internally on every run. A
-    /// `Cancelled` from one reaches `run_item` as the pause/stop signal via
-    /// the retire-intent branch.
+    /// A segmented component whose `start()` fails with `UrlExpired` (a
+    /// `403`/`410`) is refreshed through the injected resolver and restarted in
+    /// place against its existing bytes; see [`refresh`](super::refresh).
+    /// Anything else propagates. Parent spec §7.3.
     ///
-    /// The `403`/`410` URL-refresh branch for `Resolved` components (the
-    /// resolver, then a replacement `DownloadTask` swapped into the runner)
-    /// is Task 18's: until then a `UrlExpired` is returned as the error, which
-    /// `RetryPolicy` classifies as transient.
+    /// A wholesale component re-resolves internally on every run — the
+    /// refresh loop does not apply. A `Cancelled` from one reaches `run_item`
+    /// as the pause/stop signal via the retire-intent branch.
     async fn run_component(
         self: &Arc<Self>,
-        _item_id: Uuid,
+        item_id: Uuid,
+        run_id: Uuid,
+        cancel: &CancellationToken,
         component: ComponentRun,
     ) -> Option<ComponentFailure> {
-        component.start().await.err()
-    }
-
-    /// Assembly step after every component completed. `Assembly::None` → each
-    /// task already finalized its own file, nothing to do. `Mux` → run `ffmpeg
-    /// -c copy` over the finalized parts into the output container, then
-    /// delete the parts. Parent spec §7.2.
-    async fn assemble(&self, item_id: Uuid, cancel: &CancellationToken) -> Assembled {
-        let (item, package_name, folder) = {
-            let state = self.lock();
-            let Some((package, item)) = state.find_item(item_id) else {
-                return Assembled::Landed(ItemState::Completed);
-            };
-            (
-                item.clone(),
-                package.name.clone(),
-                state.settings().download_folder.join(&package.name),
-            )
-        };
-        if item.assembly == Assembly::Mux {
-            return self.run_mux(&item, &package_name, cancel).await;
-        }
-        // No mux, but a single component whose finalized part file is not
-        // already the output name (a progressive YouTube stream lands as
-        // `<title> [id].f18.mp4`, the item's output is `<title> [id].mp4`).
-        // Rename it so the item's destination matches what is on disk.
-        if item.components.len() == 1 && item.components[0].part_filename != item.output_filename {
-            let from = folder.join(&item.components[0].part_filename);
-            let to = folder.join(&item.output_filename);
-            if from.exists() {
-                let _ = std::fs::remove_file(&to);
-                if let Err(error) = std::fs::rename(&from, &to) {
-                    return Assembled::Landed(ItemState::Failed {
-                        reason: format!("Could not name the file: {error}"),
-                    });
-                }
+        match &component.worker {
+            ComponentWorker::Wholesale(_) => component.start().await.err(),
+            ComponentWorker::Segmented(task) => {
+                self.run_segmented_component(
+                    item_id,
+                    run_id,
+                    cancel,
+                    component.component_index,
+                    &component.destination,
+                    Arc::clone(task),
+                )
+                .await
             }
-            ResumeSidecar::remove(&ResumeSidecar::path_for(&from));
         }
-        Assembled::Landed(ItemState::Completed)
-    }
-
-    /// Runs the mux for a `Mux` item whose components are all downloaded.
-    /// Shared by `assemble()` and the retry-mux action (Task 17).
-    ///
-    /// A mux that ends because `cancel` fired — the item was paused,
-    /// preempted or the engine is shutting down — is `Interrupted`, not a
-    /// failure. (Swift's `catch` records any mux error, cancellation
-    /// included, as `.failed("mux failed: CancellationError()")`, which
-    /// overrides a user's Stop with a failure; the brief for this port rules
-    /// that out.)
-    async fn run_mux(
-        &self,
-        item: &DownloadItem,
-        package_name: &str,
-        cancel: &CancellationToken,
-    ) -> Assembled {
-        let Some(muxer) = &self.muxer else {
-            return Assembled::Landed(ItemState::Failed {
-                reason: "ffmpeg is not configured".to_string(),
-            });
-        };
-        if item.components.len() != 2 {
-            return Assembled::Landed(ItemState::Failed {
-                reason: "a muxed item needs exactly two components".to_string(),
-            });
-        }
-        let folder = self.lock().settings().download_folder.join(package_name);
-        let video_part = folder.join(&item.components[0].part_filename);
-        let audio_part = folder.join(&item.components[1].part_filename);
-        let output = folder.join(&item.output_filename);
-        let container = MediaContainer::from_file_extension(
-            &std::path::Path::new(&item.output_filename)
-                .extension()
-                .map(|extension| extension.to_string_lossy().into_owned())
-                .unwrap_or_default(),
-        );
-
-        self.lock().assembling_mut().insert(item.id);
-        let result = muxer
-            .mux(&video_part, &audio_part, &output, &container, cancel)
-            .await;
-        self.lock().assembling_mut().remove(&item.id);
-
-        if let Err(error) = result {
-            if cancel.is_cancelled() {
-                return Assembled::Interrupted;
-            }
-            let tail = match &error {
-                MuxError::FfmpegFailed { stderr_tail } => stderr_tail.clone(),
-                MuxError::FfmpegMissing => "ffmpegMissing".to_string(),
-                MuxError::TimedOut => "timedOut".to_string(),
-                MuxError::Process(inner) => format!("{inner:?}"),
-            };
-            return Assembled::Landed(ItemState::Failed {
-                reason: format!("mux failed: {tail}"),
-            });
-        }
-        let _ = std::fs::remove_file(&video_part);
-        let _ = std::fs::remove_file(&audio_part);
-        for component in &item.components {
-            ResumeSidecar::remove(&ResumeSidecar::path_for(
-                &folder.join(&component.part_filename),
-            ));
-        }
-        Assembled::Landed(ItemState::Completed)
     }
 
     /// Retires a finished runner, writing each component's final bytes back

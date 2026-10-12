@@ -31,17 +31,17 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | `DownloadTaskTests.swift` | 8 | `download_task_tests.rs` | 8 | `start()` returns `DownloadError`, which wraps the transport error (`DownloadError::Transport`). |
 | `DurableResumeTests.swift` | 8 | `durable_resume_tests.rs` | 8 | 5 sidecar-only tests plus 3 `DownloadTask` tests. |
 | `DurableStateTests.swift` | 5 |  |  |  |
-| `EngineRetryTests.swift` | 6 |  |  |  |
+| `EngineRetryTests.swift` | 6 | `engine_retry_tests.rs` | 6 |  |
 | `FakeOriginTests.swift` | 8 | `fake_origin_tests.rs` | 10 | 8 ported. +2 for the switches the Swift suite never exercises (`truncate_after_bytes`, `chunk_size`). |
 | `FakeWholesaleDownloader.swift` | 0 | `support/fake_wholesale_downloader.rs` | 0 | Test support; no tests. |
 | `HostileServerTests.swift` | 5 | `hostile_server_tests.rs` | 5 |  |
 | `HysteresisTests.swift` | 1 | `hysteresis_tests.rs` | 1 |  |
 | `LaunchStateTests.swift` | 3 |  |  |  |
-| `ManualRetryTests.swift` | 4 |  |  |  |
+| `ManualRetryTests.swift` | 4 | `manual_retry_tests.rs` | 4 |  |
 | `MetadataSnapshotTests.swift` | 1 | `metadata_snapshot_tests.rs` | 1 |  |
 | `MinSegmentSizeTests.swift` | 3 | `min_segment_size_tests.rs` | 3 |  |
-| `MultiComponentDownloadTests.swift` | 7 |  |  |  |
-| `MuxAssemblyTests.swift` | 4 |  |  |  |
+| `MultiComponentDownloadTests.swift` | 7 | `multi_component_download_tests.rs` | 7 | The 5-seed `@Test(arguments:)` churn test is one Rust test looping over the seeds. |
+| `MuxAssemblyTests.swift` | 4 | `mux_assembly_tests.rs` | 4 | `FakeMuxer` is in `support/fake_muxer.rs`. |
 | `MuxerTests.swift` | 6 | `muxer_tests.rs` | 6 | All 6 ported; `real_ffmpeg_muxes_two_tiny_streams` is `#[ignore]` (the Rust suite never runs a real `ffmpeg`; Swift ran it when one was installed), so 5 run. |
 | `NonResumableRestartTests.swift` | 2 | `non_resumable_restart_tests.rs` | 2 |  |
 | `PackageHistoryTests.swift` | 2 | `package_history_tests.rs` | 2 |  |
@@ -65,10 +65,10 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | `SpeedSamplerTests.swift` | 14 | `speed_sampler_tests.rs` | 14 |  |
 | `StateStoreTests.swift` | 14 | `state_store_tests.rs` | 16 | +2 Rust-only: `loads_state_written_by_swift` (rich, minimal, legacy flat), `wrong_format_version_loads_as_empty_and_is_left_in_place`. Literal-JSON tests use r-strings; encoder-based corruption tests substitute in `serde_json` output. |
 | `TestSupport.swift` | 0 |  |  |  |
-| `URLRefreshTests.swift` | 3 |  |  |  |
+| `URLRefreshTests.swift` | 3 | `url_refresh_tests.rs` | 5 | +2 Rust-only: stopping an item during its refresh ends the refresh (resolver honours the token) and a refresh that returns after a stop installs no new task (resolver ignores it); both leave the stale component URL in place. `FakeResolver` is in `support/fake_resolver.rs`. |
 | `URLSessionTransportTests.swift` | 12 | `reqwest_transport_tests.rs` | 22 | 12 ported (the `HTTPURLResponse` helpers become `HeaderMap` helpers; `defaultConfigurationNeverTouchesTheSharedCache` becomes a loopback test that a cacheable response is refetched, since reqwest has no cache to configure). +4 Review Focus 4 (redirect and final URL, body cut short, lying `Content-Length`, origin ignoring `Range`). +1 cookie replay across a redirect hop (Gate C). +5 loopback: 206/`Content-Range`/validator, error status returned not thrown, refused connection, dropping the body stream closes the connection, dropping the fetch before headers closes the connection. |
 | `UpdateSettingsTests.swift` | 1 | `update_settings_tests.rs` | 1 |  |
-| `WholesaleDownloadTests.swift` | 8 |  |  |  |
+| `WholesaleDownloadTests.swift` | 8 | `wholesale_download_tests.rs` | 8 | The preemption test waits for the preempted wholesale item to land `Queued` (the cancelled downloader call unwinds at once in Rust), where Swift asserts it straight after the ticks. No test asserted the swept-scratch behaviour, so nothing was changed to the wholesale-resume spec. |
 | `YtDlpArtifactsTests.swift` | 3 | `yt_dlp_artifacts_tests.rs` | 3 |  |
 | **Total SDMEngineTests** | **256** |  |  |  |
 

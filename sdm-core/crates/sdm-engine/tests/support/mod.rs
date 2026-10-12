@@ -4,6 +4,8 @@
 #![allow(dead_code, unused_imports)]
 
 mod engine_support;
+mod fake_muxer;
+mod fake_resolver;
 mod fake_wholesale_downloader;
 mod loopback_server;
 mod routing_transport;
@@ -27,6 +29,8 @@ pub use engine_support::{
     new_engine, new_engine_with_trash, package_of, running_count, snapshot_item, wait_for_progress,
     wait_until_async,
 };
+pub use fake_muxer::FakeMuxer;
+pub use fake_resolver::FakeResolver;
 pub use fake_wholesale_downloader::FakeWholesaleDownloader;
 pub use loopback_server::{
     LoopbackBody, LoopbackRequest, LoopbackResponse, LoopbackServer, payload_handler,

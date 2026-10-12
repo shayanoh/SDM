@@ -192,6 +192,33 @@ impl DownloadEngine {
         inner.reconcile().await;
     }
 
+    /// Manually retries a terminally `Failed` item. Spec §6.4 promised "a
+    /// terminal `failed` state surfaced with a reason and a manual retry
+    /// action" — this is that action.
+    ///
+    /// A no-op for any other state: `Scheduler::is_eligible` excludes
+    /// `Failed` unconditionally, so `Queued` is what makes the item reachable
+    /// again, not merely re-enabling it. Guarding on state rather than acting
+    /// unconditionally means a button wired to every row cannot accidentally
+    /// hand a healthy download a fresh retry budget it never asked for.
+    pub async fn retry(&self, item_id: Uuid) {
+        let inner = &self.inner;
+        {
+            let mut state = inner.lock();
+            if !matches!(state.item_state(item_id), Some(ItemState::Failed { .. })) {
+                return;
+            }
+            state.mutate_item(item_id, |item| {
+                item.state = ItemState::Queued;
+                item.is_enabled = true;
+            });
+            state.failed_attempts_mut().remove(&item_id);
+            state.retry_hold_ticks_mut().remove(&item_id);
+        }
+        inner.persist().await;
+        inner.reconcile().await;
+    }
+
     /// User-initiated Stop: moves a `Queued` or `Running` item to `Stopped`,
     /// stopping its runner first if it has one. Does not touch `is_enabled` —
     /// a stopped-but-enabled item is exactly what Resume All looks for. A
