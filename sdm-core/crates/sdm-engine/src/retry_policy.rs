@@ -100,6 +100,22 @@ impl RetryPolicy {
                 DownloadError::RefreshFailed { reason } => FailureKind::Permanent {
                     reason: reason.clone(),
                 },
+                // Swift lets the underlying error propagate out of `start()`
+                // and classifies that; these variants carry it.
+                DownloadError::Transport(inner) => return self.classify(inner),
+                DownloadError::File(inner) => return self.classify(inner),
+                DownloadError::Move { kind, .. } => {
+                    if *kind == io::ErrorKind::AlreadyExists {
+                        FailureKind::Permanent {
+                            reason: "A file already exists at the destination".to_string(),
+                        }
+                    } else {
+                        FailureKind::Transient
+                    }
+                }
+                DownloadError::InvalidUrl { url } => FailureKind::Permanent {
+                    reason: format!("{url} is not a valid URL"),
+                },
             };
         }
         // A destination that already exists is the one local failure that

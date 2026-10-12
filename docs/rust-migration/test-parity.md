@@ -25,16 +25,16 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 
 | Swift file | Swift tests | Rust file | Rust tests | Notes |
 |---|---|---|---|---|
-| `CheckpointTickTests.swift` | 9 |  |  |  |
+| `CheckpointTickTests.swift` | 9 | `checkpoint_tick_tests.rs` | 8 | The 8 `DownloadTask`-only tests. The ninth (`checkpointFailureReachesTheEngineSnapshot`) drives a `DownloadEngine` and moves to Task 16. |
 | `ConnectionBudgetEngineTests.swift` | 2 |  |  |  |
 | `DownloadEngineTests.swift` | 15 |  |  |  |
-| `DownloadTaskTests.swift` | 8 |  |  |  |
-| `DurableResumeTests.swift` | 8 |  |  |  |
+| `DownloadTaskTests.swift` | 8 | `download_task_tests.rs` | 8 | `start()` returns `DownloadError`, which wraps the transport error (`DownloadError::Transport`). |
+| `DurableResumeTests.swift` | 8 | `durable_resume_tests.rs` | 8 | 5 sidecar-only tests plus 3 `DownloadTask` tests. |
 | `DurableStateTests.swift` | 5 |  |  |  |
 | `EngineRetryTests.swift` | 6 |  |  |  |
 | `FakeOriginTests.swift` | 8 | `fake_origin_tests.rs` | 10 | 8 ported. +2 for the switches the Swift suite never exercises (`truncate_after_bytes`, `chunk_size`). |
 | `FakeWholesaleDownloader.swift` | 0 |  |  |  |
-| `HostileServerTests.swift` | 5 |  |  |  |
+| `HostileServerTests.swift` | 5 | `hostile_server_tests.rs` | 5 |  |
 | `HysteresisTests.swift` | 1 |  |  |  |
 | `LaunchStateTests.swift` | 3 |  |  |  |
 | `ManualRetryTests.swift` | 4 |  |  |  |
@@ -48,14 +48,15 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | `ProcessRunnerSupport.swift` | 0 | `testing.rs` (`FakeProcessRunner`, `ok`, `fail`) | 0 | Shared with the `SDMResolveTests` copy; one Rust double behind the `testing` feature. Not tests. |
 | `RemovalTests.swift` | 12 |  |  |  |
 | `ReorderingTests.swift` | 10 |  |  |  |
-| `ResegmentationTests.swift` | 6 |  |  |  |
+| `ResegmentationTests.swift` | 6 | `resegmentation_tests.rs` | 6 | The `@Test(arguments:)` seed table is one test looping over the same 6 seeds. `multipleWorkersNeverWriteOverlappingBytes` is `#[cfg(debug_assertions)]` like Swift's `#if DEBUG` `writeLog` (so it is absent from a `--release` run). The two raise tests hold their bodies at a `WorkerGate` (see the report) instead of racing the transfer. |
 | `ResumeSidecarTests.swift` | 8 | `resume_sidecar_tests.rs` | 11 | +3 Rust-only: Swift-fixture round-trip (`loads_sidecar_written_by_swift`), `resumable_ranges` boot-session rule, `current_boot_session_id` (macOS). `matches` takes `Option<&str>`. |
-| `ResumeTests.swift` | 9 |  |  |  |
+| `ResumeTests.swift` | 9 | `resume_tests.rs` | 9 | `pausingMidFlightNeverRecordsUnwrittenBytes` stalls the origin after a few chunks (`StallingOrigin`) so "mid-flight" is deterministic. |
 | `RetryPolicyTests.swift` | 10 | `retry_policy_tests.rs` | 10 | `classify` takes `&dyn Error` and downcasts, like Swift's `as?` casts. |
 | `RoutingTransport.swift` | 0 |  |  |  |
 | `SchedulerTests.swift` | 12 | `scheduler_tests.rs` | 12 | Fixture table ported entry for entry. |
 | `SmokeTests.swift` | 1 | `smoke_tests.rs` | 1 |  |
 | `SnapshotAggregatesTests.swift` | 17 | `snapshot_aggregates_tests.rs` | 17 |  |
+| (Rust-only) | 0 | `churn_tests.rs` | 1 | `byte_identity_under_randomized_churn`: 40 seeds x 8 MB under worker-count changes, pauses, drops of the task and a dropping/truncating origin (Review Focus 3). |
 | (Rust-only) | 0 | `engine_snapshot_tests.rs` | 3 | Pins `PartialEq` / `content_eq` for the added `aggregate`, `revision`, `figures`, `generation` fields. |
 | `SnapshotReuseTests.swift` | 12 |  |  |  |
 | `SparseFileTests.swift` | 5 | `sparse_file_tests.rs` | 5 |  |

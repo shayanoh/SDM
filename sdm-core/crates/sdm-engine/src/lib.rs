@@ -17,7 +17,9 @@ mod state_store;
 mod yt_dlp_artifacts;
 
 pub use download_engine::EngineError;
-pub use download_task::DownloadError;
+pub use download_task::{
+    ComponentTelemetry, DownloadError, DownloadTask, DownloadTaskConfiguration,
+};
 pub use engine_snapshot::{EngineSnapshot, ItemSnapshot, PackageSnapshot};
 pub use fake_origin::{FakeOrigin, FakeOriginBehavior};
 pub use http_transport::{BodyStream, HttpTransport, RangeRequest, RangeResponse, TransportError};

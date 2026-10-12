@@ -6,14 +6,17 @@
 mod loopback_server;
 mod routing_transport;
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::StreamExt;
-use sdm_core::ByteRange;
-use sdm_engine::{HttpTransport, RangeRequest, RangeResponse, TransportError};
+use sdm_core::{ByteRange, SourceUrl};
+use sdm_engine::{
+    DownloadTaskConfiguration, FakeOrigin, HttpTransport, RangeRequest, RangeResponse,
+    TransportError,
+};
 use tokio::sync::Notify;
 use url::Url;
 
@@ -51,6 +54,53 @@ pub fn make_scratch_directory() -> tempfile::TempDir {
 
 pub fn test_source_url() -> Url {
     Url::parse("https://example.com/file.bin").expect("a valid URL")
+}
+
+pub fn test_source() -> SourceUrl {
+    SourceUrl::new("https://example.com/file.bin").expect("a valid URL")
+}
+
+/// Swift's `DownloadTask.Configuration.test(workers:minChunk:)`.
+pub fn test_configuration(workers: usize, min_chunk: i64) -> DownloadTaskConfiguration {
+    DownloadTaskConfiguration::new(workers, min_chunk, 128, None)
+}
+
+/// Waits (yielding, never sleeping) until `condition` holds; fails the test
+/// instead of hanging if it never does.
+pub async fn wait_until(mut condition: impl FnMut() -> bool) {
+    within(async {
+        while !condition() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+}
+
+/// Swift's `SeededGenerator` (an xorshift), so a failing case is reproducible
+/// from its seed.
+pub struct SeededGenerator {
+    state: u64,
+}
+
+impl SeededGenerator {
+    pub fn new(seed: u64) -> Self {
+        Self {
+            state: seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1),
+        }
+    }
+
+    pub fn next_u64(&mut self) -> u64 {
+        self.state ^= self.state << 13;
+        self.state ^= self.state >> 7;
+        self.state ^= self.state << 17;
+        self.state
+    }
+
+    /// A value in `low..=high`.
+    pub fn in_range(&mut self, low: u64, high: u64) -> u64 {
+        assert!(low <= high);
+        low + self.next_u64() % (high - low + 1)
+    }
 }
 
 /// Reads a response body to its end.
@@ -122,6 +172,7 @@ impl WorkerGate {
 pub struct WorkerGatedOrigin {
     pub payload: Bytes,
     pub gate: WorkerGate,
+    requested: Mutex<Vec<ByteRange>>,
 }
 
 impl WorkerGatedOrigin {
@@ -129,7 +180,14 @@ impl WorkerGatedOrigin {
         Self {
             payload: payload.into(),
             gate,
+            requested: Mutex::new(Vec::new()),
         }
+    }
+
+    /// Every ranged request the origin has seen, in order (like
+    /// `FakeOrigin::requested_ranges`).
+    pub fn requested_ranges(&self) -> Vec<ByteRange> {
+        self.requested.lock().unwrap().clone()
     }
 }
 
@@ -138,6 +196,7 @@ impl HttpTransport for WorkerGatedOrigin {
     async fn fetch(&self, request: RangeRequest) -> Result<RangeResponse, TransportError> {
         let total = self.payload.len() as i64;
         let range = request.range.unwrap_or(ByteRange::new(0, total));
+        self.requested.lock().unwrap().push(range);
         let is_probe = range.start == 0 && range.end == 1;
         if is_probe {
             return Ok(RangeResponse {
@@ -166,5 +225,36 @@ impl HttpTransport for WorkerGatedOrigin {
             resolved_url: request.url,
             body: Box::pin(body),
         })
+    }
+}
+
+/// Wraps a `FakeOrigin` so each non-probe body delivers `free_items` chunks
+/// and then stalls until `gate` opens, leaving a download deterministically
+/// part-way through: some bytes written, the rest still in flight.
+pub struct StallingOrigin {
+    pub inner: FakeOrigin,
+    pub gate: WorkerGate,
+    pub free_items: usize,
+}
+
+#[async_trait]
+impl HttpTransport for StallingOrigin {
+    async fn fetch(&self, request: RangeRequest) -> Result<RangeResponse, TransportError> {
+        let is_probe = request.range.is_some_and(|range| range.length() == 1);
+        let mut response = self.inner.fetch(request).await?;
+        if !is_probe {
+            let gate = self.gate.clone();
+            let free_items = self.free_items;
+            response.body = Box::pin(response.body.enumerate().then(move |(index, item)| {
+                let gate = gate.clone();
+                async move {
+                    if index >= free_items {
+                        gate.wait_until_open().await;
+                    }
+                    item
+                }
+            }));
+        }
+        Ok(response)
     }
 }
