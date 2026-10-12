@@ -1,0 +1,9 @@
+{
+  "id": "progOnly123",
+  "title": "Old Low-Res Clip",
+  "extractor": "youtube",
+  "duration": 45.0,
+  "formats": [
+    { "format_id": "18", "ext": "mp4", "vcodec": "avc1.42001E", "acodec": "mp4a.40.2", "height": 360, "width": 640, "tbr": 696.7, "filesize": 4200000, "protocol": "https", "url": "https://rr1---sn.googlevideo.com/prog18" }
+  ]
+}

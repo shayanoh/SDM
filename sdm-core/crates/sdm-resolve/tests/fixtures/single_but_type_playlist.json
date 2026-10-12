@@ -1,0 +1,10 @@
+{
+  "_type": "playlist",
+  "id": "showcase-1",
+  "title": "Showcase",
+  "extractor": "vimeo:showcase",
+  "entries": [
+    { "_type": "url", "id": "s1", "title": "Showcase Item 1", "url": "https://vimeo.com/111111" },
+    { "_type": "url", "id": "s2", "title": "Showcase Item 2", "url": "https://vimeo.com/222222" }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "id": "y4zz327",
+  "title": "A Tube Clip",
+  "extractor": "XNXX",
+  "formats": [
+    { "format_id": "low", "ext": "mp4", "vcodec": null, "acodec": null, "protocol": "https", "url": "https://cdn.example/video_240p.mp4?secure=x" },
+    { "format_id": "high", "ext": "mp4", "vcodec": null, "acodec": null, "protocol": "https", "url": "https://cdn.example/video_360p.mp4?secure=x" },
+    { "format_id": "hls-480p", "ext": "mp4", "vcodec": null, "acodec": null, "height": 480, "width": 854, "tbr": 763.9, "protocol": "m3u8_native", "url": "https://hls.example/480/index.m3u8" },
+    { "format_id": "hls-720p", "ext": "mp4", "vcodec": null, "acodec": null, "height": 720, "width": 1280, "tbr": 1327.1, "protocol": "m3u8_native", "url": "https://hls.example/720/index.m3u8" },
+    { "format_id": "hls-1080p", "ext": "mp4", "vcodec": null, "acodec": null, "height": 1080, "width": 1920, "tbr": 2760.7, "protocol": "m3u8_native", "url": "https://hls.example/1080/index.m3u8" }
+  ]
+}
