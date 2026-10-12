@@ -55,9 +55,18 @@ else
 fi
 CONFIG="$MODE ${TRIPLES[*]} deployment=$MACOSX_DEPLOYMENT_TARGET"
 
+# The outputs themselves must still be there: a stamp alone proves nothing
+# once someone has deleted generated sources or the XCFramework's contents.
+outputs_present() {
+  [[ -d "$GENERATED" && -d "$XCFRAMEWORK" && -f "$XCFRAMEWORK/Info.plist" ]] || return 1
+  [[ -n "$(find "$GENERATED" -name '*.swift' -type f -print -quit 2> /dev/null)" ]] || return 1
+  [[ -n "$(find "$XCFRAMEWORK" -mindepth 2 -name "$LIB_NAME" -print -quit 2> /dev/null)" ]] || return 1
+}
+
 # Skip when nothing changed since the last successful build of this configuration.
-if [[ -f "$STAMP" && "$(cat "$STAMP")" == "$CONFIG" && -d "$XCFRAMEWORK" && -d "$GENERATED" ]]; then
+if [[ -f "$STAMP" && "$(cat "$STAMP")" == "$CONFIG" ]] && outputs_present; then
   NEWER="$(find "$WORKSPACE/crates" "$WORKSPACE/Cargo.toml" "$WORKSPACE/Cargo.lock" \
+    "$WORKSPACE/rust-toolchain.toml" "${BASH_SOURCE[0]}" \
     -type f -newer "$STAMP" -print -quit 2> /dev/null || true)"
   if [[ -z "$NEWER" ]]; then
     echo "rust core up to date"
