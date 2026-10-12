@@ -113,7 +113,7 @@ impl Default for BinaryLocator {
 
 /// Swift `FileManager.isExecutableFile(atPath:)`: the path exists and the
 /// current user may execute it (`access(2)` with `X_OK`).
-fn is_executable_file(path: &Path) -> bool {
+pub(crate) fn is_executable_file(path: &Path) -> bool {
     let Ok(c_path) = CString::new(path.as_os_str().as_bytes()) else {
         return false;
     };

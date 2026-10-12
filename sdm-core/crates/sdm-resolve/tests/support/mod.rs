@@ -19,3 +19,9 @@ pub fn fixture_dump(name: &str) -> YtDlpDump {
     YtDlpDump::from_json(&fixture_data(name))
         .unwrap_or_else(|e| panic!("fixture {name}.json does not decode: {e}"))
 }
+
+/// Lowercase hex SHA-256, as `SHA2-256SUMS` lists it.
+pub fn sha256_hex(data: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(data))
+}

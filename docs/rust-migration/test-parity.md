@@ -97,17 +97,17 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 
 | Swift file | Swift tests | Rust file | Rust tests | Notes |
 |---|---|---|---|---|
-| `BinaryFetchingTests.swift` | 2 |  |  |  |
+| `BinaryFetchingTests.swift` | 2 | `binary_fetching_tests.rs` | 6 | 2 ported against `FakeBinaryFetcher`. +4 loopback tests for `ReqwestBinaryFetcher` (body and User-Agent, non-2xx, redirect, connection refused); Swift has none for `URLSessionBinaryFetcher`. |
 | `BinaryLocatorTests.swift` | 5 | `binary_locator_tests.rs` | 5 |  |
 | `CookieSourceTests.swift` | 3 | `cookie_source_tests.rs` | 3 |  |
 | `FormatSelectorTests.swift` | 16 | `format_selector_tests.rs` | 16 |  |
-| `LZFSETests.swift` | 3 |  |  |  |
-| `ManagedBinariesCadenceTests.swift` | 2 |  |  |  |
-| `ManagedBinariesInflationTests.swift` | 4 |  |  |  |
-| `ManagedBinariesTypesTests.swift` | 4 |  |  |  |
-| `ManagedBinariesUpdateTests.swift` | 7 |  |  |  |
+| `LZFSETests.swift` | 3 | `lzfse_tests.rs` | 4 | +1: `decodes_a_file_compressed_by_macos` (fixture made by `compression_tool`). |
+| `ManagedBinariesCadenceTests.swift` | 2 | `managed_binaries_cadence_tests.rs` | 2 |  |
+| `ManagedBinariesInflationTests.swift` | 4 | `managed_binaries_inflation_tests.rs` | 4 |  |
+| `ManagedBinariesTypesTests.swift` | 4 | `managed_binaries_types_tests.rs` | 6 | +2: `manifest_matches_the_swift_fixture_byte_for_byte`, `manifest_json_escapes_like_foundation`. |
+| `ManagedBinariesUpdateTests.swift` | 7 | `managed_binaries_update_tests.rs` | 7 |  |
 | `SiteRegistryTests.swift` | 4 | `site_registry_tests.rs` | 4 | The `@Test(arguments:)` table is one looping test. |
-| `Support.swift` | 0 | `testing.rs` (`FakeProcessRunner`, `ok`, `fail`) | 0 | `FakeBinaryFetcher`, `fixtureData`/`fixtureDump` and `URL.tmp` are left for the tasks that port `BinaryFetching` / `YtDlpDump`. Not tests. |
+| `Support.swift` | 0 | `testing.rs` (`FakeProcessRunner`, `ok`, `fail`) | 0 | `FakeBinaryFetcher` now in `testing.rs`; `fixture_data`/`fixture_dump` in `tests/support`; `URL.tmp` is `tempfile::tempdir`. Not tests. |
 | `SystemProcessRunnerTests.swift` | 8 | `system_process_runner_tests.rs` | 11 | 8 Swift tests ported (`cancellation_terminates_the_process` cancels a `CancellationToken`, the stand-in for task cancellation). Extra, not ported: 3 in `system_process_runner_tests.rs` (`cancellation_applies_to_run_too`, `already_cancelled_token_returns_cancelled`, `dropping_the_future_still_terminates_the_child`) and `process_runner_tests.rs` (3: default `run_streaming`, fake, signal exit code). |
 | `WholesaleProgressParserTests.swift` | 8 | `wholesale_progress_parser_tests.rs` | 8 |  |
 | `YtDlpJSONTests.swift` | 8 | `yt_dlp_json_tests.rs` | 9 | 8 ported + 1 added test pinning `JSONDecoder` tolerance (float-for-int, null, unknown keys, type mismatches). |

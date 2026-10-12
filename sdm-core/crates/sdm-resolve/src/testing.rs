@@ -1,14 +1,16 @@
 //! Test doubles for the process seam. Compiled only with the `testing`
 //! feature; dependents enable it from their `[dev-dependencies]`.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
+use url::Url;
 
-use crate::{ProcessOutput, ProcessRunError, ProcessRunner};
+use crate::{BinaryFetchError, BinaryFetching, ProcessOutput, ProcessRunError, ProcessRunner};
 
 /// Records the arguments it was called with and replays a scripted output.
 pub struct FakeProcessRunner {
@@ -98,4 +100,69 @@ pub fn fail(stderr: &str, exit_code: i32) -> Result<ProcessOutput, ProcessRunErr
 /// `fail` with Swift's default exit code of 1.
 pub fn fail_default(stderr: &str) -> Result<ProcessOutput, ProcessRunError> {
     fail(stderr, 1)
+}
+
+/// Replays canned responses keyed by absolute URL string; counts requests.
+/// An unknown URL answers `Http(404)`.
+pub struct FakeBinaryFetcher {
+    state: Mutex<FetcherState>,
+}
+
+#[derive(Default)]
+struct FetcherState {
+    responses: HashMap<String, Result<Vec<u8>, BinaryFetchError>>,
+    request_count: usize,
+    requested_urls: Vec<String>,
+}
+
+impl FakeBinaryFetcher {
+    pub fn new() -> Self {
+        FakeBinaryFetcher {
+            state: Mutex::new(FetcherState::default()),
+        }
+    }
+
+    pub fn set_response(&self, result: Result<Vec<u8>, BinaryFetchError>, url: &Url) {
+        self.state
+            .lock()
+            .unwrap()
+            .responses
+            .insert(url.as_str().to_owned(), result);
+    }
+
+    pub fn responses(&self) -> HashMap<String, Result<Vec<u8>, BinaryFetchError>> {
+        self.state.lock().unwrap().responses.clone()
+    }
+
+    pub fn set_responses(&self, responses: HashMap<String, Result<Vec<u8>, BinaryFetchError>>) {
+        self.state.lock().unwrap().responses = responses;
+    }
+
+    pub fn request_count(&self) -> usize {
+        self.state.lock().unwrap().request_count
+    }
+
+    pub fn requested_urls(&self) -> Vec<String> {
+        self.state.lock().unwrap().requested_urls.clone()
+    }
+}
+
+impl Default for FakeBinaryFetcher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl BinaryFetching for FakeBinaryFetcher {
+    async fn data(&self, url: &Url) -> Result<Vec<u8>, BinaryFetchError> {
+        let mut state = self.state.lock().unwrap();
+        state.request_count += 1;
+        state.requested_urls.push(url.as_str().to_owned());
+        state
+            .responses
+            .get(url.as_str())
+            .cloned()
+            .unwrap_or(Err(BinaryFetchError::Http(404)))
+    }
 }
