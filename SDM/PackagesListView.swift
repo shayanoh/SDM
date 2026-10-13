@@ -502,7 +502,9 @@ struct BottomPanel: View {
     private func multipleItemData(theme: Theme) -> some View {
         var speedHistory: [Double] = []
         var bytesPerSecond: Double = 0
-        var completedRangeSet = RangeSet()
+        // Every item's completed ranges, each offset by the sizes before it,
+        // merged by the core in one call after the loop.
+        var completedParts: [OffsetRangeSet] = []
         var downloadedBytes: Int64 = 0
         var totalBytes: Int64 = 0
         var sumFractionCompleted: Double = 0
@@ -514,14 +516,12 @@ struct BottomPanel: View {
             let completed = live.completed
             let bytes = live.totalBytes ?? 0
             guard bytes > 0 else { return }
-            completed.ranges.forEach({
-                completedRangeSet.insert(
-                    ByteRange(start: $0.start + totalBytes, end: $0.end + totalBytes))
-            })
+            completedParts.append(OffsetRangeSet(set: completed, offset: totalBytes))
             downloadedBytes += live.completedBytes
             totalBytes += bytes
             bytesPerSecond += live.bytesPerSecond
-            sumFractionCompleted += item.fractionCompleted
+            // The live model already holds the byte counts (`bytes > 0` here).
+            sumFractionCompleted += Double(live.completedBytes) / Double(bytes)
             activeSegments += live.activeSegments
             configuredSegments += live.configuredSegments
             let itemSpeedHistory = live.detailHistory ?? live.speedHistory
@@ -552,6 +552,7 @@ struct BottomPanel: View {
                 )
             }
         })
+        let completedRangeSet = (try? rangeSetUnion(parts: completedParts)) ?? RangeSet()
 
         Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 4) {
             GridRow {

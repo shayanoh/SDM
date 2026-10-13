@@ -112,14 +112,14 @@ final class EngineController {
         // resolver settings start at what the Swift app's closures returned
         // on first use; `applyYtDlpSettings()` re-sends them when Settings
         // changes them.
-        let config = EngineConfig(
-            stateFile: support.appendingPathComponent("state.json"),
-            settings: Self.storedSettings(downloadFolder: downloads),
-            binarySearchPaths: [ManagedBinariesController.binDirectory],
-            cookieSource: MediaSitesSettingsStore.cookieSource,
-            maxPlaylistVideos: UInt32(MediaSitesSettingsStore.maxPlaylistVideos),
-            ytDlpExtraArguments: ManagedBinariesController.ytDlpExtraArguments)
         do {
+            let config = EngineConfig(
+                stateFile: support.appendingPathComponent("state.json"),
+                settings: try Self.storedSettings(downloadFolder: downloads),
+                binarySearchPaths: [ManagedBinariesController.binDirectory],
+                cookieSource: MediaSitesSettingsStore.cookieSource,
+                maxPlaylistVideos: UInt32(MediaSitesSettingsStore.maxPlaylistVideos),
+                ytDlpExtraArguments: ManagedBinariesController.ytDlpExtraArguments)
             engine = try DownloadEngine(config: config)
         } catch {
             // The configuration is built from clamped app settings and fixed
@@ -129,8 +129,8 @@ final class EngineController {
         }
     }
 
-    private static func storedSettings(downloadFolder: URL) -> EngineSettings {
-        EngineSettings(
+    private static func storedSettings(downloadFolder: URL) throws -> EngineSettings {
+        try EngineSettings(
             maxConcurrent: EngineSettingsStore.maxConcurrent,
             segmentsPerItem: EngineSettingsStore.segmentsPerItem,
             globalMaxConnections: EngineSettingsStore.globalMaxConnections,
@@ -145,7 +145,7 @@ final class EngineController {
         applyYtDlpSettings()
         do {
             try await engine.updateSettings(
-                settings: Self.storedSettings(downloadFolder: downloadFolder))
+                settings: try Self.storedSettings(downloadFolder: downloadFolder))
         } catch {
             report("apply the new settings", error)
         }
@@ -296,8 +296,10 @@ final class EngineController {
         // *reassignment*, not on value change, so assigning it anyway would
         // re-evaluate every reader at full tick rate with nothing running.
         // The engine hands back the same snapshot, `generation` included,
-        // while nothing changed.
-        guard newSnapshot.generation != publishedGeneration else { return }
+        // while nothing changed. User actions and the heartbeat call the engine
+        // concurrently, so a slower, older snapshot can resume after a newer
+        // one; the generation only grows, so only a newer one is published.
+        if let published = publishedGeneration, newSnapshot.generation <= published { return }
         publishedGeneration = newSnapshot.generation
         // Runs last, once everything below is in its new state.
         defer { onPublish?() }

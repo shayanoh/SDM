@@ -34,9 +34,13 @@ extension RangeSetData {
 }
 
 extension QualityPreferences {
-    public static let `default` = QualityPreferences(
-        maxHeight: 1080, videoCodecs: [.av1, .vp9, .h264], containers: [.mp4, .webm],
-        audioCodecs: [.opus, .aac])
+    /// The core's default policy. There is no meaningful fallback if the
+    /// core cannot answer, so that is fatal.
+    public static let `default`: QualityPreferences = {
+        do { return try qualityPreferencesDefault() } catch {
+            fatalError("the Rust core could not provide default quality preferences: \(error)")
+        }
+    }()
 }
 
 extension EngineSnapshot {
@@ -55,22 +59,14 @@ extension FormatChoice {
 
 extension MediaContainer {
     public var fileExtension: String {
-        switch self {
-        case .mp4: "mp4"
-        case .webm: "webm"
-        case .m4a: "m4a"
-        case .other(let ext): ext
-        }
+        (try? mediaContainerFileExtension(container: self)) ?? "bin"
     }
 }
 
 extension ItemSnapshot {
     /// A `.queued` item that has already failed at least once.
-    public var isRetrying: Bool { state == .queued && failedAttemptCount != nil }
-    public var fractionCompleted: Double {
-        guard let total = totalBytes, total > 0 else { return 0 }
-        return Double(completed.totalBytes) / Double(total)
-    }
+    public var isRetrying: Bool { (try? itemSnapshotIsRetrying(item: self)) ?? false }
+    public var fractionCompleted: Double { (try? itemSnapshotFractionCompleted(item: self)) ?? 0 }
 }
 
 /// The built-in themes, sorted by name (owned by Rust).

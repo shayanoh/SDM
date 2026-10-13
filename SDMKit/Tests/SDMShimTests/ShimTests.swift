@@ -110,11 +110,46 @@ private func itemSnapshot(
     #expect(ThemeCatalog.builtInThemes().contains { $0.id == "light" })
 }
 
-@Test func recordsAreIdentifiableByTheirId() {
+/// Compiles only for an `Identifiable` type, and returns the id it reports.
+private func identity<T: Identifiable>(_ value: T) -> T.ID { value.id }
+
+@Test func recordsAreIdentifiableByTheirId() throws {
     let item = itemSnapshot()
-    #expect(item.id == item.id)
-    let ids: [UUID] = [probedLink().id, mediaRow().id]
-    #expect(ids.count == 2)
+    #expect(identity(item) == item.id)
+    let link = probedLink()
+    #expect(identity(link) == link.id)
+    let row = mediaRow()
+    #expect(identity(row) == row.id)
+
+    let downloadItem = try downloadItemForUrl(
+        url: exampleURL, filename: "a.bin", totalBytes: nil, state: .stopped)
+    #expect(identity(downloadItem) == downloadItem.id)
+    #expect(identity(downloadItem.components[0]) == downloadItem.components[0].id)
+    let package = try downloadPackageNew(name: "P", items: [downloadItem], note: nil)
+    #expect(identity(package) == package.id)
+
+    let packageSnapshot = PackageSnapshot(
+        id: UUID(), name: "p", priority: .normal, items: [item],
+        aggregate: try packageAggregateForItems(items: [item], globalRecentSpeed: 0), revision: 0)
+    #expect(identity(packageSnapshot) == packageSnapshot.id)
+    let candidate = PackageCandidate(
+        id: UUID(), name: "p", linkIds: [], isArchive: false, note: nil)
+    #expect(identity(candidate) == candidate.id)
+
+    let format = MediaFormat(
+        id: "137", kind: .videoOnly, height: 1080, width: 1920, vcodec: .h264, acodec: nil,
+        container: .mp4, filesize: 10, filesizeApprox: nil, tbr: nil, url: exampleURL,
+        delivery: .direct)
+    #expect(identity(format) == "137")
+    let option = MediaFormatOption(
+        id: "opt", label: "1080p",
+        choice: FormatChoice(
+            video: format, audio: nil, outputContainer: .mp4, estimatedBytes: nil,
+            wholesaleSelector: nil),
+        matchesPreferences: true, isWholesale: false)
+    #expect(identity(option) == "opt")
+    let theme = try #require(ThemeCatalog.builtInThemes().first)
+    #expect(identity(theme) == theme.id)
 }
 
 @Test func constructorsFillIdsAndDefaults() throws {
@@ -130,17 +165,28 @@ private func itemSnapshot(
 
 // MARK: SDMResolve
 
-@Test func cookieSourceRawValuesRoundTrip() {
-    #expect(CookieSource.allCases.count == 6)
-    for source in CookieSource.allCases {
-        #expect(CookieSource(rawValue: source.rawValue) == source)
+/// UserDefaults already holds these strings (the Swift core's `String` raw
+/// values); they must read and write unchanged.
+@Test func cookieSourceRawValuesAreTheStringsAlreadyPersisted() {
+    let expected: [(CookieSource, String)] = [
+        (.none, "none"), (.safari, "safari"), (.chrome, "chrome"), (.firefox, "firefox"),
+        (.edge, "edge"), (.brave, "brave"),
+    ]
+    #expect(CookieSource.allCases == expected.map(\.0))
+    for (source, raw) in expected {
+        #expect(source.rawValue == raw)
+        #expect(CookieSource(rawValue: raw) == source)
     }
     #expect(CookieSource(rawValue: "bogus") == nil)
+    #expect(CookieSource(rawValue: "") == nil)
 }
 
-@Test func channelRawValuesRoundTrip() {
-    #expect(YtDlpChannel(rawValue: "nightly") == .nightly)
+@Test func channelRawValuesAreTheStringsAlreadyPersisted() {
+    #expect(YtDlpChannel.allCases == [.stable, .nightly])
     #expect(YtDlpChannel.stable.rawValue == "stable")
+    #expect(YtDlpChannel.nightly.rawValue == "nightly")
+    #expect(YtDlpChannel(rawValue: "stable") == .stable)
+    #expect(YtDlpChannel(rawValue: "nightly") == .nightly)
     #expect(YtDlpChannel(rawValue: "") == nil)
 }
 
@@ -152,8 +198,8 @@ private func itemSnapshot(
 
 // MARK: SDMEngine
 
-@Test func engineSettingsConvenienceInitUsesTheSwiftDefaults() {
-    let settings = EngineSettings(
+@Test func engineSettingsConvenienceInitUsesTheCoreDefaults() throws {
+    let settings = try EngineSettings(
         maxConcurrent: 2, segmentsPerItem: 4, globalMaxConnections: 8,
         downloadFolder: URL(fileURLWithPath: "/tmp"))
     #expect(settings.maxConnectionsPerHost == 8)
@@ -161,6 +207,16 @@ private func itemSnapshot(
     #expect(settings.persistDebounceTicks == AppTiming.ticksPerSecond * 2)
     #expect(settings.fileCheckIntervalTicks == AppTiming.ticksPerSecond * 5)
     #expect(settings.minSegmentSizeBytes == 10 * 1024 * 1024)
+    // The two the app does expose replace the defaults when given.
+    let tuned = try EngineSettings(
+        maxConcurrent: 2, segmentsPerItem: 4, globalMaxConnections: 8, maxConnectionsPerHost: 3,
+        downloadFolder: URL(fileURLWithPath: "/tmp"), minSegmentSizeBytes: 5)
+    #expect(tuned.maxConnectionsPerHost == 3 && tuned.minSegmentSizeBytes == 5)
+    #expect(throws: CoreError.self) {
+        _ = try EngineSettings(
+            maxConcurrent: 0, segmentsPerItem: 1, globalMaxConnections: 1,
+            downloadFolder: URL(fileURLWithPath: "/tmp"))
+    }
 }
 
 @Test func speedHistoriesOldLabelForwards() async throws {
@@ -171,7 +227,7 @@ private func itemSnapshot(
     let engine = try DownloadEngine(
         config: EngineConfig(
             stateFile: directory.appendingPathComponent("state.json"),
-            settings: EngineSettings(
+            settings: try EngineSettings(
                 maxConcurrent: 1, segmentsPerItem: 1, globalMaxConnections: 2,
                 downloadFolder: directory),
             binarySearchPaths: [], cookieSource: .none, maxPlaylistVideos: 50,
@@ -192,7 +248,11 @@ private func itemSnapshot(
 }
 
 @Test func mediaRowAccessors() {
-    let row = mediaRow()
+    var row = mediaRow()
+    row.choice = FormatChoice(
+        video: nil, audio: nil, outputContainer: .mp4, estimatedBytes: 110, wholesaleSelector: nil)
+    #expect(row.combinedBytes == 110)
+    row.choice = nil
     #expect(row.sourceURL == row.sourceUrl)
     #expect(row.combinedBytes == nil)
     #expect(row.displayFilename == "abc")
@@ -206,14 +266,25 @@ private func itemSnapshot(
 }
 
 @Test func grabberSnapshotCountsComeFromTheCore() {
-    #expect(GrabberSnapshot.empty.onlineCount == 0 && !GrabberSnapshot.empty.isChecking)
+    #expect(GrabberSnapshot.empty.summary == .empty)
     let snapshot = GrabberSnapshot(
         links: [probedLink()], mediaRows: [mediaRow()], packages: [], checkedCount: 1,
         totalCount: 2)
-    #expect(snapshot.onlineCount == 1)
-    #expect(snapshot.offlineCount == 0 && snapshot.faultyCount == 0 && snapshot.failedCount == 0)
-    #expect(snapshot.isChecking)
-    #expect(snapshot.recheckableCount == 0)
+    let summary = snapshot.summary
+    #expect(summary.onlineCount == 1)
+    #expect(summary.offlineCount == 0 && summary.faultyCount == 0 && summary.failedCount == 0)
+    #expect(summary.isChecking)
+    #expect(summary.recheckableCount == 0)
+    // A failed probe is something to recheck, and counts as failed.
+    var failed = probedLink()
+    failed.stage = .done
+    failed.verdict = .checkFailed
+    failed.transportFailed = true
+    let withFailure = GrabberSnapshot(
+        links: [failed], mediaRows: [], packages: [], checkedCount: 1, totalCount: 1)
+    #expect(withFailure.summary.failedCount == 1)
+    #expect(withFailure.summary.recheckableCount == 1)
+    #expect(withFailure.summary.onlineCount == 0)
 }
 
 @Test func handoffBuildHoldsBackUnresolvedRows() {
@@ -225,6 +296,38 @@ private func itemSnapshot(
 @Test func urlExtractorFindsLinks() {
     #expect(URLExtractor.extractLinks(from: "see https://example.com/a.zip now").count == 1)
     #expect(URLExtractor.extractLinks(from: "nothing here").isEmpty)
+}
+
+@Test func formatMenuListsAResolvedMediaFormat() {
+    let video = MediaFormat(
+        id: "137", kind: .videoOnly, height: 1080, width: 1920, vcodec: .h264, acodec: nil,
+        container: .mp4, filesize: 1000, filesizeApprox: nil, tbr: nil, url: exampleURL,
+        delivery: .direct)
+    let audio = MediaFormat(
+        id: "140", kind: .audioOnly, height: nil, width: nil, vcodec: nil, acodec: .aac,
+        container: .m4a, filesize: 100, filesizeApprox: nil, tbr: nil, url: exampleURL,
+        delivery: .direct)
+    let media = ResolvedMedia(
+        extractor: "youtube", videoId: "abc", title: "t", durationSeconds: nil,
+        formats: [video, audio], sourceUrl: nil)
+    let options = MediaFormatMenu.options(for: media, preferences: .default)
+    #expect(!options.isEmpty)
+    #expect(options.contains { $0.choice.video?.id == "137" })
+}
+
+@Test func rangeSetUnionShiftsAndMergesInOneCall() throws {
+    let merged = try rangeSetUnion(parts: [
+        OffsetRangeSet(set: RangeSet(ranges: [ByteRange(start: 0, end: 100)]), offset: 0),
+        OffsetRangeSet(
+            set: RangeSet(ranges: [ByteRange(start: 0, end: 50), ByteRange(start: 80, end: 100)]),
+            offset: 100),
+    ])
+    #expect(merged.ranges == [ByteRange(start: 0, end: 150), ByteRange(start: 180, end: 200)])
+}
+
+@Test func priorityRawValuesArePinned() {
+    #expect(
+        [Priority.lowest, .low, .normal, .high, .highest].map(\.rawValue) == [0, 1, 2, 3, 4])
 }
 
 @Test func formatMenuForAnUnformattedMediaIsEmpty() {

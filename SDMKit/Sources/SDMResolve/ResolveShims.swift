@@ -4,42 +4,25 @@ import Foundation
 // carry no raw values.
 
 extension CookieSource: CaseIterable, RawRepresentable {
-    public static let allCases: [CookieSource] = [.none, .safari, .chrome, .firefox, .edge, .brave]
+    public static let allCases: [CookieSource] = (try? cookieSourceAll()) ?? []
 
     public init?(rawValue: String) {
-        guard let match = Self.allCases.first(where: { $0.rawValue == rawValue }) else {
-            return nil
-        }
+        guard let match = try? cookieSourceFromRawValue(raw: rawValue) else { return nil }
         self = match
     }
 
-    public var rawValue: String {
-        switch self {
-        case .none: "none"
-        case .safari: "safari"
-        case .chrome: "chrome"
-        case .firefox: "firefox"
-        case .edge: "edge"
-        case .brave: "brave"
-        }
-    }
+    public var rawValue: String { (try? cookieSourceRawValue(source: self)) ?? "none" }
 }
 
-extension YtDlpChannel: RawRepresentable {
+extension YtDlpChannel: CaseIterable, RawRepresentable {
+    public static let allCases: [YtDlpChannel] = (try? ytDlpChannelAll()) ?? []
+
     public init?(rawValue: String) {
-        switch rawValue {
-        case "stable": self = .stable
-        case "nightly": self = .nightly
-        default: return nil
-        }
+        guard let match = try? ytDlpChannelFromRawValue(raw: rawValue) else { return nil }
+        self = match
     }
 
-    public var rawValue: String {
-        switch self {
-        case .stable: "stable"
-        case .nightly: "nightly"
-        }
-    }
+    public var rawValue: String { (try? ytDlpChannelRawValue(channel: self)) ?? "stable" }
 }
 
 extension VendorAsset {

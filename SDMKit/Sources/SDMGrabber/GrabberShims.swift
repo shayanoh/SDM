@@ -26,19 +26,16 @@ extension GrabberSnapshot {
     public static let empty = GrabberSnapshot(
         links: [], mediaRows: [], packages: [], checkedCount: 0, totalCount: 0)
 
-    /// The verdict counts, computed in Rust. All zero if the call fails.
-    public var summary: GrabberSummary {
-        (try? grabberSnapshotSummary(snapshot: self))
-            ?? GrabberSummary(
-                onlineCount: 0, offlineCount: 0, faultyCount: 0, failedCount: 0,
-                isChecking: false, recheckableCount: 0)
-    }
-    public var onlineCount: Int { summary.onlineCount }
-    public var offlineCount: Int { summary.offlineCount }
-    public var faultyCount: Int { summary.faultyCount }
-    public var failedCount: Int { summary.failedCount }
-    public var isChecking: Bool { summary.isChecking }
-    public var recheckableCount: Int { summary.recheckableCount }
+    /// The verdict counts, computed in Rust: one whole-snapshot call, so the
+    /// controller makes it once per snapshot rather than a view once per
+    /// count. All zero if the call fails.
+    public var summary: GrabberSummary { (try? grabberSnapshotSummary(snapshot: self)) ?? .empty }
+}
+
+extension GrabberSummary {
+    public static let empty = GrabberSummary(
+        onlineCount: 0, offlineCount: 0, faultyCount: 0, failedCount: 0, isChecking: false,
+        recheckableCount: 0)
 }
 
 /// The old namespaces, forwarding to the exported functions.

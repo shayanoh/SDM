@@ -11,6 +11,8 @@ import os.log
 @Observable
 final class GrabberController {
     private(set) var snapshot = GrabberSnapshot.empty
+    /// The verdict counts of `snapshot`, computed once when it changes.
+    private(set) var summary = GrabberSummary.empty
 
     private let session: GrabberSession
     private var autoClearTask: Task<Void, Never>?
@@ -96,7 +98,10 @@ final class GrabberController {
     private func refresh() {
         do {
             let newSnapshot = try session.snapshot()
-            if newSnapshot != snapshot { snapshot = newSnapshot }
+            if newSnapshot != snapshot {
+                snapshot = newSnapshot
+                summary = newSnapshot.summary
+            }
         } catch {
             Self.log.error("Snapshot failed: \(error.localizedDescription, privacy: .public)")
         }
@@ -153,7 +158,13 @@ final class GrabberController {
 
     func ingest(text: String) async {
         managedBinaries?.kick()
-        await editAsync("add the links") { try await session.ingestText(text: text) }
+        // Extract here, not in the session: the core keeps a link's string as
+        // its identity, and a URL that crossed through Foundation (which
+        // percent-encodes spaces and non-ASCII) must be the one it keeps, or
+        // the engine's copy of the same link would not match it when the
+        // known downloads are compared.
+        let links = URLExtractor.extractLinks(from: text)
+        await editAsync("add the links") { try await session.ingestUrls(urls: links) }
     }
 
     func ingest(urls: [URL]) async {
