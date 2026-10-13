@@ -82,23 +82,23 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 |---|---|---|---|---|
 | `FakeLinkResolver.swift` | 0 |  |  |  |
 | `FakeProbeOriginTests.swift` | 6 |  |  |  |
-| `FileSignatureTests.swift` | 8 |  |  |  |
+| `FileSignatureTests.swift` | 8 | `file_signature_tests.rs` | 8 |  |
 | `GrabberSessionOverrideTests.swift` | 6 |  |  |  |
 | `GrabberSessionTests.swift` | 9 |  |  |  |
 | `LinkProberStageTwoTests.swift` | 3 |  |  |  |
 | `LinkProberTests.swift` | 5 |  |  |  |
-| `MediaFormatMenuTests.swift` | 6 |  |  |  |
-| `MediaHandoffTests.swift` | 6 |  |  |  |
-| `MediaMetadataTests.swift` | 3 |  |  |  |
+| `MediaFormatMenuTests.swift` | 6 | `media_format_menu_tests.rs` | 6 | Byte counts use a hand-written `ByteCountFormatter` (.binary) twin; only the `~` marker and `360p` are asserted. |
+| `MediaHandoffTests.swift` | 6 | `media_handoff_tests.rs` | 6 |  |
+| `MediaMetadataTests.swift` | 3 | `media_metadata_tests.rs` | 3 |  |
 | `MediaRowRoutingTests.swift` | 12 |  |  |  |
-| `PackageClusteringTests.swift` | 10 |  |  |  |
+| `PackageClusteringTests.swift` | 10 | `package_clustering_tests.rs` | 10 |  |
 | `PackageOverrideTests.swift` | 5 |  |  |  |
 | `PlaylistExpansionTests.swift` | 8 |  |  |  |
-| `ReleaseTagsTests.swift` | 4 |  |  |  |
-| `SmokeTests.swift` | 1 |  |  |  |
-| `URLExtractorTests.swift` | 8 |  |  |  |
+| `ReleaseTagsTests.swift` | 4 | `release_tags_tests.rs` | 4 | The Swift `arguments:` test is one Rust test looping over the same six cases. |
+| `SmokeTests.swift` | 1 | `smoke_tests.rs` | 1 | Constructs a `GrabberSnapshot` instead of `#expect(true)`. |
+| `URLExtractorTests.swift` | 8 | `url_extractor_tests.rs` | 8 | `linkify` replaces `NSDataDetector`; scheme-less links are not found (see Task 20 report). |
 | `URLSessionProbeTransportTests.swift` | 6 |  |  |  |
-| `VerdictRulesTests.swift` | 9 |  |  |  |
+| `VerdictRulesTests.swift` | 9 | `verdict_rules_tests.rs` | 9 |  |
 | **Total SDMGrabberTests** | **115** |  |  |  |
 
 ## SDMResolveTests
