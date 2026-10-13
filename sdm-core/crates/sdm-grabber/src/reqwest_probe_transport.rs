@@ -139,14 +139,23 @@ impl ReqwestProbeTransport {
     }
 
     /// Header names are lowercase in a `HeaderMap`; repeated headers are
-    /// joined with `, ` and values that are not visible ASCII are skipped.
+    /// joined with `, `. A value that is not visible ASCII (a raw UTF-8 or
+    /// Latin-1 `Content-Disposition` filename) is never dropped: it decodes
+    /// as UTF-8 when valid, otherwise as Latin-1 (each byte is the code
+    /// point of the same number).
     pub fn lowercased_headers(headers: &HeaderMap) -> std::collections::HashMap<String, String> {
         let mut result = std::collections::HashMap::new();
         for name in headers.keys() {
-            let values: Vec<&str> = headers
+            let values: Vec<String> = headers
                 .get_all(name)
                 .iter()
-                .filter_map(|value| value.to_str().ok())
+                .map(|value| {
+                    let bytes = value.as_bytes();
+                    match std::str::from_utf8(bytes) {
+                        Ok(text) => text.to_owned(),
+                        Err(_) => bytes.iter().map(|byte| char::from(*byte)).collect(),
+                    }
+                })
                 .collect();
             if !values.is_empty() {
                 result.insert(name.as_str().to_lowercase(), values.join(", "));

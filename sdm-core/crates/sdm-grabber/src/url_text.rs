@@ -9,6 +9,7 @@ use sdm_core::SourceUrl;
 /// for a string the `url` crate cannot parse.
 pub(crate) fn decoded_path(url: &SourceUrl) -> String {
     match url.as_url() {
+        Some(_) if written_without_path(url) => String::new(),
         Some(parsed) => percent_decode_str(parsed.path())
             .decode_utf8_lossy()
             .into_owned(),
@@ -20,6 +21,7 @@ pub(crate) fn decoded_path(url: &SourceUrl) -> String {
 /// segment, `/` for a root path and `""` for a URL with no path at all.
 pub(crate) fn last_path_component(url: &SourceUrl) -> String {
     let path = match url.as_url() {
+        Some(_) if written_without_path(url) => return String::new(),
         Some(parsed) => parsed.path().to_owned(),
         None => return String::new(),
     };
@@ -33,6 +35,20 @@ pub(crate) fn last_path_component(url: &SourceUrl) -> String {
     }
     let last = trimmed.rsplit('/').next().unwrap_or("");
     percent_decode_str(last).decode_utf8_lossy().into_owned()
+}
+
+/// True when the text has an authority that runs straight into `?`, `#` or
+/// the end (`https://h?x=1`). The `url` crate then reports the path `/`;
+/// Foundation reports none.
+fn written_without_path(url: &SourceUrl) -> bool {
+    let text = url.as_str();
+    let Some((_, after_scheme)) = text.split_once("://") else {
+        return false;
+    };
+    match after_scheme.find(['/', '?', '#']) {
+        Some(index) => !after_scheme[index..].starts_with('/'),
+        None => false,
+    }
 }
 
 /// Swift `URL.host`: `None` when the URL has no (or an empty) host.
@@ -72,6 +88,20 @@ mod tests {
 
     /// Expected values were produced by Foundation's
     /// `URL.deletingLastPathComponent().path`.
+    #[test]
+    fn query_only_url_without_a_slash_has_no_path() {
+        // The `url` crate reports path "/" for these; Foundation has none.
+        let url = SourceUrl::new("https://h?x=1").unwrap();
+        assert_eq!(last_path_component(&url), "");
+        assert_eq!(decoded_path(&url), "");
+        assert_eq!(directory_path(&url), "");
+        let fragment = SourceUrl::new("https://h#frag").unwrap();
+        assert_eq!(last_path_component(&fragment), "");
+        // With the slash spelled out the root path stays.
+        let slash = SourceUrl::new("https://h/?x=1").unwrap();
+        assert_eq!(last_path_component(&slash), "/");
+    }
+
     #[test]
     fn directory_path_matches_foundation() {
         assert_eq!(dir("https://h/a/b/file.zip"), "/a/b");

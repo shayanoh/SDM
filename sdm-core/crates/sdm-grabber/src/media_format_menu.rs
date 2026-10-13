@@ -198,30 +198,122 @@ fn label(
     parts.join(" · ")
 }
 
-/// `ByteCountFormatter` with `.binary` count style: 1024-based steps with
-/// the usual `KB`/`MB`/`GB` unit names, whole numbers up to KB and one
-/// fraction digit (dropped when zero) above, `Zero KB` for 0.
+/// `ByteCountFormatter` with `.binary` count style (en_US conventions):
+/// 1024-based steps, `Zero KB` for 0, `1 byte` / `N bytes` below 1 KB, then
+/// KB with 0 fraction digits, MB with 1, GB and above with 2 (trailing zeros
+/// dropped), rounding half away from zero, a `,` grouping separator on the
+/// integer part. A value that rounds up to 1024 of its unit is shown in the
+/// next unit up ("1 MB" for 1048575 bytes). Measured against Foundation.
 fn byte_count_string(bytes: i64) -> String {
     if bytes == 0 {
         return "Zero KB".into();
     }
-    if bytes == 1 {
-        return "1 byte".into();
+    let sign = if bytes < 0 { "-" } else { "" };
+    let magnitude = bytes.unsigned_abs();
+    if magnitude == 1 {
+        return format!("{sign}1 byte");
     }
-    if bytes < 1024 {
-        return format!("{bytes} bytes");
+    if magnitude < 1024 {
+        return format!("{sign}{} bytes", group_thousands(magnitude));
     }
-    let units = ["KB", "MB", "GB", "TB", "PB", "EB"];
-    let mut value = bytes as f64 / 1024.0;
+    // (unit name, fraction digits)
+    let units = [
+        ("KB", 0),
+        ("MB", 1),
+        ("GB", 2),
+        ("TB", 2),
+        ("PB", 2),
+        ("EB", 2),
+    ];
+    let mut value = magnitude as f64 / 1024.0;
     let mut unit = 0;
-    while value >= 1024.0 && unit + 1 < units.len() {
-        value /= 1024.0;
-        unit += 1;
+    loop {
+        let scale = 10f64.powi(units[unit].1);
+        let rounded = (value * scale).round() / scale;
+        if rounded >= 1024.0 && unit + 1 < units.len() {
+            value /= 1024.0;
+            unit += 1;
+            continue;
+        }
+        let digits = units[unit].1 as usize;
+        let text = format!("{rounded:.digits$}");
+        let (whole, fraction) = text.split_once('.').unwrap_or((&text, ""));
+        let whole = group_thousands(whole.parse().unwrap_or(0));
+        let fraction = fraction.trim_end_matches('0');
+        let number = if fraction.is_empty() {
+            whole
+        } else {
+            format!("{whole}.{fraction}")
+        };
+        return format!("{sign}{number} {}", units[unit].0);
     }
-    if unit == 0 {
-        return format!("{} KB", value.round() as i64);
+}
+
+/// `1234567` -> `"1,234,567"`.
+fn group_thousands(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
     }
-    let text = format!("{value:.1}");
-    let text = text.strip_suffix(".0").unwrap_or(&text);
-    format!("{text} {}", units[unit])
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::byte_count_string;
+
+    /// Exact `ByteCountFormatter(countStyle: .binary)` outputs measured on
+    /// macOS with an en_US locale (decimal point ".", grouping separator ",").
+    #[test]
+    fn byte_count_string_matches_byte_count_formatter() {
+        let table: [(i64, &str); 40] = [
+            (0, "Zero KB"),
+            (1, "1 byte"),
+            (2, "2 bytes"),
+            (999, "999 bytes"),
+            (1000, "1,000 bytes"),
+            (1023, "1,023 bytes"),
+            (1024, "1 KB"),
+            (1025, "1 KB"),
+            (1536, "2 KB"),
+            (2560, "3 KB"),
+            (1_047_552, "1,023 KB"),
+            (1_048_063, "1,023 KB"),
+            (1_048_064, "1 MB"),
+            (1_048_575, "1 MB"),
+            (1_048_576, "1 MB"),
+            (1_310_720, "1.3 MB"),
+            (1_500_000, "1.4 MB"),
+            (5_452_595, "5.2 MB"),
+            (10_000_000, "9.5 MB"),
+            (123_456_789, "117.7 MB"),
+            (1_072_693_248, "1,023 MB"),
+            (1_073_293_248, "1,023.6 MB"),
+            (1_073_678_909, "1,023.9 MB"),
+            (1_048_575_999, "1,000 MB"),
+            (1_073_699_880, "1 GB"),
+            (1_073_741_823, "1 GB"),
+            (1_073_741_824, "1 GB"),
+            (1_460_000_000, "1.36 GB"),
+            (13_250_000_000, "12.34 GB"),
+            (15_000_000_000, "13.97 GB"),
+            (107_374_182_400, "100 GB"),
+            (130_000_000_000, "121.07 GB"),
+            (150_000_000_000, "139.7 GB"),
+            (250_000_000_000, "232.83 GB"),
+            (1_099_506_259_066, "1,023.99 GB"),
+            (1_099_511_627_775, "1 TB"),
+            (1_500_000_000_000, "1.36 TB"),
+            (1_125_899_906_842_624, "1 PB"),
+            (1_152_921_504_606_846_976, "1 EB"),
+            (2_689_723_269, "2.5 GB"),
+        ];
+        for (bytes, expected) in table {
+            assert_eq!(byte_count_string(bytes), expected, "{bytes} bytes");
+        }
+    }
 }

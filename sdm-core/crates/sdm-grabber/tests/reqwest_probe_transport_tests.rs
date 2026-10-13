@@ -97,6 +97,48 @@ async fn headers_are_lowercased_for_case_insensitive_lookup() {
     .await;
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_header_with_raw_utf8_bytes_is_kept_not_dropped() {
+    within(async {
+        // Servers commonly send a raw (unencoded) UTF-8 filename.
+        let server = LoopbackServer::start(|_| {
+            LoopbackResponse::new(200).header(
+                "Content-Disposition",
+                "attachment; filename=\"سلام café.zip\"",
+            )
+        })
+        .await;
+        let response = loopback_transport()
+            .send(ProbeRequest::new(source(&server, "/f"), ProbeMethod::Head))
+            .await
+            .unwrap();
+        assert_eq!(
+            response
+                .headers
+                .get("content-disposition")
+                .map(String::as_str),
+            Some("attachment; filename=\"سلام café.zip\"")
+        );
+    })
+    .await;
+}
+
+#[test]
+fn a_header_with_invalid_utf8_bytes_is_decoded_as_latin1() {
+    use reqwest::header::{CONTENT_DISPOSITION, HeaderMap, HeaderValue};
+    let mut map = HeaderMap::new();
+    // "caf\xE9" is Latin-1 "café" and not valid UTF-8.
+    map.insert(
+        CONTENT_DISPOSITION,
+        HeaderValue::from_bytes(b"attachment; filename=\"caf\xE9.zip\"").unwrap(),
+    );
+    let lowered = ReqwestProbeTransport::lowercased_headers(&map);
+    assert_eq!(
+        lowered.get("content-disposition").map(String::as_str),
+        Some("attachment; filename=\"café.zip\"")
+    );
+}
+
 /// A resolver that always fails, so a DNS failure is real reqwest behaviour
 /// without a lookup leaving the machine.
 struct FailingResolver;
@@ -132,7 +174,9 @@ async fn classify_maps_timeout_and_dns_error_codes() {
             .await
             .unwrap_err();
         assert_eq!(error, ProbeError::TimedOut);
-        // The held sockets live as long as the runtime; the test ends first.
+        // Dropping a `JoinHandle` only detaches the accept task; it keeps
+        // running (and holding its sockets) until the runtime shuts down when
+        // the test ends. Nothing here depends on it stopping sooner.
         drop(hold);
 
         // DNS: the resolver fails.

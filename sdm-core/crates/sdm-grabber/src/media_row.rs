@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use regex::Regex;
 use sdm_core::{FormatChoice, MediaContainer, ResolvedMedia, SourceUrl};
 use unicode_segmentation::UnicodeSegmentation;
@@ -108,14 +110,13 @@ impl MediaRow {
     }
 
     pub(crate) fn sanitize(raw: &str) -> String {
-        // Control characters (Unicode `Cc`, which includes tab and newline)
-        // are dropped outright, not turned into spaces.
-        let kept: String = raw
-            .chars()
-            .filter(|c| *c != '/' && !c.is_control())
-            .collect();
-        let whitespace_runs = Regex::new(r"\s+").expect("valid regex");
-        let collapsed = whitespace_runs.replace_all(&kept, " ");
+        // Control characters (Unicode `Cc`, which includes tab and newline,
+        // plus `Cf`, the invisible format characters such as the zero-width
+        // non-joiner) are dropped outright, not turned into spaces: that is
+        // what `CharacterSet.controlCharacters` holds.
+        let slashless: String = raw.chars().filter(|c| *c != '/').collect();
+        let kept = CONTROL_CHARACTERS.replace_all(&slashless, "");
+        let collapsed = WHITESPACE_RUNS.replace_all(&kept, " ");
         let collapsed = collapsed.trim_matches(|c: char| c == '\t' || is_space_separator(c));
         if collapsed.is_empty() {
             "video".into()
@@ -125,6 +126,13 @@ impl MediaRow {
     }
 }
 
+/// `CharacterSet.controlCharacters`: Unicode general categories `Cc` and `Cf`.
+static CONTROL_CHARACTERS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"[\p{Cc}\p{Cf}]").expect("valid regex"));
+
+static WHITESPACE_RUNS: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\s+").expect("valid regex"));
+
 /// Unicode general category `Zs` (what `CharacterSet.whitespaces` holds
 /// besides tab).
 fn is_space_separator(c: char) -> bool {
@@ -133,4 +141,25 @@ fn is_space_separator(c: char) -> bool {
         ' ' | '\u{00A0}' | '\u{1680}' | '\u{2000}'
             ..='\u{200A}' | '\u{202F}' | '\u{205F}' | '\u{3000}'
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MediaRow;
+
+    /// Swift's `CharacterSet.controlCharacters` is Unicode `Cc` plus `Cf`, so
+    /// it strips the zero-width non-joiner that Persian titles contain, and
+    /// the other invisible format characters.
+    #[test]
+    fn sanitize_strips_format_characters_like_swift() {
+        // "mikhaham" with a ZWNJ between the two words.
+        assert_eq!(MediaRow::sanitize("می\u{200C}خواهم"), "میخواهم");
+        assert_eq!(
+            MediaRow::sanitize("\u{FEFF}a\u{200B}b\u{200E}c\u{200F}d\u{00AD}e"),
+            "abcde"
+        );
+        assert_eq!(MediaRow::sanitize("\u{200C}\u{200D}"), "video");
+        // Still dropped: Cc (tab, newline) and the path separator.
+        assert_eq!(MediaRow::sanitize("a\tb\nc/d"), "abcd");
+    }
 }

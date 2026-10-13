@@ -157,9 +157,7 @@ impl ReqwestTransport {
     }
 
     pub fn validator(headers: &HeaderMap) -> Option<String> {
-        header_text(headers, &ETAG)
-            .or_else(|| header_text(headers, &LAST_MODIFIED))
-            .map(str::to_string)
+        header_text(headers, &ETAG).or_else(|| header_text(headers, &LAST_MODIFIED))
     }
 
     /// Prefers the total from `Content-Range` (correct for partial responses)
@@ -187,8 +185,16 @@ impl Default for ReqwestTransport {
     }
 }
 
-fn header_text<'a>(headers: &'a HeaderMap, name: &reqwest::header::HeaderName) -> Option<&'a str> {
-    headers.get(name).and_then(|value| value.to_str().ok())
+/// The header's value as text. A value that is not visible ASCII (a server
+/// sending raw UTF-8 or Latin-1) is never dropped: it decodes as UTF-8 when
+/// it is valid UTF-8, otherwise as Latin-1 (each byte is the code point of
+/// the same number).
+fn header_text(headers: &HeaderMap, name: &reqwest::header::HeaderName) -> Option<String> {
+    let bytes = headers.get(name)?.as_bytes();
+    Some(match std::str::from_utf8(bytes) {
+        Ok(text) => text.to_owned(),
+        Err(_) => bytes.iter().map(|byte| char::from(*byte)).collect(),
+    })
 }
 
 /// Wraps a reqwest failure with its whole cause chain ("error sending request

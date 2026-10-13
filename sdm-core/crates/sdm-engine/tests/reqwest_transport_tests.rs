@@ -373,6 +373,36 @@ async fn a_ranged_response_reports_206_content_range_and_the_validator() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_validator_with_raw_utf8_bytes_is_kept_not_dropped() {
+    support::within(async {
+        let server = LoopbackServer::start(|_| {
+            LoopbackResponse::ok(b"x".to_vec()).header("ETag", "\"v-é-سلام\"")
+        })
+        .await;
+        let response = loopback_transport()
+            .fetch(RangeRequest::new(server.url("/etag"), None))
+            .await
+            .unwrap();
+        assert_eq!(response.validator.as_deref(), Some("\"v-é-سلام\""));
+    })
+    .await;
+}
+
+#[test]
+fn a_validator_with_invalid_utf8_bytes_is_decoded_as_latin1() {
+    let mut map = HeaderMap::new();
+    // "\xE9" is Latin-1 "é" and not valid UTF-8.
+    map.insert(
+        HeaderName::from_static("etag"),
+        HeaderValue::from_bytes(b"\"v-\xE9\"").unwrap(),
+    );
+    assert_eq!(
+        ReqwestTransport::validator(&map).as_deref(),
+        Some("\"v-é\"")
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn an_error_status_is_returned_not_thrown() {
     support::within(async {
         // Like `URLSessionTransport`, the transport reports the status and leaves
