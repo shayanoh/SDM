@@ -273,10 +273,14 @@ final class EngineController {
         while !Task.isCancelled {
             do {
                 try await engine.tick()
-                // Asking only for a snapshot newer than the published one lets
-                // an idle engine answer without serialising the whole list.
+                // Asking only for a snapshot newer than the last one this
+                // loop saw lets an idle engine answer without serialising the
+                // whole list. It is the loop's own last snapshot, not the
+                // published one: a user action can publish a newer snapshot in
+                // between, and the notifications below must still see every
+                // transition, starting from a first snapshot to compare with.
                 let changed = try await engine.snapshotIfChanged(
-                    sinceGeneration: publishedGeneration)
+                    sinceGeneration: previousSnapshot?.generation)
                 lastLoggedTickError = nil
                 if let newSnapshot = changed {
                     notifyChanges(from: previousSnapshot, to: newSnapshot)
