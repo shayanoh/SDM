@@ -103,9 +103,11 @@ core, which has the bug in each case):
 
 Made while porting the grabber:
 
-- Link extraction uses the `linkify` crate in place of `NSDataDetector`, with
-  scheme-less links (`example.com/file.zip`) read as `http://` as Foundation
-  does. Trimming of trailing punctuation may differ in rare cases.
+- Link extraction uses the `linkify` crate in place of `NSDataDetector`.
+  **Deliberate difference from the Swift core (Shayan, 2026-10-13):** a link
+  must start with `http://` or `https://`; a scheme-less `example.com/file.zip`
+  is not picked up, so dotted words with slashes are never grabbed. Trimming of
+  trailing punctuation may differ in rare cases.
 
 ### Measurements
 

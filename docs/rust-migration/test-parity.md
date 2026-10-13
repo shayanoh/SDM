@@ -96,7 +96,7 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | `PlaylistExpansionTests.swift` | 8 |  |  |  |
 | `ReleaseTagsTests.swift` | 4 | `release_tags_tests.rs` | 4 | The Swift `arguments:` test is one Rust test looping over the same six cases. |
 | `SmokeTests.swift` | 1 | `smoke_tests.rs` | 1 | Constructs a `GrabberSnapshot` instead of `#expect(true)`. |
-| `URLExtractorTests.swift` | 8 | `url_extractor_tests.rs` | 9 | `linkify` replaces `NSDataDetector`. One Rust-only test: a link written without a scheme is read as `http://`. |
+| `URLExtractorTests.swift` | 8 | `url_extractor_tests.rs` | 9 | `linkify` replaces `NSDataDetector`. One Rust-only test: a link written without a scheme is not picked up (deliberate difference from Swift). |
 | `URLSessionProbeTransportTests.swift` | 6 | `reqwest_probe_transport_tests.rs` | 7 | The Swift tests exercise static helpers; the Rust ones drive the transport against a loopback server (HEAD/GET/Range, lowercased headers, timeout via a short idle timeout, DNS via a failing resolver, refused connection). One Rust-only test: the body cap (a GET with no range returns one byte, as in Swift) and the final URL after a redirect. |
 | `VerdictRulesTests.swift` | 9 | `verdict_rules_tests.rs` | 9 |  |
 | **Total SDMGrabberTests** | **115** |  |  |  |

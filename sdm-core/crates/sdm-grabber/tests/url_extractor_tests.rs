@@ -78,12 +78,11 @@ fn is_grabbable_rules() {
     )));
 }
 
-/// Rust-only: `NSDataDetector` reads a link written without a scheme as
-/// `http://`; the Swift suite has no case for it, so this pins it here.
+/// Rust-only, and a deliberate difference from Swift: `NSDataDetector` reads
+/// a link written without a scheme as `http://`. Here a link has to start
+/// with `http://` or `https://`, so dotted words with slashes are left alone.
 #[test]
-fn reads_a_link_written_without_a_scheme_as_http() {
-    let links =
-        UrlExtractor::extract_links("mirror: example.com/files/a.zip (v1.2.3) or sub.example.org");
-    let strings: Vec<&str> = links.iter().map(|url| url.as_str()).collect();
-    assert_eq!(strings, ["http://example.com/files/a.zip"]);
+fn ignores_links_written_without_a_scheme() {
+    let text = "mirror: example.com/files/a.zip, see Cargo.toml/lock or www.example.org/a.zip";
+    assert!(UrlExtractor::extract_links(text).is_empty());
 }
