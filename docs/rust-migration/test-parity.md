@@ -146,11 +146,17 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 
 **557** Swift tests. **663** Rust tests (Core 98, Engine 308, Grabber 126, Resolve 131), counted as `#[test]` / `#[tokio::test]` attributes per crate.
 
-## SDMRustTests (FFI skeleton, listed separately)
+## SDMRustTests and the FFI crate (listed separately)
 
-These test the Rust FFI skeleton, not the ported core, and are not part of the grand total above.
+These test the UniFFI surface (`sdm-ffi` and the generated Swift), not the ported core, and are not part of the grand total above. Every Rust test here is Rust-only: the Swift core has no FFI.
 
 | Swift file | Swift tests | Rust file | Rust tests | Notes |
 |---|---|---|---|---|
-| `SkeletonTests.swift` | 2 |  |  |  |
-| **Total SDMRustTests** | **2** |  |  |  |
+| `SkeletonTests.swift` | 3 | (Swift tests of the generated bindings) | | `coreVersion()` throws a String, an invalid argument throws `CoreError` instead of trapping, and an engine round-trips `UUID`, a percent-encoded `URL` and a `RangeSet` through `add` / `snapshot`. Replaces the two Task 1 skeleton tests. |
+| (Rust-only) | 0 | `engine_ffi_tests.rs` | 7 | Production `new` over a temp state file; every exported method once with valid arguments and once with an unknown id; invalid arguments are errors; a download completes through the wrapper; state survives shutdown + restore; the settings setters. |
+| (Rust-only) | 0 | `grabber_ffi_tests.rs` | 6 | Production `new`; every exported method (over `FakeProbeOrigin`); unknown ids; `prune_older_than` with a caller-supplied `now`; zero budget refused; provider closures read the setters' latest values. |
+| (Rust-only) | 0 | `binaries_ffi_tests.rs` | 4 | Production `new`; every exported method over the fake fetcher and process runner; status after a failed check; empty directory refused. |
+| (Rust-only) | 0 | `concurrency_ffi_tests.rs` | 5 | Review Focus 5: 16 tasks x 2,000 mixed calls while a 17th shuts the engine down at a seeded random point, under a 60 s timeout; a deliberately panicking call is an error, sync and async; a panic inside the engine (store `save`) and inside trashing leaves the engine answering; a poisoned wrapper mutex is recovered. |
+| (Rust-only) | 0 | `custom_types_ffi_tests.rs` | 7 | The custom types through the converters UniFFI generates: `SourceUrl` byte-for-byte for URLs `url::Url` would rewrite (Review Focus 2 across the boundary), refusal of unparseable strings as a throwable `CoreError`, `Uuid`, `PathBuf`, `usize`, `RangeSet` normalization. |
+| (Rust-only) | 0 | `functions_ffi_tests.rs` | 11 | The free functions: version, timing constants, speed helpers, theme catalog, contrast validation, site registry, format selector, format menu, URL extraction, media handoff, range-set helpers. |
+| **Total SDMRustTests** | **3** |  | **40** | Replaces `skeleton_tests.rs` (2). |

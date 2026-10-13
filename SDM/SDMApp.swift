@@ -124,7 +124,7 @@ struct SDMApp: App {
 
     init() {
         Logger(subsystem: "app.sdm", category: "rust-core")
-            .debug("Rust core \(coreVersion().version, privacy: .public)")
+            .debug("Rust core \((try? coreVersion()) ?? "unknown", privacy: .public)")
         let notification = NotificationManager()
         let managed = ManagedBinariesController(
             notify: { body in Task { @MainActor in notification.postInfo(body) } })

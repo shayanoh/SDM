@@ -1,3 +1,0 @@
-[bindings.swift]
-ffi_module_name = "SDMRustFFI"
-ffi_module_filename = "sdm_coreFFI"
