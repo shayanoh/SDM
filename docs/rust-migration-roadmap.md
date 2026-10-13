@@ -144,7 +144,18 @@ Settled at review gate E:
 
 Bugs found in the Swift core along the way (not fixed on `main`): the
 wholesale pause sweep (gate C), the stop-at-completion and interrupted-mux
-"already exists" failures (gate D), and the probe slot leak above.
+"already exists" failures (gate D), and the probe slot leak above. The final
+review added three more, all also in the Swift core:
+
+- A worker whose claim starts past byte 0 accepts any 2xx answer to its ranged
+  request. An origin that advertises `Accept-Ranges` but answers with `200` and
+  the whole body produces a file of the right size and the wrong content, with
+  no error. (The Rust core now refuses it; see the differences list.)
+- `..` in a server-declared filename (`Content-Disposition`) or in a package
+  name leaves the download folder, and removing or resetting that item then
+  moves what is at the escaped path to the Trash.
+- Moving a wholesale (HLS/DASH) item to another package leaves its yt-dlp
+  scratch files behind in the old folder.
 
 Settled at review gate F and after (the binding surface, the Swift adapter and
 the build):
@@ -195,6 +206,50 @@ One place for all of them; the detailed entries above say why.
 - An HTTP header value is decoded as UTF-8 when it is valid UTF-8, otherwise as
   Latin-1 (gate E).
 - Grabber calls finish their work even if the caller goes away (gate E).
+- A filename, a part filename or a package name is reduced to a single safe
+  path component (text after the last `/`; empty, `.` and `..` become
+  `download`) wherever it enters and wherever it is joined onto a folder, so a
+  link, a server header or a renamed package cannot place a file outside the
+  download folder. The last path component of a URL is taken from the decoded
+  path, as Foundation does, so `%2F` in a URL no longer yields a name with
+  separators. Ordinary names are unchanged. The Swift core reduces none of
+  this (final review, FR-1).
+- A worker whose claim starts past byte 0 requires `206`. A `200` there fails
+  the attempt before any byte is written (error "the server advertised byte
+  ranges but answered a ranged request at offset N with HTTP 200 instead of
+  206"), and the retry policy treats it as transient. The Swift core writes
+  the body at the wrong offset (final review, FR-5). The Rust core does not
+  restart such a download as non-resumable; an origin that keeps doing this
+  runs out of retries and fails.
+- Stopping, removing or quitting while a download is still in its first (probe)
+  request abandons that request at once, as the Swift core does (final review,
+  FR-3; this was a regression in the port, fixed).
+- The engine has no default Trash: without `with_trash` it refuses to move
+  anything, and only the `sdm-ffi` production constructor passes the system
+  Trash, so no test can reach the real one (final review, FR-2).
+
+### Other differences a user or operator may notice
+
+- Transport (`reqwest_transport.rs`): PAC proxy scripts are not evaluated
+  (system proxy settings are read, PAC scripts are not); no HTTP/3 (h2 or
+  HTTP/1.1 by ALPN); the `User-Agent` is `SDM`, not CFNetwork's; no
+  `Accept-Encoding` is sent (the origin serves the identity encoding) and no
+  `Accept-Language` is set.
+- The failure reason shown after retries run out is the `reqwest` error chain,
+  not Foundation's localized `URLError` text.
+- While a running item's data file is being flushed to disk (about once a
+  minute per item), every engine call (stop, add, tick) waits for the flush;
+  in the Swift core other calls could interleave.
+- The link grabber's snapshot is read on the main thread four times a second
+  while its tab is open, and the whole snapshot is converted each time. Not
+  fixed (final review, FR-6); a few hundred links should cost a few
+  milliseconds per read, thousands tens of milliseconds (estimated from the
+  engine benchmark, not measured).
+- Idle and per-tick CPU through the bindings grew with the length of the list
+  because the whole snapshot crossed the boundary every tick. The heartbeat now
+  calls `snapshot_if_changed`, which returns nothing when the generation is
+  unchanged (see Measurements). While anything is running, every tick still
+  crosses in full.
 
 ### Measurements
 
@@ -204,29 +259,97 @@ MacBookPro14,3, Intel Core i7-7820HQ at 2.90 GHz, 8 logical cores, 16 GB
 memory, macOS 15.7.7; release builds, 5 runs per cell, the two cores
 alternating, medians below, measured from outside with `/usr/bin/time -l`.
 
-| Scenario | Core | Wall (s) | CPU user+sys (s) | Peak RSS (MB) |
-|---|---|---:|---:|---:|
-| transfer (8 items, 2 GiB) | Rust | 10.25 | 4.38 | 265 |
-| transfer (8 items, 2 GiB) | Swift | 11.98 | 12.93 | 563 |
-| ticks (1,000 items, 600 ticks) | Rust | 2.51 | 2.42 | 29 |
-| ticks (1,000 items, 600 ticks) | Swift | 2.74 | 2.64 | 13 |
-| ffi-snapshot (1,000 items, 600 ticks, through the bindings) | Rust | 15.10 | 15.07 | 23 |
+Commit d181a54, second full run (the first run's `transfer` spread was over
+15 percent, so the script was run twice; the first run's medians are in the
+benchmarks file and agree within the spread). `transfer` and both cores now
+tick five times a second from the wall clock.
 
-The transfer wall times varied by 30 to 40 percent between runs (spread 39.6
-percent for Rust and 29.5 percent for Swift), so the two wall-time medians are
-within noise of each other. The CPU time and the memory were stable.
+| Scenario | Core | Wall (s) | CPU user+sys (s) | Peak RSS (MB) | Ticks |
+|---|---|---:|---:|---:|---:|
+| transfer (8 items, 2 GiB) | Rust | 11.08 | 7.17 | 265 | 3 |
+| transfer (8 items, 2 GiB) | Swift | 15.47 | 11.67 | 519 | 18 |
+| ticks (1,000 items, 600 ticks) | Rust | 2.45 | 2.41 | 30 | 600 |
+| ticks (1,000 items, 600 ticks) | Swift | 2.70 | 2.65 | 13 | 600 |
+| ffi-snapshot (1,000 items, 600 ticks, through the bindings) | Rust | 15.05 | 15.02 | 23 | 600 |
+| ffi-snapshot-if-changed (same, `snapshotIfChanged`) | Rust | 1.17 | 1.18 | 23 | 600 |
+
+`transfer` does not isolate the transfer. The wall time includes building the
+256 MB payload, checking the output and deleting 2 GiB, and the tick count
+shows the wait for the items lasted only about half a second (Rust) or about
+four seconds (Swift). That duration is inferred from the tick count, not
+printed by the programs. The wall-time spread was 11.2 percent (Rust) and 26.9
+percent (Swift). The `transfer` figures also include the two fake origins (the
+Swift fake copies every chunk, the Rust fake slices a shared buffer), which
+affects peak memory and some CPU. Neither a faster nor a slower core can be
+read from this row; see `docs/rust-migration/benchmarks.md`, "What the
+`transfer` tick count and wall time mean". Earlier figures for `transfer`
+(tick as fast as the loop spins) are withdrawn.
 
 The `ffi-snapshot` figure is about 25 ms per tick plus snapshot through the
-bindings with 1,000 items. It means the whole snapshot is serialised across
-the boundary on every tick, even when nothing changed. At 5 ticks per second
-that is roughly an eighth of one core with 1,000 items in the list. A
-follow-up worth doing before judging the Rust core's UI cost is an export that
-returns nothing when the snapshot generation is unchanged. The `ffi-snapshot`
-scenario has no Swift-core counterpart and is not comparable to `ticks`.
+bindings with 1,000 items: the whole snapshot is serialised across the
+boundary on every tick, even when nothing changed. With `snapshotIfChanged`,
+as the app's heartbeat now calls it, the same 600 idle ticks take 1.17 s
+(about 2 ms per tick), 13 times less. While items are running, every tick
+still returns a changed snapshot in full. Neither `ffi-snapshot` scenario has
+a Swift-core counterpart, and they are not comparable to `ticks`.
 
 Release app sizes: the Rust-core bundle is 171 MB with a 53.8 MB universal main
 binary (53,818,256 bytes); the all-Swift app is 133 MB with a 14.8 MB universal
 main binary (14,751,824 bytes).
+
+### Final review: findings fixed and minors left as they are
+
+Fixed after the final whole-branch review: FR-1 (filenames and package names
+stay inside the download folder), FR-2 (the engine no longer defaults to the
+real Trash), FR-3 (stop, remove and quit abandon a first request), FR-5 (a
+ranged request answered with `200` fails instead of corrupting the file), FR-4
+(the transfer benchmarks tick at the app's rate and print their tick count) and
+the per-tick snapshot cost (`snapshot_if_changed`). Not fixed: FR-6 to FR-15
+(minors, listed in the review). The 22 deferred minors the reviewer judged fine
+to leave:
+
+1. A panicking component leaves the item Running with a dead runner until
+   relaunch.
+2. File and trash work under the engine mutex in `move_items`; blocking
+   `fsync`, `pwrite` and sidecar writes under a std mutex on runtime threads.
+3. Atomic-write temp files are not swept after a crash.
+4. The churn test's "kill" is a dropped future that still flushes; no crash
+   between a write and its checkpoint is simulated.
+5. No test for a mid-download 403 (stored refreshed URL, refresh cap, resume
+   after refresh).
+6. `retry_mux` has no re-entrancy guard and can outlive shutdown.
+7. A refresh interrupted by shutdown lands through `failure_state`; a sibling
+   mid-refresh is not stopped when another component fails.
+8. Moving a wholesale item to another package leaves its yt-dlp scratch files
+   behind (also listed as a Swift-core bug above).
+9. Two ported assertions accept Queued or Running where Swift pins Queued.
+10. Legacy-shape decoding leniencies in `RawItem`.
+11. The stale check in `build-rust-core.sh` ignores deleted or renamed sources.
+12. Transport differences not tested: redirect cap, `Range` across origins,
+    read timeout; `Accept-Language` was missing from the differences list
+    (now listed).
+13. `SourceUrl::new` keeps surrounding whitespace; no test that playlist entry
+    URLs keep their case.
+14. Grabber URL and filename details (host case and brackets, extension rules,
+    CJK digits, final sigma, `https://a.com` naming), apart from path handling,
+    which was FR-1.
+15. Leftover split lock scopes in the grabber session.
+16. Gate E2 minors M1 to M8 and gate F2 minors M1 to M11 (not read one by one
+    by the reviewer).
+17. `Duration` lowering traps on a negative or NaN value; `UInt32(...)` of a
+    hand-edited setting can trap in Swift.
+18. One unparseable extracted URL fails the whole `ingest(text:)` batch; a
+    Swift-side filter of `about:` URLs would fix it.
+19. Synchronous FFI calls on hot paths: `packageAggregateForItems` on each
+    structural publish, `averageRecentSpeed` and `estimatedSecondsRemaining`
+    per running row, `effectiveFilename` per link row render.
+20. Full-snapshot cost per tick while items run (idle cost is fixed by
+    `snapshot_if_changed`); per-package deltas would be the next step.
+21. `PackageSnapshot` and `EngineSnapshot` `PartialEq` ignore aggregate,
+    revision, figures and generation: a trap for a later skip-if-equal.
+22. Timing-sensitive tests: the 3 s elapsed bound in the process runner tests,
+    and `removal_tests.rs` lines 241 to 308 if the gate D fix did not gate
+    them.
 
 ### Left for Shayan
 
