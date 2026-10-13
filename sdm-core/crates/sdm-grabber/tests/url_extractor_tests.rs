@@ -77,3 +77,13 @@ fn is_grabbable_rules() {
         "https://www.youtube.com/watch?v=abc"
     )));
 }
+
+/// Rust-only: `NSDataDetector` reads a link written without a scheme as
+/// `http://`; the Swift suite has no case for it, so this pins it here.
+#[test]
+fn reads_a_link_written_without_a_scheme_as_http() {
+    let links =
+        UrlExtractor::extract_links("mirror: example.com/files/a.zip (v1.2.3) or sub.example.org");
+    let strings: Vec<&str> = links.iter().map(|url| url.as_str()).collect();
+    assert_eq!(strings, ["http://example.com/files/a.zip"]);
+}

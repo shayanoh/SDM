@@ -96,7 +96,7 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | `PlaylistExpansionTests.swift` | 8 |  |  |  |
 | `ReleaseTagsTests.swift` | 4 | `release_tags_tests.rs` | 4 | The Swift `arguments:` test is one Rust test looping over the same six cases. |
 | `SmokeTests.swift` | 1 | `smoke_tests.rs` | 1 | Constructs a `GrabberSnapshot` instead of `#expect(true)`. |
-| `URLExtractorTests.swift` | 8 | `url_extractor_tests.rs` | 8 | `linkify` replaces `NSDataDetector`; scheme-less links are not found (see Task 20 report). |
+| `URLExtractorTests.swift` | 8 | `url_extractor_tests.rs` | 9 | `linkify` replaces `NSDataDetector`. One Rust-only test: a link written without a scheme is read as `http://`. |
 | `URLSessionProbeTransportTests.swift` | 6 |  |  |  |
 | `VerdictRulesTests.swift` | 9 | `verdict_rules_tests.rs` | 9 |  |
 | **Total SDMGrabberTests** | **115** |  |  |  |

@@ -9,7 +9,8 @@ use crate::url_text;
 /// Spec §7.1: a link detector rather than a hand-written regex, so URLs
 /// embedded in prose and wrapped by ordinary line breaks are found
 /// correctly. Swift uses `NSDataDetector`; this port uses the `linkify`
-/// crate, scheme-required (see the task report for where the two differ).
+/// crate. Like `NSDataDetector`, it also finds a link written without a
+/// scheme (`example.com/file.zip`) and reads it as `http://`.
 pub enum UrlExtractor {}
 
 impl UrlExtractor {
@@ -18,11 +19,18 @@ impl UrlExtractor {
     pub fn extract_links(text: &str) -> Vec<SourceUrl> {
         let mut finder = LinkFinder::new();
         finder.kinds(&[LinkKind::Url]);
+        finder.url_must_have_scheme(false);
 
         let mut seen: HashSet<String> = HashSet::new();
         let mut result = Vec::new();
         for link in finder.links(text) {
-            let Ok(url) = SourceUrl::new(link.as_str()) else {
+            let written = link.as_str();
+            let spelled = if Self::has_scheme(written) {
+                written.to_owned()
+            } else {
+                format!("http://{written}")
+            };
+            let Ok(url) = SourceUrl::new(&spelled) else {
                 continue;
             };
             if !Self::is_grabbable(&url) {
@@ -33,6 +41,17 @@ impl UrlExtractor {
             }
         }
         result
+    }
+
+    /// Whether a detected link was written with its scheme (`https://…`), as
+    /// opposed to a bare `example.com/path`.
+    fn has_scheme(link: &str) -> bool {
+        link.split_once("://").is_some_and(|(scheme, _)| {
+            !scheme.is_empty()
+                && scheme
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+        })
     }
 
     /// Whether a URL is worth adding to the grabber: an `http`/`https` URL
