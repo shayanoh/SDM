@@ -1,6 +1,14 @@
 # Swift to Rust test parity ledger
 
-One table per Swift test target, one row per file under `legacy/SDMKitSwift/Tests/<target>/` (helpers and fixture files included, with 0 tests). Swift counts come from `grep -c '@Test'` per file. The Rust columns are filled in as each file is ported (see the global constraints).
+One table per Swift test target, one row per file under `legacy/SDMKitSwift/Tests/<target>/` (helpers and fixture files included, with 0 tests). Swift counts come from `grep -c '@Test'` per file. Rust-only rows follow each table.
+
+How the counts were taken (2026-10-13, Task 27, on commit `2eb59e1` plus the documentation edits):
+
+- Swift baseline: `grep -r '@Test' legacy/SDMKitSwift/Tests/<target>` per target gives Core 79, Engine 256, Grabber 115 and Resolve 107, 557 in all. The legacy suite was not run again for this task; it was run in Task 24 and passed.
+- Rust: `cargo test --workspace` in `sdm-core`, summing every `test result` line, gave 724 passed, 0 failed, 0 ignored. The per-crate sums are Core 98, Engine 308, Grabber 127, Resolve 131 and `sdm-ffi` 60. `sdm-bench`, `uniffi-bindgen` and every doc-test run have no tests.
+- Swift tests of the bindings and shims: `swift test` in `SDMKit` ran 37 tests, all passed (`SDMRustTests` 7, `SDMShimTests` 30).
+
+A Rust count that differs from its Swift count has its reason in the Notes column of that row.
 
 ## SDMCoreTests
 
@@ -44,7 +52,7 @@ One table per Swift test target, one row per file under `legacy/SDMKitSwift/Test
 | `MinSegmentSizeTests.swift` | 3 | `min_segment_size_tests.rs` | 3 |  |
 | `MultiComponentDownloadTests.swift` | 7 | `multi_component_download_tests.rs` | 7 | The 5-seed `@Test(arguments:)` churn test is one Rust test looping over the seeds. |
 | `MuxAssemblyTests.swift` | 4 | `mux_assembly_tests.rs` | 5 | `FakeMuxer` is in `support/fake_muxer.rs`. +1 Rust-only: `a_stop_during_the_mux_does_not_poison_the_next_start` (a stop that interrupts the mux, then a restart: the item goes straight to the mux with no new origin request instead of re-downloading part 0 and failing with "already exists"). Deliberate improvement over Swift, which has the same bug; `context_for` hands a mux item whose finalized parts are all on disk no download contexts. |
-| `MuxerTests.swift` | 6 | `muxer_tests.rs` | 6 | All 6 ported; `real_ffmpeg_muxes_two_tiny_streams` is `#[ignore]` (the Rust suite never runs a real `ffmpeg`; Swift ran it when one was installed), so 5 run. |
+| `MuxerTests.swift` | 6 | `muxer_tests.rs` | 6 | All 6 ported. `real_ffmpeg_muxes_two_tiny_streams` is gated on an `ffmpeg` at `/usr/local/bin` or `/opt/homebrew/bin`, as in Swift: with none it returns early and reports as passed (the `cargo test` run counted it as passed; whether an `ffmpeg` was present on this machine was not checked). |
 | `NonResumableRestartTests.swift` | 2 | `non_resumable_restart_tests.rs` | 2 |  |
 | `PackageHistoryTests.swift` | 2 | `package_history_tests.rs` | 2 |  |
 | `ProcessRunnerSupport.swift` | 0 | `testing.rs` (`FakeProcessRunner`, `ok`, `fail`) | 0 | Shared with the `SDMResolveTests` copy; one Rust double behind the `testing` feature. Not tests. |
@@ -94,7 +102,7 @@ One table per Swift test target, one row per file under `legacy/SDMKitSwift/Test
 | `MediaFormatMenuTests.swift` | 6 | `media_format_menu_tests.rs` | 6 | Byte counts use a hand-written `ByteCountFormatter` (.binary) twin; this file asserts only the `~` marker and `360p`. The twin's output is pinned against measured Foundation values by a unit test in `src/media_format_menu.rs` (own row below). |
 | `MediaHandoffTests.swift` | 6 | `media_handoff_tests.rs` | 6 |  |
 | `MediaMetadataTests.swift` | 3 | `media_metadata_tests.rs` | 3 |  |
-| `MediaRowRoutingTests.swift` | 12 | `media_row_routing_tests.rs` | 12 |  |
+| `MediaRowRoutingTests.swift` | 12 | `media_row_routing_tests.rs` | 13 | +1 (gate F): `a_panic_under_the_session_lock_does_not_disable_the_session`, the grabber lock recovers from poisoning. |
 | `PackageClusteringTests.swift` | 10 | `package_clustering_tests.rs` | 10 |  |
 | `PackageOverrideTests.swift` | 5 | `package_override_tests.rs` | 5 |  |
 | `PlaylistExpansionTests.swift` | 8 | `playlist_expansion_tests.rs` | 8 | The 30 ms sleeps in the Swift resolvers are gates; the cap test waits for 3 resolves in flight, yields, and asserts no fourth started. |
@@ -106,7 +114,7 @@ One table per Swift test target, one row per file under `legacy/SDMKitSwift/Test
 | (Rust-only) | 0 | `src/media_format_menu.rs` (unit tests) | 1 | `byte_count_string_matches_byte_count_formatter`: 40 values measured with `ByteCountFormatter(.binary)` on macOS (en_US). |
 | (Rust-only) | 0 | `src/media_row.rs` (unit tests) | 1 | `sanitize_strips_format_characters_like_swift` (Cc and Cf, e.g. the Persian ZWNJ). |
 | (Rust-only) | 0 | `src/url_text.rs` (unit tests) | 2 | `directory_path_matches_foundation`; `query_only_url_without_a_slash_has_no_path`. |
-| **Total SDMGrabberTests** | **115** |  | **126** | Rust column sums every row above, Rust-only rows included (122 + 4). |
+| **Total SDMGrabberTests** | **115** |  | **127** | Rust column sums every row above, Rust-only rows included (123 + 4). |
 
 ## SDMResolveTests
 
@@ -129,36 +137,52 @@ One table per Swift test target, one row per file under `legacy/SDMKitSwift/Test
 | `YtDlpResolverTests.swift` | 27 | `yt_dlp_resolver_tests.rs` | 32 | +1: `refresh_surfaces_cancellation_from_the_runner` (cancellation token seam). +3 argument-vector tests (single, playlist, refresh: complete ordered vector, upper-case host kept as given) and +1 `a_url_with_no_parsed_form_is_unsupported` (`SourceUrl` can lack a parsed form). |
 | `YtDlpSmokeTests.swift` | 1 | `yt_dlp_smoke_tests.rs` | 1 | Skips with `eprintln!` when yt-dlp is not installed. |
 | `YtDlpWholesaleDownloaderTests.swift` | 5 | `yt_dlp_wholesale_downloader_tests.rs` | 8 | +1: `runner_cancellation_and_timeout_map_to_wholesale_errors`. +2: `passes_the_complete_argument_vector_with_the_original_url`, `a_url_with_no_parsed_form_still_downloads_with_its_string`. |
-| `Fixtures/playlist_flat.json` | 0 |  |  |  |
-| `Fixtures/playlist_soundcloud.json` | 0 |  |  |  |
-| `Fixtures/single_but_type_playlist.json` | 0 |  |  |  |
-| `Fixtures/video_direct_vimeo.json` | 0 |  |  |  |
-| `Fixtures/video_hls_only.json` | 0 |  |  |  |
-| `Fixtures/video_muxed.json` | 0 |  |  |  |
-| `Fixtures/video_progressive_only.json` | 0 |  |  |  |
-| `Fixtures/video_refresh_format_gone.json` | 0 |  |  |  |
-| `Fixtures/video_refresh_ok.json` | 0 |  |  |  |
-| `Fixtures/video_tube_no_codecs.json` | 0 |  |  |  |
+| `Fixtures/playlist_flat.json` | 0 | `fixtures/playlist_flat.json` | 0 | Data file, no tests; copied unchanged into the Rust crate. |
+| `Fixtures/playlist_soundcloud.json` | 0 | `fixtures/playlist_soundcloud.json` | 0 | Data file, no tests; copied unchanged into the Rust crate. |
+| `Fixtures/single_but_type_playlist.json` | 0 | `fixtures/single_but_type_playlist.json` | 0 | Data file, no tests; copied unchanged into the Rust crate. |
+| `Fixtures/video_direct_vimeo.json` | 0 | `fixtures/video_direct_vimeo.json` | 0 | Data file, no tests; copied unchanged into the Rust crate. |
+| `Fixtures/video_hls_only.json` | 0 | `fixtures/video_hls_only.json` | 0 | Data file, no tests; copied unchanged into the Rust crate. |
+| `Fixtures/video_muxed.json` | 0 | `fixtures/video_muxed.json` | 0 | Data file, no tests; copied unchanged into the Rust crate. |
+| `Fixtures/video_progressive_only.json` | 0 | `fixtures/video_progressive_only.json` | 0 | Data file, no tests; copied unchanged into the Rust crate. |
+| `Fixtures/video_refresh_format_gone.json` | 0 | `fixtures/video_refresh_format_gone.json` | 0 | Data file, no tests; copied unchanged into the Rust crate. |
+| `Fixtures/video_refresh_ok.json` | 0 | `fixtures/video_refresh_ok.json` | 0 | Data file, no tests; copied unchanged into the Rust crate. |
+| `Fixtures/video_tube_no_codecs.json` | 0 | `fixtures/video_tube_no_codecs.json` | 0 | Data file, no tests; copied unchanged into the Rust crate. |
 | (Rust-only) | 0 | `process_runner_tests.rs` | 3 | Default `run_streaming`, the fake runner, signal exit code (also named in the `SystemProcessRunnerTests` row). |
 | **Total SDMResolveTests** | **107** |  | **131** | Rust column sums every row above, Rust-only rows included (128 + 3); the `SystemProcessRunnerTests` row's own count is its file's 12. |
 
-## Grand total (four original test targets)
+## Grand total
 
-**557** Swift tests. **663** Rust tests (Core 98, Engine 308, Grabber 126, Resolve 131), counted as `#[test]` / `#[tokio::test]` attributes per crate.
+| Crate | Swift tests | Rust tests |
+|---|---:|---:|
+| `sdm-core` (SDMCoreTests) | 79 | 98 |
+| `sdm-engine` (SDMEngineTests) | 256 | 308 |
+| `sdm-grabber` (SDMGrabberTests) | 115 | 127 |
+| `sdm-resolve` (SDMResolveTests) | 107 | 131 |
+| Ported core, subtotal | **557** | **664** |
+| `sdm-ffi` (listed below) | 0 | 60 |
+| `sdm-bench`, `uniffi-bindgen` | 0 | 0 |
+| **`cargo test --workspace`** | **557** | **724** |
 
-## SDMRustTests and the FFI crate (listed separately)
+The Rust core has 107 more tests than the Swift core has: the extra tests are listed row by row above and in the notes, and are of four kinds. They pin on-disk compatibility with files the Swift app wrote, cover the Rust-only seams (cancellation tokens, the `reqwest` transports, the removal guard, `FakeOrigin` switches the Swift suite never used), pin the deliberate differences from the Swift core, and replace a Swift-only guarantee (the actor, `NSDataDetector`, `ByteCountFormatter`) with an explicit test. Every Swift test has a Rust twin with the same name in snake_case; none was dropped. Where one `@Test(arguments:)` table became one Rust test that loops, the Rust count is lower for that row and the note says so.
 
-These test the UniFFI surface (`sdm-ffi` and the generated Swift), not the ported core, and are not part of the grand total above. Every Rust test here is Rust-only: the Swift core has no FFI.
+## SDMRustTests, SDMShimTests and the FFI crate (listed separately)
 
-| Swift file | Swift tests | Rust file | Rust tests | Notes |
-|---|---|---|---|---|
-| `SkeletonTests.swift` | 3 | (Swift tests of the generated bindings) | | `coreVersion()` throws a String, an invalid argument throws `CoreError` instead of trapping, and an engine round-trips `UUID`, a percent-encoded `URL` and a `RangeSet` through `add` / `snapshot`. Replaces the two Task 1 skeleton tests. |
-| (Rust-only) | 0 | `engine_ffi_tests.rs` | 7 | Production `new` over a temp state file; every exported method once with valid arguments and once with an unknown id; invalid arguments are errors; a download completes through the wrapper; state survives shutdown + restore; the settings setters. |
-| (Rust-only) | 0 | `grabber_ffi_tests.rs` | 6 | Production `new`; every exported method (over `FakeProbeOrigin`); unknown ids; `prune_older_than` with a caller-supplied `now`; zero budget refused; provider closures read the setters' latest values. |
-| (Rust-only) | 0 | `binaries_ffi_tests.rs` | 4 | Production `new`; every exported method over the fake fetcher and process runner; status after a failed check; empty directory refused. |
-| (Rust-only) | 0 | `concurrency_ffi_tests.rs` | 5 | Review Focus 5: 16 tasks x 2,000 mixed calls while a 17th shuts the engine down at a seeded random point, under a 60 s timeout; a deliberately panicking call is an error, sync and async; a panic inside the engine (store `save`) and inside trashing leaves the engine answering; a poisoned wrapper mutex is recovered. |
-| (Rust-only) | 0 | `custom_types_ffi_tests.rs` | 7 | The custom types through the converters UniFFI generates: `SourceUrl` byte-for-byte for URLs `url::Url` would rewrite (Review Focus 2 across the boundary), refusal of unparseable strings as a throwable `CoreError`, `Uuid`, `PathBuf`, `usize`, `RangeSet` normalization. |
-| (Rust-only) | 0 | `functions_ffi_tests.rs` | 14 | The free functions: version, timing constants, speed helpers, theme catalog, contrast validation, site registry, format selector, format menu, URL extraction, media handoff, range-set helpers; Task 24 adds the constructors (`download_item_for_url`, `download_package_new`), the grabber summary and names, and `package_aggregate_for_items`. |
-| (Rust-only) | 0 | `shared.rs` (unit) | 1 | Task 24: `Toolchain::configured` starts with the given yt-dlp settings. |
-| `ShimTests.swift` (`SDMShimTests`) | 26 | (Swift-only) | | Task 24: one test per shim addition in `SDMKit/Sources/{SDMCore,SDMResolve,SDMEngine,SDMGrabber}`. |
-| **Total SDMRustTests** | **3** |  | **44** | Replaces `skeleton_tests.rs` (2). `SDMShimTests` (26) is counted separately. |
+These test the UniFFI surface (`sdm-ffi` and the generated Swift) and the thin Swift shims, not the ported core, so they are not part of the grand totals above. The Swift core has no FFI, so every test here is new.
+
+| Swift file / Rust file | Swift tests | Rust tests | Notes |
+|---|---:|---:|---|
+| `SDMKit/Tests/SDMRustTests/SkeletonTests.swift` | 3 | | `coreVersion()` throws a String, an invalid argument throws `CoreError` instead of trapping, and an engine round-trips `UUID`, a percent-encoded `URL` and a `RangeSet` through `add` / `snapshot`. |
+| `SDMKit/Tests/SDMRustTests/UrlRoundTripTests.swift` | 4 | | Strings the core preserves come back byte for byte; Foundation's rewrites of a URL are stable, so the Swift route deduplicates; extracted links carry Foundation's form; the unusable-URL placeholder is refused on the way back in. |
+| `SDMKit/Tests/SDMShimTests/ShimTests.swift` | 30 | | One test per shim addition in `SDMKit/Sources/{SDMCore,SDMResolve,SDMEngine,SDMGrabber}`, including `perRowShimsAgreeWithTheCore`, which pins the three per-row figures computed in Swift (`isRetrying`, `fractionCompleted`, `RangeSet.totalBytes`) to the core's answers. |
+| `sdm-ffi/tests/engine_ffi_tests.rs` | | 9 | Production `new` over a temp state file; every exported method once with valid arguments and once with an unknown id; invalid arguments are errors; a download completes through the wrapper; state survives shutdown and restore; lifecycle calls change the snapshot; retry requeues a failed item; the settings setters reach the yt-dlp command line. |
+| `sdm-ffi/tests/grabber_ffi_tests.rs` | | 7 | Production `new`; every exported method (over `FakeProbeOrigin`); unknown ids; `prune_older_than` with a caller-supplied `now`; a zero budget is refused; setters change what the session does; provider closures read the setters' latest values. |
+| `sdm-ffi/tests/binaries_ffi_tests.rs` | | 5 | Production `new`; every exported method over the fake fetcher and process runner; status after a failed check; an empty directory is refused; an update notifies once and invalidates the locators. |
+| `sdm-ffi/tests/concurrency_ffi_tests.rs` | | 6 | Review Focus 5: 16 tasks x 2,000 mixed calls while a 17th shuts the engine down at a seeded random point, under a 60 s timeout; a deliberately panicking call is an error, sync and async; a panic inside the engine and inside trashing leaves the engine answering; poisoned engine and settings mutexes are recovered. |
+| `sdm-ffi/tests/custom_types_ffi_tests.rs` | | 8 | The custom types through the converters UniFFI generates: `SourceUrl` byte for byte for URLs `url::Url` would rewrite, refusal of unparseable strings and of the unusable-URL placeholder as a throwable `CoreError`, `Uuid`, `PathBuf`, `usize`, `RangeSet` normalization and refusal of inverted ranges. |
+| `sdm-ffi/tests/functions_ffi_tests.rs` | | 24 | The free functions: version, timing constants, speed helpers, theme catalog, contrast validation, site registry, format selector and menu, URL extraction, media handoff, range-set helpers, constructors, the grabber summary and names, package aggregates, item snapshot helpers, container extensions, persisted raw values of the settings enums, `Priority` raw values. |
+| `sdm-ffi/src/shared.rs` (unit) | | 1 | `Toolchain::configured` starts with the given yt-dlp settings. |
+| **Total** | **37** | **60** | `swift test` in `SDMKit`: 37 passed. `cargo test -p sdm-ffi`: 60 passed (sum of the Rust column). |
+
+## Benchmark programs (no tests)
+
+`sdm-core/crates/sdm-bench` (Rust), `legacy/SDMKitSwift/Sources/SDMBench` (Swift core) and `SDMKit/Sources/SDMFFIBench` (Rust core through the bindings) are measurement programs, not tests: they have 0 tests each and are run by `scripts/` and recorded in [benchmarks.md](benchmarks.md).
