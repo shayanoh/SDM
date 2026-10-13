@@ -1,3 +1,4 @@
+use crate::safe_join::JoinName;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -31,14 +32,14 @@ impl YtDlpArtifacts {
         entries
             .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
             .filter(|name| name != output_filename && Self::is_scratch(name, output_filename, stem))
-            .map(|name| folder.join(name))
+            .map(|name| folder.join_name(&name))
             .collect()
     }
 
     /// `scratch_files` plus `output_filename` itself.
     pub fn all_files(folder: &Path, output_filename: &str) -> Vec<PathBuf> {
         let mut files = Self::scratch_files(folder, output_filename);
-        files.push(folder.join(output_filename));
+        files.push(folder.join_name(output_filename));
         files
     }
 

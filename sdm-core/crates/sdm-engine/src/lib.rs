@@ -10,6 +10,7 @@ mod muxer;
 mod reqwest_transport;
 mod resume_sidecar;
 mod retry_policy;
+mod safe_join;
 mod scheduler;
 mod snapshot_aggregates;
 mod sparse_file;

@@ -1,5 +1,6 @@
 //! Scheduling: applies the scheduler's desired running set.
 
+use crate::safe_join::JoinName;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -425,7 +426,7 @@ fn context_for(state: &EngineState, item_id: Uuid) -> Result<Option<ItemRunConte
     let Some((package, item)) = state.find_item(item_id) else {
         return Ok(None);
     };
-    let folder = state.settings().download_folder.join(&package.name);
+    let folder = state.settings().download_folder.join_name(&package.name);
     std::fs::create_dir_all(&folder).map_err(|error| {
         EngineError::DestinationFolderUnavailable {
             path: folder.to_string_lossy().into_owned(),
@@ -453,7 +454,7 @@ fn context_for(state: &EngineState, item_id: Uuid) -> Result<Option<ItemRunConte
         contexts.push(ComponentContext {
             component_index: index,
             source_url: component.url.clone(),
-            destination: folder.join(&component.part_filename),
+            destination: folder.join_name(&component.part_filename),
             cached_completed,
             refreshable_format_id,
             origin: component.origin.clone(),
@@ -475,14 +476,14 @@ fn context_for(state: &EngineState, item_id: Uuid) -> Result<Option<ItemRunConte
     // this bug; see the parity ledger.)
     let parts_ready_to_mux = item.assembly == Assembly::Mux
         && item.components.iter().all(|component| {
-            component.is_complete() && folder.join(&component.part_filename).exists()
+            component.is_complete() && folder.join_name(&component.part_filename).exists()
         });
     if contexts.is_empty() && !parts_ready_to_mux {
         let first = &item.components[0];
         contexts.push(ComponentContext {
             component_index: 0,
             source_url: first.url.clone(),
-            destination: folder.join(&first.part_filename),
+            destination: folder.join_name(&first.part_filename),
             cached_completed: first.completed.clone(),
             refreshable_format_id: None,
             origin: first.origin.clone(),

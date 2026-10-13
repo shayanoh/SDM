@@ -131,16 +131,16 @@ impl ProbedLink {
     /// The name used for clustering and display: the server-declared name
     /// when Stage 1 captured one, otherwise the last URL path component.
     pub fn effective_filename(&self) -> String {
-        if let Some(name) = &self.suggested_filename
-            && !name.is_empty()
+        // Whatever the source, the result is one path component: it becomes a
+        // filename joined onto the download folder.
+        if let Some(name) = self
+            .suggested_filename
+            .as_deref()
+            .and_then(sdm_core::single_path_component)
         {
-            return name.clone();
+            return name;
         }
         let last = url_text::last_path_component(&self.final_url);
-        if last.is_empty() {
-            "download".into()
-        } else {
-            last
-        }
+        sdm_core::safe_path_component(&last)
     }
 }

@@ -1,6 +1,7 @@
 //! Organizing the list: reordering and moving items and packages, removing
 //! them, and resetting a download.
 
+use crate::safe_join::JoinName;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -106,9 +107,9 @@ fn is_sidecar(path: &Path) -> bool {
 /// resume sidecar. A one-component HTTP item's part filename equals its output
 /// filename, so this collapses to the old single-file set for it.
 fn item_artefact_urls(item: &DownloadItem, folder: &Path) -> Vec<PathBuf> {
-    let mut bases = vec![folder.join(&item.output_filename)];
+    let mut bases = vec![folder.join_name(&item.output_filename)];
     for component in &item.components {
-        bases.push(folder.join(&component.part_filename));
+        bases.push(folder.join_name(&component.part_filename));
     }
     let mut urls = Vec::new();
     for base in bases {
@@ -296,13 +297,13 @@ impl Inner {
         }
 
         let download_folder = state.settings().download_folder.clone();
-        let destination_folder = download_folder.join(&state.packages()[destination].name);
+        let destination_folder = download_folder.join_name(&state.packages()[destination].name);
         for (id, item) in ids.iter().zip(&moved_items) {
             let source = sources[id];
             if source.0 == destination {
                 continue;
             }
-            let source_folder = download_folder.join(&state.packages()[source.0].name);
+            let source_folder = download_folder.join_name(&state.packages()[source.0].name);
             relocate_item_files(item, &source_folder, &destination_folder);
         }
 
@@ -341,7 +342,7 @@ impl Inner {
             }
             if state.packages()[package_index].items.is_empty() {
                 empty_source_folders
-                    .push(download_folder.join(&state.packages()[package_index].name));
+                    .push(download_folder.join_name(&state.packages()[package_index].name));
                 state.packages_mut().remove(package_index);
             } else {
                 state.renumber_positions(package_index);
@@ -399,7 +400,7 @@ impl DownloadEngine {
         let inner = &self.inner;
         let moved = {
             let mut state = inner.lock();
-            let new_package = DownloadPackage::new(package_name);
+            let new_package = DownloadPackage::new(sdm_core::safe_path_component(package_name));
             let new_package_id = new_package.id;
             state.packages_mut().push(new_package);
             inner.move_items(&mut state, item_ids, new_package_id, Some(0))
@@ -486,7 +487,7 @@ impl DownloadEngine {
             };
             let found = (
                 item.clone(),
-                state.settings().download_folder.join(&package.name),
+                state.settings().download_folder.join_name(&package.name),
             );
             let guard = RemovalGuard::new(inner, &mut state, vec![item_id]);
             (found.0, found.1, guard)
@@ -543,7 +544,7 @@ impl DownloadEngine {
             };
             let found = (
                 package.clone(),
-                state.settings().download_folder.join(&package.name),
+                state.settings().download_folder.join_name(&package.name),
             );
             let ids = found.0.items.iter().map(|item| item.id).collect();
             let guard = RemovalGuard::new(inner, &mut state, ids);
@@ -602,7 +603,7 @@ impl DownloadEngine {
             };
             let found = (
                 item.clone(),
-                state.settings().download_folder.join(&package.name),
+                state.settings().download_folder.join_name(&package.name),
                 item.state.clone(),
             );
             let guard = RemovalGuard::new(inner, &mut state, vec![item_id]);

@@ -124,16 +124,19 @@ pub enum YtDlpParser {}
 /// Swift `URL.lastPathComponent`: the percent-decoded last non-empty path
 /// segment, `/` for a root path.
 fn last_path_component(url: &Url) -> String {
-    let trimmed = url.path().trim_end_matches('/');
+    // Decoded first, then split, as Foundation does (see the grabber's twin).
+    let path = percent_decode_str(url.path())
+        .decode_utf8_lossy()
+        .into_owned();
+    let trimmed = path.trim_end_matches('/');
     if trimmed.is_empty() {
-        return if url.path().is_empty() {
+        return if path.is_empty() {
             String::new()
         } else {
             "/".into()
         };
     }
-    let last = trimmed.rsplit('/').next().unwrap_or("");
-    percent_decode_str(last).decode_utf8_lossy().into_owned()
+    trimmed.rsplit('/').next().unwrap_or("").to_owned()
 }
 
 fn lower_in(ext: Option<&str>, list: &[&str]) -> bool {

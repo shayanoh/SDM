@@ -9,7 +9,8 @@ use super::{ComponentRun, ComponentWorker, DownloadEngine, EngineSettings, Retir
 use crate::speed_sampler::SpeedSampler;
 
 impl DownloadEngine {
-    pub async fn add(&self, package: DownloadPackage) {
+    pub async fn add(&self, mut package: DownloadPackage) {
+        crate::safe_join::sanitize_package_names(&mut package);
         let inner = &self.inner;
         {
             let mut state = inner.lock();
@@ -83,6 +84,7 @@ impl DownloadEngine {
 
         let mut restored = inner.state_store.load().await.packages;
         for package in &mut restored {
+            crate::safe_join::sanitize_package_names(package);
             for item in &mut package.items {
                 if matches!(item.state, ItemState::Running | ItemState::Queued) {
                     item.state = ItemState::Stopped;

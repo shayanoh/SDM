@@ -1,6 +1,7 @@
 //! Assembly: the step after every component has downloaded, and the
 //! "Retry mux" action. Parent spec §7.2 / §9.3.
 
+use crate::safe_join::JoinName;
 use sdm_core::{Assembly, DownloadItem, ItemState, MediaContainer};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -33,7 +34,7 @@ impl Inner {
             (
                 item.clone(),
                 package.name.clone(),
-                state.settings().download_folder.join(&package.name),
+                state.settings().download_folder.join_name(&package.name),
             )
         };
         if item.assembly == Assembly::Mux {
@@ -44,8 +45,8 @@ impl Inner {
         // `<title> [id].f18.mp4`, the item's output is `<title> [id].mp4`).
         // Rename it so the item's destination matches what is on disk.
         if item.components.len() == 1 && item.components[0].part_filename != item.output_filename {
-            let from = folder.join(&item.components[0].part_filename);
-            let to = folder.join(&item.output_filename);
+            let from = folder.join_name(&item.components[0].part_filename);
+            let to = folder.join_name(&item.output_filename);
             if from.exists() {
                 let _ = std::fs::remove_file(&to);
                 if let Err(error) = std::fs::rename(&from, &to) {
@@ -84,10 +85,14 @@ impl Inner {
                 reason: "a muxed item needs exactly two components".to_string(),
             });
         }
-        let folder = self.lock().settings().download_folder.join(package_name);
-        let video_part = folder.join(&item.components[0].part_filename);
-        let audio_part = folder.join(&item.components[1].part_filename);
-        let output = folder.join(&item.output_filename);
+        let folder = self
+            .lock()
+            .settings()
+            .download_folder
+            .join_name(package_name);
+        let video_part = folder.join_name(&item.components[0].part_filename);
+        let audio_part = folder.join_name(&item.components[1].part_filename);
+        let output = folder.join_name(&item.output_filename);
         let container = MediaContainer::from_file_extension(
             &std::path::Path::new(&item.output_filename)
                 .extension()
@@ -119,7 +124,7 @@ impl Inner {
         let _ = std::fs::remove_file(&audio_part);
         for component in &item.components {
             ResumeSidecar::remove(&ResumeSidecar::path_for(
-                &folder.join(&component.part_filename),
+                &folder.join_name(&component.part_filename),
             ));
         }
         Assembled::Landed(ItemState::Completed)

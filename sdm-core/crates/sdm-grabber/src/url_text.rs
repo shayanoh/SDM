@@ -20,21 +20,18 @@ pub(crate) fn decoded_path(url: &SourceUrl) -> String {
 /// Swift `URL.lastPathComponent`: the percent-decoded last non-empty path
 /// segment, `/` for a root path and `""` for a URL with no path at all.
 pub(crate) fn last_path_component(url: &SourceUrl) -> String {
-    let path = match url.as_url() {
-        Some(_) if written_without_path(url) => return String::new(),
-        Some(parsed) => parsed.path().to_owned(),
-        None => return String::new(),
-    };
+    // The last component of the *decoded* path, as Foundation does: an
+    // encoded slash (`%2F`) is a separator once decoded, so the name can never
+    // carry one.
+    let path = decoded_path(url);
+    if path.is_empty() {
+        return String::new();
+    }
     let trimmed = path.trim_end_matches('/');
     if trimmed.is_empty() {
-        return if path.is_empty() {
-            String::new()
-        } else {
-            "/".into()
-        };
+        return "/".into();
     }
-    let last = trimmed.rsplit('/').next().unwrap_or("");
-    percent_decode_str(last).decode_utf8_lossy().into_owned()
+    trimmed.rsplit('/').next().unwrap_or("").to_owned()
 }
 
 /// True when the text has an authority that runs straight into `?`, `#` or

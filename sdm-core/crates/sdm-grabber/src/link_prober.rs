@@ -122,11 +122,8 @@ impl LinkProber {
             }
             let value: String = trimmed.chars().skip("filename=".chars().count()).collect();
             let value = value.trim_matches('"');
-            return if value.is_empty() {
-                None
-            } else {
-                Some(value.to_owned())
-            };
+            // One path component only: a header must not pick the folder.
+            return sdm_core::single_path_component(value);
         }
         None
     }

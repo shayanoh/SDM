@@ -23,6 +23,7 @@
 //! Callers that would otherwise bump on every idle tick therefore check
 //! first.
 
+use crate::safe_join::JoinName;
 use std::collections::{HashMap, HashSet};
 
 use sdm_core::{AppTiming, DownloadItem, DownloadPackage, ItemState, RangeSet};
@@ -386,13 +387,13 @@ impl EngineState {
     pub(super) fn refresh_missing_files(&mut self) {
         let mut missing = HashSet::new();
         for package in &self.packages {
-            let folder = self.settings.download_folder.join(&package.name);
+            let folder = self.settings.download_folder.join_name(&package.name);
             for item in package
                 .items
                 .iter()
                 .filter(|item| item.state == ItemState::Completed)
             {
-                if !folder.join(item.filename()).exists() {
+                if !folder.join_name(item.filename()).exists() {
                     missing.insert(item.id);
                 }
             }

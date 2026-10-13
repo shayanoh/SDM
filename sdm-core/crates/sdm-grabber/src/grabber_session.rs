@@ -421,9 +421,11 @@ impl GrabberSession {
     /// new name. Spec §7.4: "rename." Identified by id — see
     /// [`GrabberSession::move_link`]'s doc comment for why.
     pub fn rename_package(&self, id: Uuid, new_name: &str) {
-        if new_name.is_empty() {
+        // The name becomes a folder under the download folder.
+        let Some(new_name) = sdm_core::single_path_component(new_name) else {
             return;
-        }
+        };
+        let new_name = new_name.as_str();
         let mut state = self.inner.state();
         let Some(package) = state.packages.iter().find(|p| p.id == id).cloned() else {
             return;
