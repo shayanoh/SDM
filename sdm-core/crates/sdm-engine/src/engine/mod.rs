@@ -378,7 +378,7 @@ impl DownloadEngine {
                 muxer,
                 wholesale_downloader,
                 retry_policy,
-                trash: Arc::new(SystemTrash),
+                trash: Arc::new(organize::RefusingTrash),
                 hysteresis_window_ticks: sdm_core::AppTiming::TICKS_PER_SECOND * 5,
                 persist_gate: tokio::sync::Semaphore::new(1),
                 state: Mutex::new(EngineState::new(settings)),
@@ -386,9 +386,10 @@ impl DownloadEngine {
         }
     }
 
-    /// Replaces where removed and reset files go (the user's Trash by
-    /// default). Tests inject a [`Trash`] that moves them into a scratch
-    /// directory instead.
+    /// Sets where removed and reset files go. Without it the engine refuses
+    /// to trash anything (it never defaults to the user's real Trash), so
+    /// only the production constructor passes [`SystemTrash`]; tests pass a
+    /// [`Trash`] that moves files into a scratch directory.
     ///
     /// # Panics
     ///

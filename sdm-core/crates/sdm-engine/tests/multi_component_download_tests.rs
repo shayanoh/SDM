@@ -14,8 +14,8 @@ use sdm_engine::{
     RangeRequest, RangeResponse, ResumeSidecar, RetryPolicy, SparseFile, TransportError,
 };
 use support::{
-    FakeMuxer, RoutingTransport, SeededGenerator, WorkerGate, WorkerGatedOrigin, engine_settings,
-    make_scratch_directory, snapshot_item, test_payload, wait_until_async, within,
+    FakeMuxer, RoutingTransport, ScratchTrash, SeededGenerator, WorkerGate, WorkerGatedOrigin,
+    engine_settings, make_scratch_directory, snapshot_item, test_payload, wait_until_async, within,
 };
 
 fn source(string: &str) -> SourceUrl {
@@ -242,7 +242,8 @@ async fn resetting_an_incomplete_mux_download_clears_every_component_part_and_si
         None,
         Some(Arc::new(FakeMuxer::new())),
         None,
-    );
+    )
+    .with_trash(Arc::new(ScratchTrash::new()));
     let item = DownloadItem::new(
         vec![
             FileComponent::new(source("https://v.example/v"), "clip.f137.mp4"),

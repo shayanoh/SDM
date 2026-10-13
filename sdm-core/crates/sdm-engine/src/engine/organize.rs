@@ -46,6 +46,24 @@ impl Trash for SystemTrash {
     }
 }
 
+/// The engine's default [`Trash`]: it moves nothing and reports an error.
+///
+/// `DownloadEngine::new` cannot know which trash the caller wants, and the
+/// wrong default is destructive (the real Trash, in a test run). So the
+/// default refuses, and a caller that wants files trashed says so with
+/// `with_trash`. Only the production constructor in `sdm-ffi` passes
+/// [`SystemTrash`].
+pub(crate) struct RefusingTrash;
+
+impl Trash for RefusingTrash {
+    fn trash(&self, path: &Path) -> std::io::Result<()> {
+        Err(std::io::Error::other(format!(
+            "no Trash was configured for this engine; refusing to move {}",
+            path.display()
+        )))
+    }
+}
+
 /// Applies `ids` as the new order of `existing`, writing each placed element's
 /// `position` as its index in `ids`. Anything not named keeps its relative
 /// order, appended at the end. An id that is not in `existing`, or that
