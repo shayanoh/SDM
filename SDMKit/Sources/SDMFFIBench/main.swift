@@ -3,10 +3,15 @@ import SDMCore
 import SDMEngine
 
 // Benchmark program for the Rust core as the app uses it: Swift calling the
-// generated UniFFI bindings. One scenario:
+// generated UniFFI bindings. Two scenarios over the same 1,000 idle items:
 //
-//   SDMFFIBench ffi-snapshot   1,000 disabled items in 20 packages, then
-//                              600 x (tick + snapshot) across the boundary
+//   SDMFFIBench ffi-snapshot             1,000 disabled items in 20 packages,
+//                                        then 600 x (tick + snapshot) across
+//                                        the boundary
+//   SDMFFIBench ffi-snapshot-if-changed  the same, but each tick asks
+//                                        snapshotIfChanged(sinceGeneration:)
+//                                        with the generation it already
+//                                        holds, as the app's heartbeat does
 //
 // Nothing is downloaded: every item is disabled, so the scheduler never starts
 // one and neither the network transport nor the Trash is ever used. State goes
@@ -31,7 +36,7 @@ func scale() throws -> Int {
     return value
 }
 
-func runFFISnapshot(directory: URL) async throws -> String {
+func runFFISnapshot(directory: URL, scenario: String) async throws -> String {
     let itemCount = 1000
     let packageCount = 20
     let iterations = 600 / (try scale())
@@ -71,24 +76,42 @@ func runFFISnapshot(directory: URL) async throws -> String {
     }
 
     var itemsSeen = 0
-    for _ in 0..<iterations {
-        try await engine.tick()
-        let snapshot = try await engine.snapshot()
-        itemsSeen += snapshot.packages.reduce(0) { $0 + $1.items.count }
-    }
-    guard itemsSeen == iterations * itemCount else {
-        throw BenchError.failed(
-            "snapshots held \(itemsSeen) items, expected \(iterations * itemCount)")
+    if scenario == "ffi-snapshot-if-changed" {
+        // The first call holds no generation and gets the snapshot; every
+        // later call finds the idle engine unchanged and gets nothing.
+        var generation: UInt64?
+        for _ in 0..<iterations {
+            try await engine.tick()
+            if let snapshot = try await engine.snapshotIfChanged(sinceGeneration: generation) {
+                generation = snapshot.generation
+                itemsSeen += snapshot.packages.reduce(0) { $0 + $1.items.count }
+            }
+        }
+        guard itemsSeen == itemCount else {
+            throw BenchError.failed("snapshots held \(itemsSeen) items, expected \(itemCount)")
+        }
+    } else {
+        for _ in 0..<iterations {
+            try await engine.tick()
+            let snapshot = try await engine.snapshot()
+            itemsSeen += snapshot.packages.reduce(0) { $0 + $1.items.count }
+        }
+        guard itemsSeen == iterations * itemCount else {
+            throw BenchError.failed(
+                "snapshots held \(itemsSeen) items, expected \(iterations * itemCount)")
+        }
     }
     try await engine.shutdown()
-    return "scenario=ffi-snapshot ok=true items=\(itemCount) bytes=0"
+    return "scenario=\(scenario) ok=true items=\(itemCount) bytes=0"
 }
 
 // MARK: - Entry point
 
-let usage = "usage: SDMFFIBench ffi-snapshot"
+let usage = "usage: SDMFFIBench ffi-snapshot|ffi-snapshot-if-changed"
 let arguments = CommandLine.arguments.dropFirst()
-guard arguments.count == 1, arguments.first == "ffi-snapshot" else {
+guard arguments.count == 1, let scenario = arguments.first,
+    scenario == "ffi-snapshot" || scenario == "ffi-snapshot-if-changed"
+else {
     FileHandle.standardError.write(Data((usage + "\n").utf8))
     exit(2)
 }
@@ -98,9 +121,9 @@ let directory = FileManager.default.temporaryDirectory
 var exitCode: Int32 = 0
 do {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    print(try await runFFISnapshot(directory: directory))
+    print(try await runFFISnapshot(directory: directory, scenario: scenario))
 } catch {
-    FileHandle.standardError.write(Data("scenario=ffi-snapshot ok=false error=\(error)\n".utf8))
+    FileHandle.standardError.write(Data("scenario=\(scenario) ok=false error=\(error)\n".utf8))
     exitCode = 1
 }
 try? FileManager.default.removeItem(at: directory)

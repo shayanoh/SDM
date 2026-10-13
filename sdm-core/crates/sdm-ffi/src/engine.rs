@@ -320,6 +320,18 @@ impl DownloadEngine {
         run(async move { engine.snapshot().await }).await
     }
 
+    /// The snapshot, or `None` when its `generation` equals `since_generation`
+    /// (the caller already holds it). Pass `None` for the first call. The
+    /// engine decides this under its lock without copying the snapshot, so an
+    /// idle engine costs one comparison per tick instead of a serialised list.
+    pub async fn snapshot_if_changed(
+        &self,
+        since_generation: Option<u64>,
+    ) -> Result<Option<EngineSnapshot>, CoreError> {
+        let engine = Arc::clone(&self.engine);
+        run(async move { engine.snapshot_if_changed(since_generation).await }).await
+    }
+
     /// Each requested item's full speed history; items with no sampler are
     /// absent from the result.
     pub async fn speed_histories(

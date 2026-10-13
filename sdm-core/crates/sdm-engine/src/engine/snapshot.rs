@@ -22,6 +22,26 @@ struct PackageItems {
 
 impl DownloadEngine {
     pub async fn snapshot(&self) -> EngineSnapshot {
+        self.build_snapshot(None)
+            .expect("a snapshot with no generation to match is always returned")
+    }
+
+    /// The snapshot, unless it is the one the caller already holds:
+    /// `None` when its `generation` equals `since_generation`.
+    ///
+    /// The comparison happens under the engine lock and before the cached
+    /// snapshot is cloned, so an idle engine answers a per-tick poll without
+    /// copying a list of any length. `generation` only moves when the
+    /// content changed (see `snapshot`), so equal generations mean equal
+    /// snapshots. `None` for `since_generation` always returns the snapshot.
+    pub async fn snapshot_if_changed(
+        &self,
+        since_generation: Option<u64>,
+    ) -> Option<EngineSnapshot> {
+        self.build_snapshot(since_generation)
+    }
+
+    fn build_snapshot(&self, since_generation: Option<u64>) -> Option<EngineSnapshot> {
         let max_attempts = self.inner.retry_policy.max_attempts;
         let mut guard = self.inner.lock();
         let state = &mut *guard;
@@ -33,7 +53,10 @@ impl DownloadEngine {
             && let Some(last) = &state.last_snapshot
             && state.last_snapshot_generation == state.snapshot_generation()
         {
-            return last.clone();
+            if since_generation == Some(last.generation) {
+                return None;
+            }
+            return Some(last.clone());
         }
         // Read before the build: the build below is one lock scope, so nothing
         // can bump the counter during it, but the cached build must be tagged
@@ -110,7 +133,10 @@ impl DownloadEngine {
         }
         state.last_snapshot = Some(result.clone());
         state.last_snapshot_generation = built_at_generation;
-        result
+        if since_generation == Some(result.generation) {
+            return None;
+        }
+        Some(result)
     }
 
     /// Each requested item's full speed history — the sampler's whole

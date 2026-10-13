@@ -273,11 +273,16 @@ final class EngineController {
         while !Task.isCancelled {
             do {
                 try await engine.tick()
-                let newSnapshot = try await engine.snapshot()
+                // Asking only for a snapshot newer than the published one lets
+                // an idle engine answer without serialising the whole list.
+                let changed = try await engine.snapshotIfChanged(
+                    sinceGeneration: publishedGeneration)
                 lastLoggedTickError = nil
-                notifyChanges(from: previousSnapshot, to: newSnapshot)
-                previousSnapshot = newSnapshot
-                publish(newSnapshot)
+                if let newSnapshot = changed {
+                    notifyChanges(from: previousSnapshot, to: newSnapshot)
+                    previousSnapshot = newSnapshot
+                    publish(newSnapshot)
+                }
                 await refreshDetailHistories()
             } catch {
                 logTickFailure(error)

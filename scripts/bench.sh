@@ -8,7 +8,8 @@
 # Programs (all built in release mode):
 #   sdm-bench       Rust core        transfer, ticks
 #   SDMBench        all-Swift core   transfer, ticks   (legacy/SDMKitSwift)
-#   SDMFFIBench     Rust core via the generated Swift bindings   ffi-snapshot
+#   SDMFFIBench     Rust core via the generated Swift bindings   ffi-snapshot,
+#                                                                ffi-snapshot-if-changed
 #
 # Each scenario runs RUNS times (5) under /usr/bin/time -l, the two cores
 # alternating run by run. Refuses to run on battery, or with under 6 GB free
@@ -107,9 +108,11 @@ for scenario in transfer ticks; do
         run_one "$scenario" "Swift" "$SWIFT_BENCH" "$scenario"
     done
 done
-for run in $(seq 1 "$RUNS"); do
-    log "ffi-snapshot, run $run of $RUNS"
-    run_one "ffi-snapshot" "Rust via bindings" "$FFI_BENCH" "ffi-snapshot"
+for scenario in ffi-snapshot ffi-snapshot-if-changed; do
+    for run in $(seq 1 "$RUNS"); do
+        log "$scenario, run $run of $RUNS"
+        run_one "$scenario" "Rust via bindings" "$FFI_BENCH" "$scenario"
+    done
 done
 
 # --- Report ------------------------------------------------------------------
