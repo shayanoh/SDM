@@ -26,13 +26,30 @@
 //! * `ingest_urls`: the awaits on the three helpers above, then `recluster`
 //!   in a fresh scope. `recheck_failed` / `recheck` likewise.
 //!
+//! Where Swift has no `await` between two steps, Rust keeps them in one lock
+//! scope: inserting rows, building the pending list and choosing the first
+//! wave of probes (`start_probes`, called inside the caller's scope), and
+//! setting rows to `Resolving` together with the first wave of resolves
+//! (`start_media_resolves`). The `quality_preferences` and `ffmpeg_available`
+//! closures are called with the lock held, as they are inside the actor; like
+//! the resolver's `can_handle` they must not call back into the session.
+//!
 //! The session never cancels in-flight work: `cancel_checks` only sets
 //! `cancel_requested`, which stops the probe and resolve loops from
 //! launching *new* work. Probes and resolves already handed out finish and
 //! are recorded. So, as in Swift, no cancellation token is involved (and
-//! `LinkResolver::resolve` takes none). Dropping a caller's future drops the
-//! call's `JoinSet`, which stops its children — the twin of a cancelled
-//! Swift task group.
+//! `LinkResolver::resolve` takes none).
+//!
+//! # Dropping a caller
+//!
+//! A cancelled Swift caller still runs its `withTaskGroup` to completion,
+//! merges every child result and reclusters. A dropped Rust future would
+//! drop the call's `JoinSet` and abort its children, leaving rows `Probing`
+//! or `Resolving` for ever. So every public async method runs its body in a
+//! spawned task and only awaits the `JoinHandle` ([`run_detached`]): dropping
+//! the caller leaves the work running to completion. Nothing is ever aborted.
+//! These methods therefore need a tokio runtime context when polled (they
+//! already did, for the `JoinSet`).
 //!
 //! Probe and resolve concurrency use Swift's own accounting (a pending list,
 //! an active counter and per-host counts, all local to the call, decided in
@@ -207,6 +224,22 @@ fn join_outcome<T>(joined: Result<T, JoinError>) -> Option<T> {
     }
 }
 
+/// Runs `work` to completion in its own task and waits for it. Dropping the
+/// returned future detaches the task instead of cancelling it (a
+/// `JoinHandle` drop never stops its task), which is what a cancelled Swift
+/// caller gets from its task group.
+async fn run_detached<F>(work: F)
+where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
+    if let Err(error) = tokio::spawn(work).await
+        && error.is_panic()
+    {
+        std::panic::resume_unwind(error.into_panic());
+    }
+    // A cancelled join can only come from the runtime shutting down.
+}
+
 impl GrabberSession {
     /// # Panics
     ///
@@ -249,13 +282,16 @@ impl GrabberSession {
     /// Extracts links from pasted or dropped text, dedupes against links
     /// already in this session, then probes the new ones under budget.
     pub async fn ingest_text(&self, text: &str) {
-        self.ingest_urls(&UrlExtractor::extract_links(text)).await;
+        let urls = UrlExtractor::extract_links(text);
+        self.ingest_urls(&urls).await;
     }
 
     /// Links are identified by the URL string exactly as written
     /// ([`SourceUrl`] compares and hashes on it), never by a normalised form.
     pub async fn ingest_urls(&self, urls: &[SourceUrl]) {
-        self.inner.ingest_urls(urls).await;
+        let inner = Arc::clone(&self.inner);
+        let urls = urls.to_vec();
+        run_detached(async move { inner.ingest_urls(&urls).await }).await;
     }
 
     /// Sets a format on a media row (the picker override) and re-clusters —
@@ -455,7 +491,8 @@ impl GrabberSession {
     /// are waiting on a now-maybe-installed binary. Faulty/offline links and
     /// `.unsupported` media rows are genuine verdicts and are left alone.
     pub async fn recheck_failed(&self) {
-        self.inner.recheck_failed().await;
+        let inner = Arc::clone(&self.inner);
+        run_detached(async move { inner.recheck_failed().await }).await;
     }
 
     /// Re-probes / re-resolves exactly the given rows, whatever their
@@ -464,7 +501,9 @@ impl GrabberSession {
     /// media row is retried too, because the operator asked for it
     /// explicitly.
     pub async fn recheck(&self, ids: &HashSet<Uuid>) {
-        self.inner.recheck(ids).await;
+        let inner = Arc::clone(&self.inner);
+        let ids = ids.clone();
+        run_detached(async move { inner.recheck(&ids).await }).await;
     }
 
     /// Stops the in-flight probe and resolve loops from launching any
@@ -476,6 +515,27 @@ impl GrabberSession {
         self.inner.state().cancel_requested = true;
     }
 }
+
+/// A probe call's own bookkeeping, built by `start_probes` in the caller's
+/// lock scope and consumed by `drive_probes`.
+struct ProbeRun {
+    ids: Vec<Uuid>,
+    pending: Vec<PendingProbe>,
+    host_counts: HashMap<String, i64>,
+    active: usize,
+    first_wave: Vec<(Uuid, SourceUrl)>,
+}
+
+/// The same for a media-resolve call (`start_media_resolves` /
+/// `drive_media_resolves`).
+struct MediaRun {
+    pending: VecDeque<Uuid>,
+    active: usize,
+    first_wave: Vec<Uuid>,
+}
+
+/// A playlist entry to resolve: its row id, URL and the resolver to ask.
+type EntryResolve = (Uuid, SourceUrl, Arc<dyn LinkResolver>);
 
 /// One probe waiting for a slot: the link id, its URL, and the host its
 /// per-host count is keyed on.
@@ -507,7 +567,7 @@ impl Inner {
             .collect();
         let now = (self.clock)();
 
-        let (fresh_probes, fresh_media) = {
+        let (probe_run, fresh_media) = {
             let mut state = self.state();
             state.cancel_requested = false;
             let mut fresh_probes: Vec<Uuid> = Vec::new();
@@ -537,13 +597,18 @@ impl Inner {
                     fresh_probes.push(id);
                 }
             }
-            (fresh_probes, fresh_media)
+            // Swift's `probeBounded` runs on from the insertion without a
+            // suspension, so the pending list and the first wave are chosen
+            // in this same scope.
+            let probe_run =
+                (!fresh_probes.is_empty()).then(|| self.start_probes(&mut state, &fresh_probes));
+            if probe_run.is_none() && fresh_media.is_empty() {
+                return;
+            }
+            (probe_run, fresh_media)
         };
-        if fresh_probes.is_empty() && fresh_media.is_empty() {
-            return;
-        }
-        if !fresh_probes.is_empty() {
-            self.probe_bounded(&fresh_probes).await;
+        if let Some(run) = probe_run {
+            self.drive_probes(run).await;
         }
         for id in fresh_media {
             self.resolve_media(id).await;
@@ -591,15 +656,15 @@ impl Inner {
     }
 
     fn apply_resolved_media(&self, media: ResolvedMedia, id: Uuid) {
-        // The preference and ffmpeg closures run outside the lock; they hold
-        // no session state.
-        let preferences = (self.quality_preferences)();
-        let choice = FormatSelector::pick(&media, &preferences);
-        let chosen_state = choice.as_ref().map(|choice| self.state_for(choice));
+        // One stretch, as in the actor: the row guard first, then the
+        // preference and ffmpeg closures (called with the lock held).
         let mut state = self.state();
         let Some(row) = state.media_rows.get_mut(&id) else {
             return;
         };
+        let preferences = (self.quality_preferences)();
+        let choice = FormatSelector::pick(&media, &preferences);
+        let chosen_state = choice.as_ref().map(|choice| self.state_for(choice));
         row.title = media.title.clone();
         row.media = Some(media);
         match (choice, chosen_state) {
@@ -625,11 +690,11 @@ impl Inner {
     }
 
     fn set_format_choice(&self, choice: FormatChoice, id: Uuid) {
-        let chosen_state = self.state_for(&choice);
         let mut state = self.state();
         let Some(row) = state.media_rows.get_mut(&id) else {
             return;
         };
+        let chosen_state = self.state_for(&choice);
         row.choice = Some(choice);
         row.state = chosen_state;
         state.recluster();
@@ -647,7 +712,10 @@ impl Inner {
         total_available: i64,
     ) {
         let now = (self.clock)();
-        let entry_ids: Vec<Uuid> = {
+        let mut pending: VecDeque<Uuid>;
+        let mut active = 0usize;
+        let mut children: JoinSet<(Uuid, Result<ResolvedTarget, ResolveError>)> = JoinSet::new();
+        let first_wave = {
             let mut state = self.state();
             // Replace the origin row with one row per entry, all in one
             // group. The playlist URL itself no longer has a row, so it must
@@ -696,16 +764,15 @@ impl Inner {
             } else {
                 state.package_notes.remove(&title);
             }
-            entry_ids
+            // Lazily resolve each entry, but only a few yt-dlp processes at
+            // once — the probe concurrency (dozens) would pin the CPU and
+            // time every extraction out. See
+            // `GrabberBudget::max_concurrent_resolves`. The first wave is
+            // chosen in the same scope as the row insertion, as in Swift.
+            pending = entry_ids.into();
+            self.next_entry_resolves(&mut state, &mut pending, &mut active)
         };
-
-        // Lazily resolve each entry, but only a few yt-dlp processes at once
-        // — the probe concurrency (dozens) would pin the CPU and time every
-        // extraction out. See `GrabberBudget::max_concurrent_resolves`.
-        let mut pending: VecDeque<Uuid> = entry_ids.into();
-        let mut active = 0usize;
-        let mut children: JoinSet<(Uuid, Result<ResolvedTarget, ResolveError>)> = JoinSet::new();
-        self.launch_entry_resolves(&mut pending, &mut active, &mut children);
+        Self::spawn_entry_resolves(first_wave, &mut children);
         while let Some(joined) = children.join_next().await {
             let Some((entry_id, result)) = join_outcome(joined) else {
                 break;
@@ -724,7 +791,11 @@ impl Inner {
                     }
                 }
             }
-            self.launch_entry_resolves(&mut pending, &mut active, &mut children);
+            let launches = {
+                let mut state = self.state();
+                self.next_entry_resolves(&mut state, &mut pending, &mut active)
+            };
+            Self::spawn_entry_resolves(launches, &mut children);
         }
     }
 
@@ -732,41 +803,45 @@ impl Inner {
     /// extractions; entries that never started are settled as check failures
     /// so "Recheck All" / per-item Recheck picks them back up. Mirrors
     /// `resolve_media_bounded`.
-    fn launch_entry_resolves(
+    fn next_entry_resolves(
         &self,
+        state: &mut State,
         pending: &mut VecDeque<Uuid>,
         active: &mut usize,
+    ) -> Vec<EntryResolve> {
+        let mut launches: Vec<EntryResolve> = Vec::new();
+        if state.cancel_requested {
+            for id in pending.drain(..) {
+                if let Some(row) = state.media_rows.get_mut(&id) {
+                    row.state = MediaRowState::Failed("Check cancelled".into());
+                }
+            }
+            return launches;
+        }
+        while *active < self.budget.max_concurrent_resolves {
+            let Some(entry_id) = pending.pop_front() else {
+                break;
+            };
+            let Some(url) = state
+                .media_rows
+                .get(&entry_id)
+                .map(|row| row.source_url.clone())
+            else {
+                continue;
+            };
+            let Some(resolver) = self.resolver.clone() else {
+                continue;
+            };
+            *active += 1;
+            launches.push((entry_id, url, resolver));
+        }
+        launches
+    }
+
+    fn spawn_entry_resolves(
+        launches: Vec<EntryResolve>,
         children: &mut JoinSet<(Uuid, Result<ResolvedTarget, ResolveError>)>,
     ) {
-        let mut launches: Vec<(Uuid, SourceUrl, Arc<dyn LinkResolver>)> = Vec::new();
-        {
-            let mut state = self.state();
-            if state.cancel_requested {
-                for id in pending.drain(..) {
-                    if let Some(row) = state.media_rows.get_mut(&id) {
-                        row.state = MediaRowState::Failed("Check cancelled".into());
-                    }
-                }
-                return;
-            }
-            while *active < self.budget.max_concurrent_resolves {
-                let Some(entry_id) = pending.pop_front() else {
-                    break;
-                };
-                let Some(url) = state
-                    .media_rows
-                    .get(&entry_id)
-                    .map(|row| row.source_url.clone())
-                else {
-                    continue;
-                };
-                let Some(resolver) = self.resolver.clone() else {
-                    continue;
-                };
-                *active += 1;
-                launches.push((entry_id, url, resolver));
-            }
-        }
         for (entry_id, url, resolver) in launches {
             children.spawn(async move { (entry_id, resolver.resolve(&url).await) });
         }
@@ -775,7 +850,10 @@ impl Inner {
     // MARK: - Rechecking
 
     async fn recheck_failed(self: &Arc<Self>) {
-        let (failed_probes, failed_media) = {
+        // One stretch: the filters, the probes' pending list and first wave,
+        // or (when there are no probes to wait for) the media rows' first
+        // resolve wave.
+        let (probe_run, media_run, failed_media) = {
             let mut state = self.state();
             state.cancel_requested = false;
             let failed_probes: Vec<Uuid> = state
@@ -804,20 +882,17 @@ impl Inner {
                     })
                 })
                 .collect();
-            (failed_probes, failed_media)
+            if failed_probes.is_empty() && failed_media.is_empty() {
+                return;
+            }
+            self.start_recheck(&mut state, failed_probes, failed_media)
         };
-        if failed_probes.is_empty() && failed_media.is_empty() {
-            return;
-        }
-        if !failed_probes.is_empty() {
-            self.probe_bounded(&failed_probes).await;
-        }
-        self.resolve_media_bounded(failed_media).await;
-        self.state().recluster();
+        self.finish_recheck(probe_run, media_run, failed_media)
+            .await;
     }
 
     async fn recheck(self: &Arc<Self>, ids: &HashSet<Uuid>) {
-        let (probes, media) = {
+        let (probe_run, media_run, media) = {
             let mut state = self.state();
             state.cancel_requested = false;
             let probes: Vec<Uuid> = state
@@ -832,77 +907,133 @@ impl Inner {
                 .copied()
                 .filter(|id| ids.contains(id) && state.media_rows.contains_key(id))
                 .collect();
-            (probes, media)
+            if probes.is_empty() && media.is_empty() {
+                return;
+            }
+            self.start_recheck(&mut state, probes, media)
         };
-        if probes.is_empty() && media.is_empty() {
-            return;
+        self.finish_recheck(probe_run, media_run, media).await;
+    }
+
+    /// The part of a recheck that has no suspension before it: the probes'
+    /// first wave if there are probes, otherwise the media rows' first wave.
+    /// Returns what `finish_recheck` needs, plus the media ids still to be
+    /// started once the probes are done.
+    fn start_recheck(
+        &self,
+        state: &mut State,
+        probes: Vec<Uuid>,
+        media: Vec<Uuid>,
+    ) -> (Option<ProbeRun>, Option<MediaRun>, Vec<Uuid>) {
+        if probes.is_empty() {
+            let media_run = self.start_media_resolves(state, media);
+            (None, media_run, Vec::new())
+        } else {
+            (Some(self.start_probes(state, &probes)), None, media)
         }
-        if !probes.is_empty() {
-            self.probe_bounded(&probes).await;
+    }
+
+    async fn finish_recheck(
+        self: &Arc<Self>,
+        probe_run: Option<ProbeRun>,
+        media_run: Option<MediaRun>,
+        media_after_probes: Vec<Uuid>,
+    ) {
+        if let Some(run) = probe_run {
+            self.drive_probes(run).await;
+            self.resolve_media_bounded(media_after_probes).await;
+        } else if let Some(run) = media_run {
+            self.drive_media_resolves(run).await;
         }
-        self.resolve_media_bounded(media).await;
         self.state().recluster();
     }
 
     /// Re-resolves the given media rows under the small resolve concurrency
     /// cap — a burst of yt-dlp processes trips YouTube's rate limit.
     async fn resolve_media_bounded(self: &Arc<Self>, ids: Vec<Uuid>) {
-        let mut pending: VecDeque<Uuid> = {
+        let run = {
             let mut state = self.state();
-            let pending: VecDeque<Uuid> = ids
-                .into_iter()
-                .filter(|id| state.media_rows.contains_key(id))
-                .collect();
-            for id in &pending {
-                if let Some(row) = state.media_rows.get_mut(id) {
-                    row.state = MediaRowState::Resolving;
-                }
-            }
-            pending
+            self.start_media_resolves(&mut state, ids)
         };
+        if let Some(run) = run {
+            self.drive_media_resolves(run).await;
+        }
+    }
+
+    /// Marks the still-existing rows `Resolving` and chooses the first wave,
+    /// in the caller's scope. `None` when there is nothing to resolve.
+    fn start_media_resolves(&self, state: &mut State, ids: Vec<Uuid>) -> Option<MediaRun> {
+        let mut pending: VecDeque<Uuid> = ids
+            .into_iter()
+            .filter(|id| state.media_rows.contains_key(id))
+            .collect();
+        for id in &pending {
+            if let Some(row) = state.media_rows.get_mut(id) {
+                row.state = MediaRowState::Resolving;
+            }
+        }
         if pending.is_empty() {
-            return;
+            return None;
         }
         let mut active = 0usize;
+        let first_wave = self.next_media_resolves(state, &mut pending, &mut active);
+        Some(MediaRun {
+            pending,
+            active,
+            first_wave,
+        })
+    }
+
+    async fn drive_media_resolves(self: &Arc<Self>, run: MediaRun) {
+        let MediaRun {
+            mut pending,
+            mut active,
+            first_wave,
+        } = run;
         let mut children: JoinSet<()> = JoinSet::new();
-        self.launch_media_resolves(&mut pending, &mut active, &mut children);
+        self.spawn_media_resolves(first_wave, &mut children);
         while let Some(joined) = children.join_next().await {
             if join_outcome(joined).is_none() {
                 break;
             }
             active -= 1;
-            self.launch_media_resolves(&mut pending, &mut active, &mut children);
+            let launches = {
+                let mut state = self.state();
+                self.next_media_resolves(&mut state, &mut pending, &mut active)
+            };
+            self.spawn_media_resolves(launches, &mut children);
         }
     }
 
-    fn launch_media_resolves(
-        self: &Arc<Self>,
+    fn next_media_resolves(
+        &self,
+        state: &mut State,
         pending: &mut VecDeque<Uuid>,
         active: &mut usize,
-        children: &mut JoinSet<()>,
-    ) {
+    ) -> Vec<Uuid> {
         let mut launches: Vec<Uuid> = Vec::new();
-        {
-            let mut state = self.state();
-            if state.cancel_requested {
-                for id in pending.drain(..) {
-                    if let Some(row) = state.media_rows.get_mut(&id) {
-                        row.state = MediaRowState::Failed("Check cancelled".into());
-                    }
+        if state.cancel_requested {
+            for id in pending.drain(..) {
+                if let Some(row) = state.media_rows.get_mut(&id) {
+                    row.state = MediaRowState::Failed("Check cancelled".into());
                 }
-                return;
             }
-            while *active < self.budget.max_concurrent_resolves {
-                let Some(id) = pending.pop_front() else {
-                    break;
-                };
-                if !state.media_rows.contains_key(&id) {
-                    continue;
-                }
-                *active += 1;
-                launches.push(id);
-            }
+            return launches;
         }
+        while *active < self.budget.max_concurrent_resolves {
+            let Some(id) = pending.pop_front() else {
+                break;
+            };
+            if !state.media_rows.contains_key(&id) {
+                continue;
+            }
+            *active += 1;
+            launches.push(id);
+        }
+        launches
+    }
+
+    fn spawn_media_resolves(self: &Arc<Self>, launches: Vec<Uuid>, children: &mut JoinSet<()>) {
         for id in launches {
             let session = Arc::clone(self);
             children.spawn(async move { session.resolve_media(id).await });
@@ -911,33 +1042,46 @@ impl Inner {
 
     // MARK: - Probing
 
-    /// Launches probes for `ids` under the global and per-host caps. All
-    /// mutable session state here is only touched inside a lock scope that
-    /// contains no suspension, so a concurrent `ingest` call started while
-    /// this one is still probing sees a consistent, if interleaved, picture —
-    /// the same actor-reentrancy shape `DownloadEngine.reconcile` documents
-    /// in Phase 1. The pending list, per-host counts and active count belong
-    /// to this call alone.
-    async fn probe_bounded(self: &Arc<Self>, ids: &[Uuid]) {
-        let mut pending: Vec<PendingProbe> = {
-            let state = self.state();
-            ids.iter()
-                .filter_map(|id| {
-                    let url = state.links.get(id)?.original_url.clone();
-                    let host = url_text::host(&url).unwrap_or_default();
-                    Some(PendingProbe { id: *id, url, host })
-                })
-                .collect()
-        };
+    /// Chooses the pending list and the first wave of probes for `ids`, in
+    /// the caller's lock scope (Swift's `probeBounded` runs from its start to
+    /// its first `await` without a suspension, and callers reach it the same
+    /// way). All mutable session state is only touched inside lock scopes
+    /// that contain no suspension, so a concurrent `ingest` call started
+    /// while this one is still probing sees a consistent, if interleaved,
+    /// picture — the same actor-reentrancy shape `DownloadEngine.reconcile`
+    /// documents in Phase 1. The pending list, per-host counts and active
+    /// count belong to the returned [`ProbeRun`] alone.
+    fn start_probes(&self, state: &mut State, ids: &[Uuid]) -> ProbeRun {
+        let mut pending: Vec<PendingProbe> = ids
+            .iter()
+            .filter_map(|id| {
+                let url = state.links.get(id)?.original_url.clone();
+                let host = url_text::host(&url).unwrap_or_default();
+                Some(PendingProbe { id: *id, url, host })
+            })
+            .collect();
         let mut host_counts: HashMap<String, i64> = HashMap::new();
         let mut active = 0usize;
-        let mut children: JoinSet<(Uuid, ProbedLink)> = JoinSet::new();
+        let first_wave = self.next_probes(state, &mut pending, &mut host_counts, &mut active);
+        ProbeRun {
+            ids: ids.to_vec(),
+            pending,
+            host_counts,
+            active,
+            first_wave,
+        }
+    }
 
-        let launches = {
-            let mut state = self.state();
-            self.next_probes(&mut state, &mut pending, &mut host_counts, &mut active)
-        };
-        self.spawn_probes(launches, &mut children);
+    async fn drive_probes(self: &Arc<Self>, run: ProbeRun) {
+        let ProbeRun {
+            ids,
+            mut pending,
+            mut host_counts,
+            mut active,
+            first_wave,
+        } = run;
+        let mut children: JoinSet<(Uuid, ProbedLink)> = JoinSet::new();
+        self.spawn_probes(first_wave, &mut children);
 
         while let Some(joined) = children.join_next().await {
             let Some((id, probed)) = join_outcome(joined) else {
@@ -967,7 +1111,7 @@ impl Inner {
         // "Recheck All" / the per-item Recheck picks it back up.
         let mut state = self.state();
         if state.cancel_requested {
-            for id in ids {
+            for id in &ids {
                 if let Some(link) = state.links.get_mut(id)
                     && link.verdict.is_none()
                 {

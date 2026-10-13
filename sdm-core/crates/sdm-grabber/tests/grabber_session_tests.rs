@@ -348,3 +348,67 @@ async fn prune_older_than_is_a_no_op_for_a_never_expired_list() {
     })
     .await;
 }
+
+// MARK: - A dropped caller does not abort the work
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn dropping_an_ingest_caller_still_finishes_the_probes_and_reclusters() {
+    within(async {
+        let origin = Arc::new(FakeProbeOrigin::new());
+        let url = su("https://a.example.com/movie.mp4");
+        origin.set_behavior(held(), &url);
+        let session = session_for(&origin);
+
+        let ingest = session.ingest_urls(std::slice::from_ref(&url));
+        // Poll it until the probe is parked at the origin, then drop it.
+        let mut ingest = Box::pin(ingest);
+        assert!(futures::poll!(ingest.as_mut()).is_pending());
+        wait_until(|| !origin.request_log().is_empty()).await;
+        assert_eq!(session.snapshot().links[0].stage, Stage::Probing);
+        drop(ingest);
+
+        origin.release(&url);
+        wait_until(|| session.snapshot().links[0].verdict.is_some()).await;
+
+        let snapshot = session.snapshot();
+        assert_eq!(snapshot.links[0].stage, Stage::Done);
+        assert_eq!(snapshot.checked_count, 1);
+        // The recluster that follows the probes ran too.
+        assert_eq!(snapshot.packages.len(), 1);
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn dropping_a_recheck_caller_still_finishes_the_probe() {
+    within(async {
+        let origin = Arc::new(FakeProbeOrigin::new());
+        let url = su("https://a.example.com/movie.mp4");
+        let session = session_for(&origin);
+        session.ingest_urls(std::slice::from_ref(&url)).await;
+        let id = session.snapshot().links[0].id;
+
+        origin.set_behavior(held(), &url);
+        let ids: HashSet<_> = [id].into_iter().collect();
+        let before = origin.request_log().len();
+        poll_once_then_drop_after(&session, &ids, || origin.request_log().len() > before).await;
+
+        origin.release(&url);
+        wait_until(|| session.snapshot().links[0].stage == Stage::Done).await;
+        assert!(session.snapshot().links[0].verdict.is_some());
+    })
+    .await;
+}
+
+/// Starts `session.recheck(ids)`, waits until `parked` holds (the probe is
+/// held at the origin), then drops the caller's future.
+async fn poll_once_then_drop_after(
+    session: &GrabberSession,
+    ids: &HashSet<uuid::Uuid>,
+    mut parked: impl FnMut() -> bool,
+) {
+    let mut recheck = Box::pin(session.recheck(ids));
+    assert!(futures::poll!(recheck.as_mut()).is_pending());
+    wait_until(&mut parked).await;
+    drop(recheck);
+}
