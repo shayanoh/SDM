@@ -19,7 +19,9 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | `SmokeTests.swift` | 1 | `smoke_tests.rs` | 1 |  |
 | `ThemeCatalogTests.swift` | 5 | `theme_catalog_tests.rs` | 6 | +1 byte-identity test of embedded theme files vs Swift fixtures |
 | `ThemeTests.swift` | 1 | `theme_tests.rs` | 1 |  |
-| **Total SDMCoreTests** | **79** |  |  |  |
+| (Rust-only) | 0 | `persistence_compat_tests.rs` | 12 | Swift-written fixtures load and re-serialize (state, packages, media, `SourceUrl` byte-for-byte identity; Review Focus 1 and 2). |
+| (Rust-only) | 0 | `priority_tests.rs` | 4 | `Priority` ordering and wire shapes, `ItemState` wire shapes, a Swift-written fixture round trip. |
+| **Total SDMCoreTests** | **79** |  | **98** | Rust column sums every row above, Rust-only rows included (82 ported + 16). |
 
 ## SDMEngineTests
 
@@ -70,11 +72,13 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | `StateStoreTests.swift` | 14 | `state_store_tests.rs` | 16 | +2 Rust-only: `loads_state_written_by_swift` (rich, minimal, legacy flat), `wrong_format_version_loads_as_empty_and_is_left_in_place`. Literal-JSON tests use r-strings; encoder-based corruption tests substitute in `serde_json` output. |
 | `TestSupport.swift` | 0 | `support/mod.rs`, `support/engine_support.rs` | 0 | Test support; no tests (`Gate`, `GatedOrigin`, `test_payload`, `make_scratch_directory`, engine constructors including `new_engine_with_store`). |
 | `URLRefreshTests.swift` | 3 | `url_refresh_tests.rs` | 5 | +2 Rust-only: stopping an item during its refresh ends the refresh (resolver honours the token) and a refresh that returns after a stop installs no new task (resolver ignores it); both leave the stale component URL in place. `FakeResolver` is in `support/fake_resolver.rs`. |
-| `URLSessionTransportTests.swift` | 12 | `reqwest_transport_tests.rs` | 22 | 12 ported (the `HTTPURLResponse` helpers become `HeaderMap` helpers; `defaultConfigurationNeverTouchesTheSharedCache` becomes a loopback test that a cacheable response is refetched, since reqwest has no cache to configure). +4 Review Focus 4 (redirect and final URL, body cut short, lying `Content-Length`, origin ignoring `Range`). +1 cookie replay across a redirect hop (Gate C). +5 loopback: 206/`Content-Range`/validator, error status returned not thrown, refused connection, dropping the body stream closes the connection, dropping the fetch before headers closes the connection. |
+| `URLSessionTransportTests.swift` | 12 | `reqwest_transport_tests.rs` | 24 | 12 ported (the `HTTPURLResponse` helpers become `HeaderMap` helpers; `defaultConfigurationNeverTouchesTheSharedCache` becomes a loopback test that a cacheable response is refetched, since reqwest has no cache to configure). +4 Review Focus 4 (redirect and final URL, body cut short, lying `Content-Length`, origin ignoring `Range`). +1 cookie replay across a redirect hop (Gate C). +5 loopback: 206/`Content-Range`/validator, error status returned not thrown, refused connection, dropping the body stream closes the connection, dropping the fetch before headers closes the connection. +2 (gate E): a validator header with raw UTF-8 bytes is kept (loopback), and one with invalid UTF-8 decodes as Latin-1 instead of being dropped. |
 | `UpdateSettingsTests.swift` | 1 | `update_settings_tests.rs` | 1 |  |
 | `WholesaleDownloadTests.swift` | 8 | `wholesale_download_tests.rs` | 8 | The preemption test waits for the preempted wholesale item to land `Queued` (the cancelled downloader call unwinds at once in Rust), where Swift asserts it straight after the ticks. No test asserted the swept-scratch behaviour, so nothing was changed to the wholesale-resume spec. |
 | `YtDlpArtifactsTests.swift` | 3 | `yt_dlp_artifacts_tests.rs` | 3 |  |
-| **Total SDMEngineTests** | **256** |  | **303** | Rust column sums every row above, Rust-only rows included. |
+| (Rust-only) | 0 | `src/download_task.rs` (unit tests) | 2 | `the_sentinel_returns_once_the_task_is_cancelled`, `run_workers_after_a_pause_spawns_nothing_and_returns` (private `DownloadTask` items). |
+| (Rust-only) | 0 | `checkpoint_tick_engine_tests.rs` | 1 | The ninth `CheckpointTickTests` case (`checkpointFailureReachesTheEngineSnapshot`), which drives a `DownloadEngine` (see the `checkpoint_tick_tests.rs` row). |
+| **Total SDMEngineTests** | **256** |  | **308** | Rust column sums every row above, Rust-only rows included (303 + 2 gate E + 3 previously unlisted). |
 
 ## SDMGrabberTests
 
@@ -84,10 +88,10 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | `FakeProbeOriginTests.swift` | 6 | `fake_probe_origin_tests.rs` | 6 |  |
 | `FileSignatureTests.swift` | 8 | `file_signature_tests.rs` | 8 |  |
 | `GrabberSessionOverrideTests.swift` | 6 | `grabber_session_override_tests.rs` | 7 | +1: `a_url_deduplicates_against_its_own_original_spelling` (URL identity is the string as written). |
-| `GrabberSessionTests.swift` | 9 | `grabber_session_tests.rs` | 9 | The prune tests drive an injected clock (`ManualClock`) instead of `Task.sleep` and `Date()`. |
+| `GrabberSessionTests.swift` | 9 | `grabber_session_tests.rs` | 11 | The prune tests drive an injected clock (`ManualClock`) instead of `Task.sleep` and `Date()`. +2 (gate E, E2-F2): dropping the caller of `ingest_urls` / `recheck` mid-probe still finishes the probe and reclusters. |
 | `LinkProberStageTwoTests.swift` | 3 | `link_prober_stage_two_tests.rs` | 3 |  |
 | `LinkProberTests.swift` | 5 | `link_prober_tests.rs` | 5 |  |
-| `MediaFormatMenuTests.swift` | 6 | `media_format_menu_tests.rs` | 6 | Byte counts use a hand-written `ByteCountFormatter` (.binary) twin; only the `~` marker and `360p` are asserted. |
+| `MediaFormatMenuTests.swift` | 6 | `media_format_menu_tests.rs` | 6 | Byte counts use a hand-written `ByteCountFormatter` (.binary) twin; this file asserts only the `~` marker and `360p`. The twin's output is pinned against measured Foundation values by a unit test in `src/media_format_menu.rs` (own row below). |
 | `MediaHandoffTests.swift` | 6 | `media_handoff_tests.rs` | 6 |  |
 | `MediaMetadataTests.swift` | 3 | `media_metadata_tests.rs` | 3 |  |
 | `MediaRowRoutingTests.swift` | 12 | `media_row_routing_tests.rs` | 12 |  |
@@ -97,9 +101,12 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | `ReleaseTagsTests.swift` | 4 | `release_tags_tests.rs` | 4 | The Swift `arguments:` test is one Rust test looping over the same six cases. |
 | `SmokeTests.swift` | 1 | `smoke_tests.rs` | 1 | Constructs a `GrabberSnapshot` instead of `#expect(true)`. |
 | `URLExtractorTests.swift` | 8 | `url_extractor_tests.rs` | 9 | `linkify` replaces `NSDataDetector`. One Rust-only test: a link written without a scheme is not picked up (deliberate difference from Swift). |
-| `URLSessionProbeTransportTests.swift` | 6 | `reqwest_probe_transport_tests.rs` | 7 | The Swift tests exercise static helpers; the Rust ones drive the transport against a loopback server (HEAD/GET/Range, lowercased headers, timeout via a short idle timeout, DNS via a failing resolver, refused connection). One Rust-only test: the body cap (a GET with no range returns one byte, as in Swift) and the final URL after a redirect. |
+| `URLSessionProbeTransportTests.swift` | 6 | `reqwest_probe_transport_tests.rs` | 9 | The Swift tests exercise static helpers; the Rust ones drive the transport against a loopback server (HEAD/GET/Range, lowercased headers, timeout via a short idle timeout, DNS via a failing resolver, refused connection). One Rust-only test: the body cap (a GET with no range returns one byte, as in Swift) and the final URL after a redirect. +2 (gate E): a header with raw UTF-8 bytes is kept (loopback), and one with invalid UTF-8 decodes as Latin-1 instead of being dropped. |
 | `VerdictRulesTests.swift` | 9 | `verdict_rules_tests.rs` | 9 |  |
-| **Total SDMGrabberTests** | **115** |  | **119** | Includes 1 Rust-only unit test in `url_text.rs` (`directory_path_matches_foundation`). |
+| (Rust-only) | 0 | `src/media_format_menu.rs` (unit tests) | 1 | `byte_count_string_matches_byte_count_formatter`: 40 values measured with `ByteCountFormatter(.binary)` on macOS (en_US). |
+| (Rust-only) | 0 | `src/media_row.rs` (unit tests) | 1 | `sanitize_strips_format_characters_like_swift` (Cc and Cf, e.g. the Persian ZWNJ). |
+| (Rust-only) | 0 | `src/url_text.rs` (unit tests) | 2 | `directory_path_matches_foundation`; `query_only_url_without_a_slash_has_no_path`. |
+| **Total SDMGrabberTests** | **115** |  | **126** | Rust column sums every row above, Rust-only rows included (122 + 4). |
 
 ## SDMResolveTests
 
@@ -132,11 +139,12 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | `Fixtures/video_refresh_format_gone.json` | 0 |  |  |  |
 | `Fixtures/video_refresh_ok.json` | 0 |  |  |  |
 | `Fixtures/video_tube_no_codecs.json` | 0 |  |  |  |
-| **Total SDMResolveTests** | **107** |  |  |  |
+| (Rust-only) | 0 | `process_runner_tests.rs` | 3 | Default `run_streaming`, the fake runner, signal exit code (also named in the `SystemProcessRunnerTests` row). |
+| **Total SDMResolveTests** | **107** |  | **131** | Rust column sums every row above, Rust-only rows included (128 + 3); the `SystemProcessRunnerTests` row's own count is its file's 12. |
 
 ## Grand total (four original test targets)
 
-**557** Swift tests.
+**557** Swift tests. **663** Rust tests (Core 98, Engine 308, Grabber 126, Resolve 131), counted as `#[test]` / `#[tokio::test]` attributes per crate.
 
 ## SDMRustTests (FFI skeleton, listed separately)
 
