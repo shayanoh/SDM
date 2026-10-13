@@ -28,8 +28,8 @@ core.
       site registry, managed binaries, wholesale downloader — with tests
 - [x] 1.3 `SDMEngine` port: transport, `FakeOrigin`, download task, scheduler,
       persistence, engine, muxing, wholesale task — with tests
-- [ ] 1.4 `SDMGrabber` port: extraction, probing, verdicts, clustering, session
-      — with tests (in progress: plan Task 20 of 20–22 implemented)
+- [x] 1.4 `SDMGrabber` port: extraction, probing, verdicts, clustering, session
+      — with tests
 - [ ] 1.5 Binding surface and Swift adapter: the app's controllers run on the
       Rust core; Swift `SDMKit` sources removed from the branch
 - [ ] 1.6 App builds in Xcode (Debug and universal Release), manual smoke test
@@ -37,10 +37,11 @@ core.
 
 ### Status and how to resume (updated 2026-10-13)
 
-Plan Tasks 1–19 of 27 are implemented, reviewed and committed; review gate D
-(Tasks 16–19, the engine) is done and its fixes are in `1c7d928` and
-`1d28c5d`. Task 20 (the grabber's pure functions) is implemented and waits for
-review gate E. **Next: Tasks 21–22 (probing, grabber session)**, then gate E.
+Plan Tasks 1–22 of 27 are implemented, reviewed and committed: all four Swift
+targets are ported (557 Swift tests accounted for; 663 Rust tests). Review
+gate E (Tasks 20–22, the grabber) is done and its fixes end at `94120b5`.
+**Next: Task 23, the UniFFI surface**, then Tasks 24–25 (Swift adapter, build)
+and review gate F.
 
 The app does not run on the Rust core yet (that is Task 24) and there are no
 benchmark numbers yet (Task 26). Xcode Debug builds with the Rust skeleton
@@ -108,6 +109,27 @@ Made while porting the grabber:
   must start with `http://` or `https://`; a scheme-less `example.com/file.zip`
   is not picked up, so dotted words with slashes are never grabbed. Trimming of
   trailing punctuation may differ in rare cases.
+
+Settled at review gate E:
+
+- **Deliberate difference from the Swift core:** an HTTP header value is
+  decoded as UTF-8 when it is valid UTF-8, otherwise as Latin-1. Foundation
+  always decodes as Latin-1, so a raw-UTF-8 `Content-Disposition` filename is
+  mojibake in the Swift app and correct here. Side effect: a non-ASCII `ETag`
+  saved by the Swift app will not match what the Rust engine reads, which
+  restarts that one download.
+- The grabber session's calls finish their work even if the caller goes away
+  (as a Swift task group does); a dropped call cannot leave rows stuck in
+  "Probing".
+- Kept as in Swift: a probe whose link is removed while it is in flight holds
+  its per-host slot for the rest of that ingest, so that host's remaining
+  probes can stay queued until a recheck. Rare; a candidate for `todo.md` on
+  `main`.
+
+Bugs found in the Swift core along the way (not fixed on `main`): the
+wholesale pause sweep (gate C), the stop-at-completion and interrupted-mux
+"already exists" failures and the unguarded removal window does not apply
+(gate D), and the probe slot leak above.
 
 ### Measurements
 
