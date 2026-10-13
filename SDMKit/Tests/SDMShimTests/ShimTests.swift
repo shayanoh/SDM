@@ -336,3 +336,35 @@ private func identity<T: Identifiable>(_ value: T) -> T.ID { value.id }
         sourceUrl: nil)
     #expect(MediaFormatMenu.options(for: media, preferences: .default).isEmpty)
 }
+
+// MARK: Field-arithmetic shims agree with the core
+
+/// `isRetrying`, `fractionCompleted` and `RangeSet.totalBytes` are computed in
+/// Swift because rows read them on every tick. Each must give the core's own
+/// answer for every shape of item.
+@Test func perRowShimsAgreeWithTheCore() throws {
+    let states: [ItemState] = [.stopped, .queued, .running, .completed, .failed(reason: "x")]
+    let attempts: [Int?] = [nil, 0, 1, 3]
+    let totals: [Int64?] = [nil, 0, 1, 200, 1 << 40]
+    let ranges: [[ByteRange]] = [
+        [],
+        [ByteRange(start: 0, end: 50)],
+        [ByteRange(start: 0, end: 50), ByteRange(start: 120, end: 200)],
+        [ByteRange(start: 0, end: 200)],
+    ]
+    for state in states {
+        for failed in attempts {
+            for total in totals {
+                for completed in ranges {
+                    let item = itemSnapshot(
+                        state: state, failedAttempts: failed, total: total, completed: completed)
+                    #expect(item.isRetrying == (try itemSnapshotIsRetrying(item: item)))
+                    #expect(
+                        item.fractionCompleted == (try itemSnapshotFractionCompleted(item: item)))
+                    #expect(
+                        item.completed.totalBytes == (try rangeSetTotalBytes(set: item.completed)))
+                }
+            }
+        }
+    }
+}

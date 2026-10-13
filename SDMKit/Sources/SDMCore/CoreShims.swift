@@ -21,8 +21,9 @@ extension ByteRange {
 
 extension RangeSetData {
     public init() { self.init(ranges: []) }
-    /// Zero if the core rejects the set (it cannot, for one the core produced).
-    public var totalBytes: Int64 { (try? rangeSetTotalBytes(set: self)) ?? 0 }
+    /// Field arithmetic rather than a call into the core: rows read this on
+    /// every tick. `SDMShimTests` pins it to the core's `rangeSetTotalBytes`.
+    public var totalBytes: Int64 { ranges.reduce(0) { $0 + ($1.end - $1.start) } }
     /// Adds `range`, merged with whatever it touches (the merge is Rust's).
     /// A rejected range (negative or inverted) leaves the set unchanged.
     public mutating func insert(_ range: ByteRange) {
@@ -64,9 +65,16 @@ extension MediaContainer {
 }
 
 extension ItemSnapshot {
+    // Both are field arithmetic rather than calls into the core: every row
+    // reads them on every tick, and a call would send the whole snapshot
+    // across. `SDMShimTests` pins each to the core's own answer.
+
     /// A `.queued` item that has already failed at least once.
-    public var isRetrying: Bool { (try? itemSnapshotIsRetrying(item: self)) ?? false }
-    public var fractionCompleted: Double { (try? itemSnapshotFractionCompleted(item: self)) ?? 0 }
+    public var isRetrying: Bool { state == .queued && failedAttemptCount != nil }
+    public var fractionCompleted: Double {
+        guard let total = totalBytes, total > 0 else { return 0 }
+        return Double(completed.totalBytes) / Double(total)
+    }
 }
 
 /// The built-in themes, sorted by name (owned by Rust).
