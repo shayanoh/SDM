@@ -360,7 +360,8 @@ fn schedulable_packages(state: &EngineState) -> Vec<DownloadPackage> {
     for item in held.iter_mut().flat_map(|package| package.items.iter_mut()) {
         // An item being removed or reset must not be started under the code
         // that is trashing its files (see `EngineState::removing`).
-        if state.retry_hold_ticks().contains_key(&item.id) || state.removing.contains(&item.id) {
+        if state.retry_hold_ticks().contains_key(&item.id) || state.removing.contains_key(&item.id)
+        {
             item.is_enabled = false;
         }
     }

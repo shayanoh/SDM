@@ -136,7 +136,9 @@ impl RemovalGuard {
     /// Marks `ids` as being removed. `state` is the locked state of the scope
     /// that decided the operation, so the marking is atomic with the decision.
     fn new(inner: &Arc<Inner>, state: &mut EngineState, ids: Vec<Uuid>) -> Self {
-        state.removing.extend(ids.iter().copied());
+        for id in &ids {
+            *state.removing.entry(*id).or_insert(0) += 1;
+        }
         Self {
             inner: Arc::clone(inner),
             ids,
@@ -148,7 +150,12 @@ impl Drop for RemovalGuard {
     fn drop(&mut self) {
         let mut state = self.inner.lock();
         for id in &self.ids {
-            state.removing.remove(id);
+            if let Some(count) = state.removing.get_mut(id) {
+                *count -= 1;
+                if *count == 0 {
+                    state.removing.remove(id);
+                }
+            }
         }
     }
 }
