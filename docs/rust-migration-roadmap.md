@@ -128,8 +128,7 @@ Settled at review gate E:
 
 Bugs found in the Swift core along the way (not fixed on `main`): the
 wholesale pause sweep (gate C), the stop-at-completion and interrupted-mux
-"already exists" failures and the unguarded removal window does not apply
-(gate D), and the probe slot leak above.
+"already exists" failures (gate D), and the probe slot leak above.
 
 ### Measurements
 
