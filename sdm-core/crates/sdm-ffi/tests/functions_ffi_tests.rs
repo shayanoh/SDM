@@ -180,3 +180,72 @@ fn range_set_helpers_merge_total_and_find_gaps() {
         Err(CoreError::InvalidArgument { .. })
     ));
 }
+
+#[test]
+fn constructors_fill_ids_and_defaults() {
+    let item = download_item_for_url(
+        su("https://example.com/a.bin"),
+        "a.bin".to_owned(),
+        Some(10),
+        sdm_core::ItemState::Stopped,
+    )
+    .unwrap();
+    assert_eq!(item.output_filename, "a.bin");
+    assert_eq!(item.state, sdm_core::ItemState::Stopped);
+    assert!(item.is_enabled);
+    assert_eq!(item.total_bytes(), Some(10));
+    let other = download_item_for_url(
+        su("https://example.com/a.bin"),
+        "a.bin".to_owned(),
+        None,
+        sdm_core::ItemState::Queued,
+    )
+    .unwrap();
+    assert_ne!(item.id, other.id);
+    assert_eq!(other.total_bytes(), None);
+    assert!(matches!(
+        download_item_for_url(
+            su("https://example.com/a"),
+            String::new(),
+            None,
+            sdm_core::ItemState::Queued
+        ),
+        Err(CoreError::InvalidArgument { .. })
+    ));
+
+    let package =
+        download_package_new("Pack".to_owned(), vec![item], Some("note".to_owned())).unwrap();
+    assert_eq!(package.name, "Pack");
+    assert_eq!(package.items.len(), 1);
+    assert_eq!(package.note.as_deref(), Some("note"));
+    assert!(matches!(
+        download_package_new(String::new(), vec![], None),
+        Err(CoreError::InvalidArgument { .. })
+    ));
+}
+
+#[test]
+fn grabber_summary_and_names_match_the_core_methods() {
+    let link = ProbedLink::new(su("https://example.com/movie.mp4"));
+    assert_eq!(
+        probed_link_effective_filename(link.clone()).unwrap(),
+        "movie.mp4"
+    );
+    let row = MediaRow::new(su("https://www.youtube.com/watch?v=abc"));
+    assert_eq!(
+        media_row_display_filename(row.clone()).unwrap(),
+        row.display_filename()
+    );
+    let snapshot = sdm_grabber::GrabberSnapshot::new(vec![link], vec![row], vec![], 0, 2);
+    let summary = grabber_snapshot_summary(snapshot.clone()).unwrap();
+    assert_eq!(summary.online_count, snapshot.online_count());
+    assert_eq!(summary.recheckable_count, snapshot.recheckable_count());
+    assert!(summary.is_checking);
+}
+
+#[test]
+fn package_aggregate_for_items_matches_the_engine_computation() {
+    let empty = package_aggregate_for_items(vec![], 0.0).unwrap();
+    assert_eq!(empty, sdm_engine::PackageAggregate::new(&[], 0.0));
+    assert_eq!(empty.total_bytes, 0);
+}

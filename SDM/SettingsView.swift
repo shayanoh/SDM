@@ -11,6 +11,7 @@ import SwiftUI
 /// and are reverted on Cancel from a snapshot taken on appear.
 struct SettingsView: View {
     @Environment(EngineController.self) private var controller
+    @Environment(GrabberController.self) private var grabberController
     @Environment(ManagedBinariesController.self) private var managedBinaries
     @Environment(ThemeStore.self) private var themeStore
     @Environment(ActivationPolicyController.self) private var activationPolicyController
@@ -411,6 +412,7 @@ struct SettingsView: View {
         NotificationSettings.packageFinishedEnabled = packageFinishedEnabled
         NotificationSettings.downloadFailedEnabled = downloadFailedEnabled
         NotificationSettings.linksGrabbedEnabled = linksGrabbedEnabled
+        grabberController.applyStoredSettings()
         Task { await controller.applyStoredSettings() }
         dismiss()
     }

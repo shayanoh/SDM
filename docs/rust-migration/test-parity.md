@@ -1,6 +1,6 @@
 # Swift to Rust test parity ledger
 
-One table per Swift test target, one row per file under `SDMKit/Tests/<target>/` (helpers and fixture files included, with 0 tests). Swift counts come from `grep -c '@Test'` per file. The Rust columns are filled in as each file is ported (see the global constraints).
+One table per Swift test target, one row per file under `legacy/SDMKitSwift/Tests/<target>/` (helpers and fixture files included, with 0 tests). Swift counts come from `grep -c '@Test'` per file. The Rust columns are filled in as each file is ported (see the global constraints).
 
 ## SDMCoreTests
 
@@ -158,5 +158,7 @@ These test the UniFFI surface (`sdm-ffi` and the generated Swift), not the porte
 | (Rust-only) | 0 | `binaries_ffi_tests.rs` | 4 | Production `new`; every exported method over the fake fetcher and process runner; status after a failed check; empty directory refused. |
 | (Rust-only) | 0 | `concurrency_ffi_tests.rs` | 5 | Review Focus 5: 16 tasks x 2,000 mixed calls while a 17th shuts the engine down at a seeded random point, under a 60 s timeout; a deliberately panicking call is an error, sync and async; a panic inside the engine (store `save`) and inside trashing leaves the engine answering; a poisoned wrapper mutex is recovered. |
 | (Rust-only) | 0 | `custom_types_ffi_tests.rs` | 7 | The custom types through the converters UniFFI generates: `SourceUrl` byte-for-byte for URLs `url::Url` would rewrite (Review Focus 2 across the boundary), refusal of unparseable strings as a throwable `CoreError`, `Uuid`, `PathBuf`, `usize`, `RangeSet` normalization. |
-| (Rust-only) | 0 | `functions_ffi_tests.rs` | 11 | The free functions: version, timing constants, speed helpers, theme catalog, contrast validation, site registry, format selector, format menu, URL extraction, media handoff, range-set helpers. |
-| **Total SDMRustTests** | **3** |  | **40** | Replaces `skeleton_tests.rs` (2). |
+| (Rust-only) | 0 | `functions_ffi_tests.rs` | 14 | The free functions: version, timing constants, speed helpers, theme catalog, contrast validation, site registry, format selector, format menu, URL extraction, media handoff, range-set helpers; Task 24 adds the constructors (`download_item_for_url`, `download_package_new`), the grabber summary and names, and `package_aggregate_for_items`. |
+| (Rust-only) | 0 | `shared.rs` (unit) | 1 | Task 24: `Toolchain::configured` starts with the given yt-dlp settings. |
+| `ShimTests.swift` (`SDMShimTests`) | 26 | (Swift-only) | | Task 24: one test per shim addition in `SDMKit/Sources/{SDMCore,SDMResolve,SDMEngine,SDMGrabber}`. |
+| **Total SDMRustTests** | **3** |  | **44** | Replaces `skeleton_tests.rs` (2). `SDMShimTests` (26) is counted separately. |

@@ -1036,7 +1036,7 @@ private func headerAggregate(
 ) -> PackageAggregate {
     isLive
         ? controller.liveModel(for: package).aggregate
-        : PackageAggregate(items: package.items, globalRecentSpeed: 0)
+        : package.aggregate
 }
 
 /// The package header's live "completed / total" bytes readout. See
@@ -1364,14 +1364,17 @@ private struct DraggableItemRow<Content: View>: View {
         url: URL(fileURLWithPath: ""),
         filename: "Filename",
         totalBytes: 1_000_000,
-        completed: RangeSet([ByteRange(start: 10000, end: 20000)]),
+        completed: RangeSet(ranges: [ByteRange(start: 10000, end: 20000)]),
         state: .running,
         isEnabled: true,
         isResumable: true,
         activeSegments: 1,
         configuredSegments: 3,
         bytesPerSecond: 100000,
-        speedHistory: [100000, 90000, 80000])
+        speedHistory: [100000, 90000, 80000],
+        checkpointFailure: nil, remainingAttempts: nil, failedAttemptCount: nil,
+        lastFailureReason: nil, retryHoldSeconds: nil, fileMissing: false,
+        isAssembling: false, assembly: .none, partFilenames: ["Filename"], metadata: nil)
     let theme = ThemeCatalog.builtInThemes()[5]
     let controller = EngineController(notificationManager: NotificationManager())
     let row = { (index: Int, isSelected: Bool) in
@@ -1750,9 +1753,11 @@ private struct ItemETAText: View {
     private var eta: TimeInterval {
         var speed = model.recentAverageSpeed
         if speed == 0, isQueued { speed = stats.recentGlobalSpeed }
-        return estimatedSecondsRemaining(
-            totalBytes: model.totalBytes ?? 0, completedBytes: model.completedBytes,
-            speed: speed)
+        // A failed call reads as "no estimate", which the row shows as a dash.
+        return
+            (try? estimatedSecondsRemaining(
+                totalBytes: model.totalBytes ?? 0, completedBytes: model.completedBytes,
+                speed: speed)) ?? 0
     }
 
     var body: some View {

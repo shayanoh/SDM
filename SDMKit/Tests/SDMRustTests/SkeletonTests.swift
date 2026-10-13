@@ -27,7 +27,8 @@ import Testing
     let engine = try DownloadEngine(
         config: EngineConfig(
             stateFile: directory.appendingPathComponent("state.json"),
-            settings: settings, binarySearchPaths: []))
+            settings: settings, binarySearchPaths: [], cookieSource: .none,
+            maxPlaylistVideos: 50, ytDlpExtraArguments: []))
     #expect(try await engine.snapshot().packages.isEmpty)
 
     // A URL Foundation percent-encodes: the string Swift hands over is kept.

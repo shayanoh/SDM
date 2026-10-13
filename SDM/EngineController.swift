@@ -3,6 +3,7 @@ import Observation
 import SDMCore
 import SDMEngine
 import SDMResolve
+import os.log
 
 /// A package's URL and optional size, as grabbed from LinkGrabber
 struct PackageUrlItem {
@@ -11,16 +12,12 @@ struct PackageUrlItem {
     let effectiveFilename: String?
 }
 
-/// Bridges the engine actor to SwiftUI: drives the `AppTiming.ticksPerSecond`
+/// Bridges the Rust download engine to SwiftUI: drives the `AppTiming.ticksPerSecond`
 /// tick and republishes on the main actor at that same rate.
 @MainActor
 @Observable
 final class EngineController {
-    private(set) var snapshot = EngineSnapshot(
-        packages: [],
-        globalBytesPerSecond: 0,
-        globalHistory: []
-    )
+    private(set) var snapshot = EngineSnapshot.empty
     /// A `packages` array that only changes identity when something beyond
     /// pure byte/speed telemetry actually changed (add/remove/reorder, a
     /// state transition, enable/disable, resumability learned, etc.) — see
@@ -83,8 +80,19 @@ final class EngineController {
 
     /// `nonisolated` so `applicationWillTerminate` — which runs on the main
     /// thread and cannot await anything — can still reach the engine. Safe
-    /// because `DownloadEngine` is an actor, and therefore `Sendable`.
+    /// because `DownloadEngine` is a `Sendable` reference type whose state
+    /// the Rust core guards itself.
     private nonisolated let engine: DownloadEngine
+    private nonisolated static let log = Logger(
+        subsystem: "com.shayanoh.SDM", category: "engine")
+    /// The text of the last tick/snapshot error that was logged, so a core
+    /// that fails on every 5 Hz tick logs once rather than five times a second.
+    @ObservationIgnored private var lastLoggedTickError: String?
+    /// The generation of the last published snapshot, `nil` before the first.
+    /// The Rust engine returns the same snapshot (same generation) while
+    /// nothing changed, which is what the old `newSnapshot != snapshot`
+    /// equality check was standing in for.
+    @ObservationIgnored private var publishedGeneration: UInt64?
     /// Retains the heartbeat's own `Task`, started once and independent of
     /// any SwiftUI view's `.task` — see `startHeartbeatIfNeeded()`.
     private var heartbeatTask: Task<Void, Never>?
@@ -92,12 +100,7 @@ final class EngineController {
     private var previousSnapshot: EngineSnapshot?
     private let downloadFolder: URL
 
-    init(
-        notificationManager: NotificationManager,
-        binaryLocator: BinaryLocator = BinaryLocator(searchPaths: [
-            ManagedBinariesController.binDirectory
-        ])
-    ) {
+    init(notificationManager: NotificationManager) {
         notifications = notificationManager
         let support = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -105,49 +108,108 @@ final class EngineController {
         let downloads = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
         downloadFolder = downloads
 
-        // yt-dlp / ffmpeg are located once and shared by the resolver and the
-        // muxer. Cookie source and playlist cap are Part 4 Settings — literals
-        // for now.
-        let processRunner = SystemProcessRunner()
-        engine = DownloadEngine(
-            transport: URLSessionTransport(),
-            stateStore: JSONStateStore(fileURL: support.appendingPathComponent("state.json")),
-            settings: EngineSettings(
-                maxConcurrent: EngineSettingsStore.maxConcurrent,
-                segmentsPerItem: EngineSettingsStore.segmentsPerItem,
-                globalMaxConnections: EngineSettingsStore.globalMaxConnections,
-                maxConnectionsPerHost: EngineSettingsStore.maxConnectionsPerHost,
-                downloadFolder: downloads,
-                minSegmentSizeBytes: Int64(EngineSettingsStore.minSegmentSizeMB) * 1024 * 1024
-            ),
-            resolver: YtDlpResolver(
-                runner: processRunner, locator: binaryLocator,
-                cookieSource: { MediaSitesSettingsStore.cookieSource },
-                maxPlaylistVideos: { MediaSitesSettingsStore.maxPlaylistVideos },
-                extraArguments: { ManagedBinariesController.ytDlpExtraArguments }
-            ),
-            muxer: FFmpegMuxer(runner: processRunner, locator: binaryLocator),
-            wholesaleDownloader: YtDlpWholesaleDownloader(
-                runner: processRunner, locator: binaryLocator,
-                cookieSource: { MediaSitesSettingsStore.cookieSource },
-                extraArguments: { ManagedBinariesController.ytDlpExtraArguments }
-            )
-        )
+        // yt-dlp / ffmpeg are looked for in the managed `bin/` directory. The
+        // resolver settings start at what the Swift app's closures returned
+        // on first use; `applyYtDlpSettings()` re-sends them when Settings
+        // changes them.
+        let config = EngineConfig(
+            stateFile: support.appendingPathComponent("state.json"),
+            settings: Self.storedSettings(downloadFolder: downloads),
+            binarySearchPaths: [ManagedBinariesController.binDirectory],
+            cookieSource: MediaSitesSettingsStore.cookieSource,
+            maxPlaylistVideos: UInt32(MediaSitesSettingsStore.maxPlaylistVideos),
+            ytDlpExtraArguments: ManagedBinariesController.ytDlpExtraArguments)
+        do {
+            engine = try DownloadEngine(config: config)
+        } catch {
+            // The configuration is built from clamped app settings and fixed
+            // paths, so this is a bug, not a condition the user can fix; there
+            // is no engine to run without it.
+            fatalError("SDM could not start its download core: \(error.localizedDescription)")
+        }
+    }
+
+    private static func storedSettings(downloadFolder: URL) -> EngineSettings {
+        EngineSettings(
+            maxConcurrent: EngineSettingsStore.maxConcurrent,
+            segmentsPerItem: EngineSettingsStore.segmentsPerItem,
+            globalMaxConnections: EngineSettingsStore.globalMaxConnections,
+            maxConnectionsPerHost: EngineSettingsStore.maxConnectionsPerHost,
+            downloadFolder: downloadFolder,
+            minSegmentSizeBytes: Int64(EngineSettingsStore.minSegmentSizeMB) * 1024 * 1024)
     }
 
     /// Re-reads every `EngineSettingsStore` value and applies it live. Called
     /// from `SettingsView` whenever the operator changes a value.
     func applyStoredSettings() async {
-        await engine.updateSettings(
-            EngineSettings(
-                maxConcurrent: EngineSettingsStore.maxConcurrent,
-                segmentsPerItem: EngineSettingsStore.segmentsPerItem,
-                globalMaxConnections: EngineSettingsStore.globalMaxConnections,
-                maxConnectionsPerHost: EngineSettingsStore.maxConnectionsPerHost,
-                downloadFolder: downloadFolder,
-                minSegmentSizeBytes: Int64(EngineSettingsStore.minSegmentSizeMB) * 1024 * 1024
-            )
-        )
+        applyYtDlpSettings()
+        do {
+            try await engine.updateSettings(
+                settings: Self.storedSettings(downloadFolder: downloadFolder))
+        } catch {
+            report("apply the new settings", error)
+        }
+    }
+
+    /// Sends the yt-dlp settings (cookie source, playlist cap) to the engine.
+    /// The Swift core read these through closures on every use; the Rust
+    /// engine holds copies, so every change must be pushed. The extra
+    /// arguments are fixed at construction.
+    func applyYtDlpSettings() {
+        do {
+            try engine.setCookieSource(source: MediaSitesSettingsStore.cookieSource)
+            try engine.setMaxPlaylistVideos(
+                count: UInt32(MediaSitesSettingsStore.maxPlaylistVideos))
+        } catch {
+            report("apply the yt-dlp settings", error)
+        }
+    }
+
+    /// Points a binary (`"yt-dlp"`, `"ffmpeg"`) at a user-chosen path, or back
+    /// at the default lookup with `nil`.
+    func setBinaryOverride(name: String, path: URL?) {
+        do {
+            try engine.setBinaryOverride(name: name, path: path)
+        } catch {
+            report("change the \(name) location", error)
+        }
+    }
+
+    /// Surfaces a failed user action: logged, and shown as a banner, because
+    /// the engine used to be unable to fail and nothing else tells the user
+    /// that a click did nothing.
+    private func report(_ action: String, _ error: Error) {
+        Self.log.error("Could not \(action, privacy: .public): \(error.localizedDescription)")
+        notifications.postInfo("Could not \(action): \(error.localizedDescription)")
+    }
+
+    /// Logs a heartbeat failure once per distinct message and leaves the UI on
+    /// the previous snapshot; the next tick tries again.
+    private func logTickFailure(_ error: Error) {
+        let message = error.localizedDescription
+        guard message != lastLoggedTickError else { return }
+        lastLoggedTickError = message
+        Self.log.error("Engine heartbeat failed: \(message, privacy: .public)")
+    }
+
+    /// Runs one user action against the engine and republishes the snapshot
+    /// whether or not it worked (a refused call may still have changed
+    /// nothing, which `publish` ignores).
+    private func perform(_ action: String, _ body: () async throws -> Void) async {
+        do {
+            try await body()
+        } catch {
+            report(action, error)
+        }
+        await republish()
+    }
+
+    private func republish() async {
+        do {
+            publish(try await engine.snapshot())
+        } catch {
+            logTickFailure(error)
+        }
     }
 
     /// Starts the heartbeat exactly once for the process's lifetime, in a
@@ -184,7 +246,13 @@ final class EngineController {
     /// would hide it from callers and from tests that construct a
     /// controller without wanting disk access yet.
     private func runHeartbeat() async {
-        await engine.restore()
+        do {
+            try await engine.restore()
+        } catch {
+            // Without the saved list the app still works; the user just
+            // starts with an empty one. Say so rather than failing silently.
+            report("load your saved downloads", error)
+        }
         // `restore()` always lands every non-terminal item `.stopped` — the
         // store never persists `.queued`/`.running` (see
         // `DownloadEngine.persist()`) — so "resume downloads automatically on
@@ -193,18 +261,27 @@ final class EngineController {
         // by default means simply not calling it, leaving everything exactly
         // as `restore()` left it.
         if EngineSettingsStore.autoStartDownloadsOnLaunch {
-            await engine.resumeAll()
+            do {
+                try await engine.resumeAll()
+            } catch {
+                report("resume your downloads", error)
+            }
         }
-        publish(await engine.snapshot())
+        await republish()
         notifications.requestAuthorization()
 
         while !Task.isCancelled {
-            await engine.tick()
-            let newSnapshot = await engine.snapshot()
-            notifyChanges(from: previousSnapshot, to: newSnapshot)
-            previousSnapshot = newSnapshot
-            publish(newSnapshot)
-            await refreshDetailHistories()
+            do {
+                try await engine.tick()
+                let newSnapshot = try await engine.snapshot()
+                lastLoggedTickError = nil
+                notifyChanges(from: previousSnapshot, to: newSnapshot)
+                previousSnapshot = newSnapshot
+                publish(newSnapshot)
+                await refreshDetailHistories()
+            } catch {
+                logTickFailure(error)
+            }
             try? await Task.sleep(for: .seconds(1.0 / Double(AppTiming.ticksPerSecond)))
         }
     }
@@ -218,7 +295,10 @@ final class EngineController {
         // means there is nothing to do — and `@Observable` notifies on
         // *reassignment*, not on value change, so assigning it anyway would
         // re-evaluate every reader at full tick rate with nothing running.
-        guard newSnapshot != snapshot else { return }
+        // The engine hands back the same snapshot, `generation` included,
+        // while nothing changed.
+        guard newSnapshot.generation != publishedGeneration else { return }
+        publishedGeneration = newSnapshot.generation
         // Runs last, once everything below is in its new state.
         defer { onPublish?() }
         let priorSnapshot = snapshot
@@ -242,7 +322,7 @@ final class EngineController {
 
         guard structuralChanged else { return }
         structuralPackages = newSnapshot.packages
-        let completed = Self.completedOnly(newSnapshot.packages)
+        let completed = completedOnly(newSnapshot.packages)
         if !Self.packagesStructurallyEqual(completedPackages, completed) {
             completedPackages = completed
         }
@@ -261,47 +341,32 @@ final class EngineController {
     private func refreshLiveModels(
         from snapshot: EngineSnapshot, previous: EngineSnapshot?, structuralChanged: Bool
     ) {
-        let globalRecentSpeed = stats.recentGlobalSpeed
         let previousPackages = structuralChanged ? nil : previous?.packages
         for (index, package) in snapshot.packages.enumerated() {
-            // With no structural change the packages line up by index. A
-            // package with a running item is never skipped: its ETA also
-            // depends on the global rate.
+            // With no structural change the packages line up by index. The
+            // engine stamps a package with a new `revision` whenever anything
+            // in it changed — items, aggregate, or the global rate its ETA
+            // depends on — so an equal revision means nothing to update.
             if let previousPackages, index < previousPackages.count,
                 previousPackages[index].id == package.id,
-                let model = packageModels[package.id], !model.hasRunningItems,
-                previousPackages[index].items == package.items
+                previousPackages[index].revision == package.revision,
+                packageModels[package.id] != nil
             {
                 continue
             }
-            var isStale = structuralChanged
-            var hasRunning = false
             for item in package.items {
                 if let model = itemModels[item.id] {
-                    if model.update(from: item) { isStale = true }
+                    model.update(from: item)
                 } else {
                     itemModels[item.id] = ItemLiveModel(item)
-                    isStale = true
                 }
-                if item.state == .running { hasRunning = true }
             }
-            // A package with nothing running and no changed member has the
-            // same aggregate it had last tick. One with a running member is
-            // always recomputed: its ETA also depends on the global rate.
+            // The aggregate is computed once per snapshot by the core.
             if let model = packageModels[package.id] {
-                if isStale || hasRunning {
-                    model.update(
-                        PackageAggregate(
-                            items: package.items, globalRecentSpeed: globalRecentSpeed))
-                }
-                model.hasRunningItems = hasRunning
+                model.update(package.aggregate)
             } else {
-                let model = PackageLiveModel(
-                    id: package.id,
-                    aggregate: PackageAggregate(
-                        items: package.items, globalRecentSpeed: globalRecentSpeed))
-                model.hasRunningItems = hasRunning
-                packageModels[package.id] = model
+                packageModels[package.id] = PackageLiveModel(
+                    id: package.id, aggregate: package.aggregate)
             }
         }
 
@@ -334,7 +399,16 @@ final class EngineController {
 
     private func refreshDetailHistories() async {
         let wanted = detailItemIDs
-        let histories = wanted.isEmpty ? [:] : await engine.speedHistories(for: wanted)
+        var histories: [UUID: [Double]] = [:]
+        if !wanted.isEmpty {
+            do {
+                histories = try await engine.speedHistories(itemIds: wanted)
+            } catch {
+                // Keep the short tails already on screen.
+                logTickFailure(error)
+                return
+            }
+        }
         // The selection may have moved on while the engine was answering.
         guard wanted == detailItemIDs else { return }
         for itemID in itemsHoldingDetailHistory.subtracting(wanted) {
@@ -381,20 +455,26 @@ final class EngineController {
         if let model = packageModels[package.id] { return model }
         let model = PackageLiveModel(
             id: package.id,
-            aggregate: PackageAggregate(items: package.items, globalRecentSpeed: 0))
+            aggregate: package.aggregate)
         packageModels[package.id] = model
         return model
     }
 
     /// Spec §9.1: "Completed is a filtered view of the same list, not a
     /// separate store."
-    private static func completedOnly(_ packages: [PackageSnapshot]) -> [PackageSnapshot] {
+    private func completedOnly(_ packages: [PackageSnapshot]) -> [PackageSnapshot] {
         packages.compactMap { package in
             let completedItems = package.items.filter { $0.state == .completed }
             guard !completedItems.isEmpty else { return nil }
+            // The header figures of the filtered copy sum just its items,
+            // computed by the core like the engine's own packages'.
+            let aggregate =
+                (try? packageAggregateForItems(
+                    items: completedItems, globalRecentSpeed: stats.recentGlobalSpeed))
+                ?? package.aggregate
             return PackageSnapshot(
                 id: package.id, name: package.name, priority: package.priority,
-                items: completedItems)
+                items: completedItems, aggregate: aggregate, revision: package.revision)
         }
     }
 
@@ -412,9 +492,8 @@ final class EngineController {
                 packageA.priority == packageB.priority,
                 packageA.items.count == packageB.items.count
             else { return false }
-            // An unchanged package comes back from the engine as the same
-            // `items` storage, which `==` recognizes without walking it.
-            if packageA.items == packageB.items { continue }
+            // An unchanged package keeps its `revision`; no need to walk it.
+            if packageA.revision == packageB.revision { continue }
             for (itemA, itemB) in zip(packageA.items, packageB.items) {
                 guard itemA.id == itemB.id, itemA.url == itemB.url,
                     itemA.filename == itemB.filename, itemA.state == itemB.state,
@@ -435,23 +514,27 @@ final class EngineController {
         return true
     }
 
+    /// Every item of a non-empty package has completed.
+    private static func isFinished(_ package: PackageSnapshot) -> Bool {
+        !package.items.isEmpty && package.items.allSatisfy { $0.state == .completed }
+    }
+
     /// Compares two heartbeats' worth of snapshot and fires exactly the
     /// notifications spec §9.8 lists, once per transition — never a repeat
     /// for a state that has already been announced.
     private func notifyChanges(from old: EngineSnapshot?, to new: EngineSnapshot) {
-        guard let old, old.packages != new.packages else { return }
+        guard let old, old.generation != new.generation else { return }
 
-        // Only packages whose items differ can hold a transition, and the
-        // engine returns an unchanged package's `items` as the same
-        // storage, so finding them costs one cheap compare per package.
-        // Both sides are collected — an item moved between packages changed
+        // Only packages whose content changed can hold a transition, and an
+        // unchanged package keeps its `revision`, so finding them costs one
+        // cheap compare per package. Both sides are collected — an item moved between packages changed
         // its old package *and* its new one — so its previous state is
         // always among `changedOld` and a move never reads as "finished".
         let oldByID = Dictionary(uniqueKeysWithValues: old.packages.map { ($0.id, $0) })
         let newByID = Dictionary(uniqueKeysWithValues: new.packages.map { ($0.id, $0) })
-        let changedNew = new.packages.filter { oldByID[$0.id]?.items != $0.items }
+        let changedNew = new.packages.filter { oldByID[$0.id]?.revision != $0.revision }
         guard !changedNew.isEmpty else { return }
-        let changedOld = old.packages.filter { newByID[$0.id]?.items != $0.items }
+        let changedOld = old.packages.filter { newByID[$0.id]?.revision != $0.revision }
 
         let oldStates = Dictionary(
             uniqueKeysWithValues: changedOld.flatMap(\.items).map { ($0.id, $0.state) })
@@ -468,42 +551,37 @@ final class EngineController {
         }
 
         for package in changedNew {
-            let isDone = !package.items.isEmpty && package.completedCount == package.items.count
+            let isDone = Self.isFinished(package)
             guard isDone else { continue }
             let wasDone =
-                oldByID[package.id].map {
-                    !$0.items.isEmpty && $0.completedCount == $0.items.count
-                } ?? false
+                oldByID[package.id].map(Self.isFinished) ?? false
             guard !wasDone else { continue }
             notifications.notifyPackageFinished(name: package.name)
         }
     }
 
     func setEnabled(_ enabled: Bool, for itemID: UUID) async {
-        await engine.setEnabled(enabled, for: itemID)
-        publish(await engine.snapshot())
+        await perform("change the download") {
+            try await engine.setEnabled(enabled: enabled, itemId: itemID)
+        }
     }
 
     func startItem(_ itemID: UUID) async {
-        await engine.startItem(itemID)
-        publish(await engine.snapshot())
+        await perform("start the download") { try await engine.startItem(itemId: itemID) }
     }
 
     func stopItem(_ itemID: UUID) async {
-        await engine.stopItem(itemID)
-        publish(await engine.snapshot())
+        await perform("stop the download") { try await engine.stopItem(itemId: itemID) }
     }
 
     func retry(_ itemID: UUID) async {
-        await engine.retry(itemID)
-        publish(await engine.snapshot())
+        await perform("retry the download") { try await engine.retry(itemId: itemID) }
     }
 
     /// Re-runs only the `ffmpeg` mux for a failed muxed item whose parts are
     /// all downloaded. Spec §9.3's "Retry mux".
     func retryMux(_ itemID: UUID) async {
-        await engine.retryMux(itemID)
-        publish(await engine.snapshot())
+        await perform("retry the mux") { try await engine.retryMux(itemId: itemID) }
     }
 
     func moveItem(_ itemID: UUID, toPackage packageID: UUID, atIndex index: Int? = nil) async {
@@ -511,50 +589,54 @@ final class EngineController {
     }
 
     func moveItems(_ itemIDs: [UUID], toPackage packageID: UUID, atIndex index: Int? = nil) async {
-        await engine.moveItems(itemIDs, toPackage: packageID, atIndex: index)
-        publish(await engine.snapshot())
+        await perform("move the downloads") {
+            try await engine.moveItemsToPackage(
+                itemIds: itemIDs, packageId: packageID, atIndex: index)
+        }
     }
 
     func moveItems(_ itemIDs: [UUID], toNewPackageNamed packageName: String) async {
-        await engine.moveItems(itemIDs, toNewPackageNamed: packageName)
-        publish(await engine.snapshot())
+        await perform("move the downloads") {
+            try await engine.moveItemsToNewPackage(itemIds: itemIDs, packageName: packageName)
+        }
     }
 
     func reorderPackages(_ packageIDs: [UUID]) async {
-        await engine.reorderPackages(packageIDs)
-        publish(await engine.snapshot())
+        await perform("reorder the packages") {
+            try await engine.reorderPackages(packageIds: packageIDs)
+        }
     }
 
     func reorderItems(_ itemIDs: [UUID], inPackage packageID: UUID) async {
-        await engine.reorderItems(itemIDs, inPackage: packageID)
-        publish(await engine.snapshot())
+        await perform("reorder the downloads") {
+            try await engine.reorderItems(itemIds: itemIDs, packageId: packageID)
+        }
     }
 
     /// Global pause/resume: stops or (re-)queues every stoppable/resumable
     /// item in one call. Never touches any item's `isEnabled`.
     func pauseAll() async {
-        await engine.pauseAll()
-        publish(await engine.snapshot())
+        await perform("pause the downloads") { try await engine.pauseAll() }
     }
 
     func resumeAll() async {
-        await engine.resumeAll()
-        publish(await engine.snapshot())
+        await perform("resume the downloads") { try await engine.resumeAll() }
     }
 
     func removeItem(_ itemID: UUID, deleteFile: Bool) async {
-        await engine.removeItem(itemID, deleteFile: deleteFile)
-        publish(await engine.snapshot())
+        await perform("remove the download") {
+            try await engine.removeItem(itemId: itemID, deleteFile: deleteFile)
+        }
     }
 
     func removePackage(_ packageID: UUID, deleteFiles: Bool) async {
-        await engine.removePackage(packageID, deleteFiles: deleteFiles)
-        publish(await engine.snapshot())
+        await perform("remove the package") {
+            try await engine.removePackage(packageId: packageID, deleteFiles: deleteFiles)
+        }
     }
 
     func resetDownload(_ itemID: UUID) async {
-        await engine.resetDownload(itemID)
-        publish(await engine.snapshot())
+        await perform("reset the download") { try await engine.resetDownload(itemId: itemID) }
     }
 
     /// Where a completed item's file actually lives on disk — the same path
@@ -574,25 +656,37 @@ final class EngineController {
     /// removed in turn, then the snapshot is republished once at the end
     /// rather than once per item.
     func removeItems(_ itemIDs: [UUID], deleteFile: Bool) async {
+        // One failure does not stop the rest; the first is reported.
+        var firstError: Error?
         for itemID in itemIDs {
-            await engine.removeItem(itemID, deleteFile: deleteFile)
+            do {
+                try await engine.removeItem(itemId: itemID, deleteFile: deleteFile)
+            } catch {
+                firstError = firstError ?? error
+            }
         }
-        publish(await engine.snapshot())
+        if let firstError { report("remove some downloads", firstError) }
+        await republish()
     }
 
     /// Hands a grabbed package off to the download engine. Spec §7.5's "Add
     /// to downloads" / "Add and start".
     func addPackage(name: String, urlItems: [PackageUrlItem], startImmediately: Bool) async {
         guard !urlItems.isEmpty else { return }
-        let items = urlItems.map { urlItem in
-            DownloadItem(
-                url: urlItem.url,
-                filename: urlItem.effectiveFilename
-                    ?? (urlItem.url.lastPathComponent.isEmpty
-                        ? "download" : urlItem.url.lastPathComponent),
-                totalBytes: urlItem.size,
-                state: startImmediately ? .queued : .stopped
-            )
+        let items: [DownloadItem]
+        do {
+            items = try urlItems.map { urlItem in
+                try downloadItemForUrl(
+                    url: urlItem.url,
+                    filename: urlItem.effectiveFilename
+                        ?? (urlItem.url.lastPathComponent.isEmpty
+                            ? "download" : urlItem.url.lastPathComponent),
+                    totalBytes: urlItem.size,
+                    state: startImmediately ? .queued : .stopped)
+            }
+        } catch {
+            report("add the download", error)
+            return
         }
         await addItems(name: name, note: nil, items: items, startImmediately: startImmediately)
     }
@@ -611,8 +705,10 @@ final class EngineController {
             copy.isEnabled = true
             return copy
         }
-        await engine.add(DownloadPackage(name: name, items: staged, note: note))
-        publish(await engine.snapshot())
+        await perform("add the download") {
+            try await engine.add(
+                package: try downloadPackageNew(name: name, items: staged, note: note))
+        }
     }
 
     /// Shuts the engine down from `applicationWillTerminate`, blocking the
@@ -641,7 +737,9 @@ final class EngineController {
         let engine = self.engine
         let done = DispatchSemaphore(value: 0)
         Task.detached(priority: .userInitiated) {
-            await engine.shutdown()
+            // Nothing useful to do with a failure at quit; the state file was
+            // flushed by the debounce, and the process is ending either way.
+            try? await engine.shutdown()
             done.signal()
         }
         _ = done.wait(timeout: .now() + timeout)

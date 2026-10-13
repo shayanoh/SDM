@@ -44,6 +44,12 @@ pub struct EngineConfig {
     /// override. Empty means the default install locations (Homebrew,
     /// `/usr/local/bin`, `/usr/bin`, `~/.local/bin`).
     pub binary_search_paths: Vec<PathBuf>,
+    /// Initial yt-dlp cookie source; change it later with `set_cookie_source`.
+    pub cookie_source: CookieSource,
+    /// Initial cap on playlist videos resolved (Swift's default was 50).
+    pub max_playlist_videos: u32,
+    /// Initial extra arguments for every yt-dlp invocation.
+    pub yt_dlp_extra_arguments: Vec<String>,
 }
 
 /// The collaborators of an engine, for tests that substitute fakes. Not
@@ -182,7 +188,12 @@ impl DownloadEngine {
     /// muxer.
     #[uniffi::constructor]
     pub fn new(config: EngineConfig) -> Result<Arc<Self>, CoreError> {
-        let tools = Toolchain::new(config.binary_search_paths);
+        let tools = Toolchain::configured(
+            config.binary_search_paths,
+            config.cookie_source,
+            config.max_playlist_videos,
+            config.yt_dlp_extra_arguments,
+        );
         let dependencies = EngineDependencies {
             transport: Arc::new(ReqwestTransport::new()),
             state_store: Arc::new(JsonStateStore::new(config.state_file)),

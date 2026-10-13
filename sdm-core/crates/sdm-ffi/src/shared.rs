@@ -153,6 +153,24 @@ impl Toolchain {
         }
     }
 
+    /// A toolchain whose yt-dlp settings start at the given values, so the
+    /// first call already sees what the app configured (the setters only
+    /// matter when a setting changes later).
+    pub fn configured(
+        search_paths: Vec<PathBuf>,
+        cookie_source: CookieSource,
+        max_playlist_videos: u32,
+        extra_arguments: Vec<String>,
+    ) -> Self {
+        let toolchain = Self::new(search_paths);
+        toolchain.settings.set_cookie_source(cookie_source);
+        toolchain
+            .settings
+            .set_max_playlist_videos(max_playlist_videos as usize);
+        toolchain.settings.set_extra_arguments(extra_arguments);
+        toolchain
+    }
+
     pub(crate) fn resolver(&self) -> Arc<dyn LinkResolver> {
         let cookies = Arc::clone(&self.settings);
         let playlist = Arc::clone(&self.settings);
@@ -196,5 +214,26 @@ impl Toolchain {
         }
         self.locator.set_override(path, name);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn configured_toolchain_starts_with_the_given_yt_dlp_settings() {
+        let toolchain = Toolchain::configured(
+            Vec::new(),
+            CookieSource::Safari,
+            7,
+            vec!["--ffmpeg-location".to_owned(), "/bin".to_owned()],
+        );
+        assert_eq!(toolchain.settings.cookie_source(), CookieSource::Safari);
+        assert_eq!(toolchain.settings.max_playlist_videos(), 7);
+        assert_eq!(
+            toolchain.settings.extra_arguments(),
+            vec!["--ffmpeg-location".to_owned(), "/bin".to_owned()]
+        );
     }
 }

@@ -5,12 +5,13 @@
 //! the Swift binding is always a throwing call.
 
 use sdm_core::{
-    AppTiming, ByteRange, ContrastRatio, FormatChoice, MediaFormat, QualityPreferences, RangeSet,
-    ResolvedMedia, SourceUrl, Theme, ThemeCatalog,
+    AppTiming, ByteRange, ContrastRatio, DownloadItem, DownloadPackage, FormatChoice, ItemState,
+    MediaFormat, QualityPreferences, RangeSet, ResolvedMedia, SourceUrl, Theme, ThemeCatalog,
 };
-use sdm_engine::LiveWindow as EngineLiveWindow;
+use sdm_engine::{ItemSnapshot, LiveWindow as EngineLiveWindow, PackageAggregate};
 use sdm_grabber::{
-    MediaFormatMenu, MediaFormatOption, MediaHandoff, MediaRow, ProbedLink, UrlExtractor,
+    GrabberSnapshot, MediaFormatMenu, MediaFormatOption, MediaHandoff, MediaRow, ProbedLink,
+    UrlExtractor,
 };
 use sdm_resolve::{FormatSelector, SiteRegistry};
 
@@ -45,6 +46,17 @@ pub fn live_window() -> Result<LiveWindow, CoreError> {
         package_sparkline_samples: EngineLiveWindow::PACKAGE_SPARKLINE_SAMPLES,
         item_history_samples: EngineLiveWindow::ITEM_HISTORY_SAMPLES,
     })
+}
+
+/// The summed figures for `items`, as the engine computes a package's: used
+/// for the Completed tab, whose package is a filtered copy of the engine's.
+/// `global_recent_speed` is the global rate averaged over the ETA window.
+#[uniffi::export]
+pub fn package_aggregate_for_items(
+    items: Vec<ItemSnapshot>,
+    global_recent_speed: f64,
+) -> Result<PackageAggregate, CoreError> {
+    guard(|| PackageAggregate::new(&items, global_recent_speed))
 }
 
 /// Mean of the trailing ETA-window samples of `history`, or `fallback` when
@@ -229,4 +241,86 @@ pub fn range_set_gaps_within(set: RangeSetData, total: i64) -> Result<Vec<ByteRa
     }
     let rebuilt = range_set_from_data(&set)?;
     guard(|| rebuilt.gaps_within(total))
+}
+
+/// The verdict counts the link grabber's header and chips show, computed once
+/// per snapshot (the Swift `GrabberSnapshot` computed properties).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Record)]
+pub struct GrabberSummary {
+    pub online_count: usize,
+    pub offline_count: usize,
+    pub faulty_count: usize,
+    pub failed_count: usize,
+    pub is_checking: bool,
+    pub recheckable_count: usize,
+}
+
+#[uniffi::export]
+pub fn grabber_snapshot_summary(snapshot: GrabberSnapshot) -> Result<GrabberSummary, CoreError> {
+    guard(|| GrabberSummary {
+        online_count: snapshot.online_count(),
+        offline_count: snapshot.offline_count(),
+        faulty_count: snapshot.faulty_count(),
+        failed_count: snapshot.failed_count(),
+        is_checking: snapshot.is_checking(),
+        recheckable_count: snapshot.recheckable_count(),
+    })
+}
+
+/// The name used for clustering and display of a probed link.
+#[uniffi::export]
+pub fn probed_link_effective_filename(link: ProbedLink) -> Result<String, CoreError> {
+    guard(|| link.effective_filename())
+}
+
+/// `"<sanitized title> [<videoID>].<container>"` once a media row is resolved,
+/// the URL-derived title before that.
+#[uniffi::export]
+pub fn media_row_display_filename(row: MediaRow) -> Result<String, CoreError> {
+    guard(|| row.display_filename())
+}
+
+// MARK: Constructors
+
+/// A one-component HTTP item for `url` with a fresh id, enabled, no priority.
+/// `total_bytes` is the size when known.
+#[uniffi::export]
+pub fn download_item_for_url(
+    url: SourceUrl,
+    filename: String,
+    total_bytes: Option<i64>,
+    state: ItemState,
+) -> Result<DownloadItem, CoreError> {
+    if filename.is_empty() {
+        return Err(CoreError::invalid("filename", "must not be empty"));
+    }
+    if total_bytes.is_some_and(|bytes| bytes < 0) {
+        return Err(CoreError::invalid("totalBytes", "must not be negative"));
+    }
+    guard(|| {
+        let item = DownloadItem::http(url, filename).with_state(state);
+        match total_bytes {
+            Some(bytes) => item.with_total_bytes(bytes),
+            None => item,
+        }
+    })
+}
+
+/// A package with a fresh id, normal priority and position 0.
+#[uniffi::export]
+pub fn download_package_new(
+    name: String,
+    items: Vec<DownloadItem>,
+    note: Option<String>,
+) -> Result<DownloadPackage, CoreError> {
+    if name.is_empty() {
+        return Err(CoreError::invalid("name", "must not be empty"));
+    }
+    guard(|| {
+        let package = DownloadPackage::new(name).with_items(items);
+        match note {
+            Some(note) => package.with_note(note),
+            None => package,
+        }
+    })
 }

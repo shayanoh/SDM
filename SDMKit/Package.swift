@@ -1,6 +1,10 @@
 // swift-tools-version: 6.2
 import PackageDescription
 
+// The four library names the app links are kept, but each target is now a thin
+// adapter over `SDMRust`, the UniFFI bindings of the Rust core (`sdm-core/`).
+// The original Swift implementation lives in `../legacy/SDMKitSwift` as a
+// baseline and is linked into nothing.
 let package = Package(
     name: "SDMKit",
     platforms: [.macOS(.v15)],
@@ -11,9 +15,6 @@ let package = Package(
         .library(name: "SDMResolve", targets: ["SDMResolve"]),
     ],
     targets: [
-        .target(
-            name: "SDMCore", dependencies: ["SDMRust"],
-            resources: [.process("Resources")]),
         .binaryTarget(name: "SDMRustFFI", path: "Artifacts/SDMRust.xcframework"),
         .target(
             name: "SDMRust",
@@ -25,23 +26,13 @@ let package = Package(
                 .linkedFramework("CoreFoundation"),
             ]
         ),
-        .target(
-            name: "SDMEngine",
-            dependencies: ["SDMCore", "SDMResolve"],
-            // Debug-only scheduler/engine/worker event logging (os.log). Comment out
-            // the define below to silence it, e.g. before a public release build.
-            // swiftSettings: [.define("SDM_ENGINE_LOGGING")]
-        ),
-        .target(name: "SDMGrabber", dependencies: ["SDMCore", "SDMResolve"]),
-        .target(name: "SDMResolve", dependencies: ["SDMCore"]),
-        .executableTarget(
-            name: "FixtureDump", dependencies: ["SDMCore", "SDMEngine", "SDMResolve"]),
+        .target(name: "SDMCore", dependencies: ["SDMRust"]),
+        .target(name: "SDMResolve", dependencies: ["SDMCore", "SDMRust"]),
+        .target(name: "SDMEngine", dependencies: ["SDMCore", "SDMResolve", "SDMRust"]),
+        .target(name: "SDMGrabber", dependencies: ["SDMCore", "SDMResolve", "SDMRust"]),
         .testTarget(name: "SDMRustTests", dependencies: ["SDMRust"]),
-        .testTarget(name: "SDMCoreTests", dependencies: ["SDMCore"]),
-        .testTarget(name: "SDMEngineTests", dependencies: ["SDMEngine", "SDMResolve"]),
-        .testTarget(name: "SDMGrabberTests", dependencies: ["SDMGrabber", "SDMResolve"]),
         .testTarget(
-            name: "SDMResolveTests", dependencies: ["SDMResolve"],
-            resources: [.copy("Fixtures")]),
+            name: "SDMShimTests",
+            dependencies: ["SDMCore", "SDMEngine", "SDMGrabber", "SDMResolve"]),
     ]
 )

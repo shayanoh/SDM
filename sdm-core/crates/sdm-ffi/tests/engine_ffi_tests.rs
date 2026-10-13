@@ -6,6 +6,7 @@ use std::sync::Arc;
 use sdm_core::{DownloadItem, DownloadPackage, ItemState, Priority};
 use sdm_engine::{EngineSettings, EngineSnapshot, JsonStateStore};
 use sdm_ffi::{CoreError, DownloadEngine, EngineConfig};
+use sdm_resolve::CookieSource;
 use support::{
     ScratchTrash, dependencies, engine_over, engine_settings, package, payload, scratch_directory,
     su, wait_until, within,
@@ -49,6 +50,9 @@ async fn new_builds_a_production_engine_over_a_temp_state_file() {
             state_file: dir.path().join("state.json"),
             settings: engine_settings(dir.path()),
             binary_search_paths: vec![dir.path().join("bin")],
+            cookie_source: CookieSource::None,
+            max_playlist_videos: 50,
+            yt_dlp_extra_arguments: vec![],
         })
         .expect("build the production engine");
 
@@ -287,6 +291,9 @@ async fn invalid_arguments_are_errors_not_panics() {
             state_file: dir.path().join("state.json"),
             settings: zero,
             binary_search_paths: vec![],
+            cookie_source: CookieSource::None,
+            max_playlist_videos: 50,
+            yt_dlp_extra_arguments: vec![],
         });
         assert!(matches!(refused, Err(CoreError::InvalidArgument { .. })));
 

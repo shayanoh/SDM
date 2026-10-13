@@ -1,16 +1,25 @@
 import Foundation
 import Observation
 import SDMResolve
+import os.log
 
-/// Bridges `SDMResolve.ManagedBinaries` to the app: owns the one shared
-/// `BinaryLocator`, runs the launch check + 1 Hz tick loop, and republishes
-/// a `ManagedBinariesStatus` for the Settings "Components" section.
+/// Bridges the Rust `ManagedBinaries` to the app: runs the launch check + 1 Hz
+/// tick loop, drains its notification queue, and republishes a
+/// `ManagedBinariesStatus` for the Settings "Components" section. (The Rust
+/// core invalidates every engine/grabber binary lookup itself when the
+/// binaries change.)
 @MainActor
 @Observable
 final class ManagedBinariesController {
-    let binaryLocator: BinaryLocator
     private let managed: ManagedBinaries
     private var tickTask: Task<Void, Never>?
+    private let notify: @MainActor (String) -> Void
+    private nonisolated static let log = Logger(
+        subsystem: "com.shayanoh.SDM", category: "binaries")
+    /// Called when the installed ffmpeg or yt-dlp may have changed, so the
+    /// link grabber can refresh its "ffmpeg is available" flag (the Rust
+    /// session has no way to notice by itself).
+    @ObservationIgnored var onBinariesMayHaveChanged: (() -> Void)?
 
     private(set) var status = ManagedBinariesStatus(
         ytDlpVersion: nil, latestKnown: nil, channel: .stable,
@@ -32,48 +41,90 @@ final class ManagedBinariesController {
         ]
     }
 
-    init(notify: @escaping @Sendable (String) -> Void = { _ in }) {
-        let bin = Self.binDirectory
-        let locator = BinaryLocator(searchPaths: [bin])
-        binaryLocator = locator
-        managed = ManagedBinaries(
-            binDirectory: bin,
-            fetcher: URLSessionBinaryFetcher(),
-            runner: SystemProcessRunner(),
-            vendorAssets: { Self.bundledVendorAssets() },
-            channel: { MediaSitesSettingsStore.ytDlpChannel },
-            onBinariesChanged: { await locator.invalidate() },
-            notify: notify)
+    init(notify: @escaping @MainActor (String) -> Void = { _ in }) {
+        self.notify = notify
+        let config = ManagedBinariesConfig(
+            binDirectory: Self.binDirectory,
+            vendorAssets: Self.bundledVendorAssets(),
+            channel: MediaSitesSettingsStore.ytDlpChannel)
+        do {
+            managed = try ManagedBinaries(config: config)
+        } catch {
+            fatalError("SDM could not set up its tools: \(error.localizedDescription)")
+        }
     }
 
     func start() {
         Task { [managed] in
-            await managed.provisionBundledIfNeeded()
-            _ = await managed.checkNow(reason: .launch)
-            self.status = await managed.status()
+            do {
+                try await managed.provisionBundledIfNeeded()
+            } catch {
+                Self.log.error(
+                    "Provisioning bundled tools failed: \(error.localizedDescription, privacy: .public)"
+                )
+            }
+            do {
+                _ = try await managed.checkNow(reason: .launch)
+            } catch {
+                Self.log.error(
+                    "Launch check failed: \(error.localizedDescription, privacy: .public)")
+            }
+            self.refresh()
+            // The bundled ffmpeg/qjs are in place by now, whatever the
+            // version strings said before.
+            self.onBinariesMayHaveChanged?()
         }
         tickTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(1))
                 guard let self else { return }
-                await self.managed.tick()
-                self.status = await self.managed.status()
+                do {
+                    try await self.managed.tick()
+                } catch {
+                    Self.log.error(
+                        "Tool update tick failed: \(error.localizedDescription, privacy: .public)")
+                }
+                self.refresh()
             }
+        }
+    }
+
+    /// Reads the status and the queued banners. A failed read keeps the
+    /// previous status; the next call tries again.
+    private func refresh() {
+        do {
+            let newStatus = try managed.status()
+            if newStatus != status {
+                let toolsChanged =
+                    newStatus.ffmpegVersion != status.ffmpegVersion
+                    || newStatus.ytDlpVersion != status.ytDlpVersion
+                status = newStatus
+                if toolsChanged { onBinariesMayHaveChanged?() }
+            }
+            for message in try managed.takeNotifications() { notify(message) }
+        } catch {
+            Self.log.error("Tool status failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
     /// Settings "Check now" / channel change.
     func checkNow() async {
-        _ = await managed.checkNow(reason: .manual)
-        status = await managed.status()
+        // The Swift core read the channel through a closure at check time.
+        do {
+            try managed.setChannel(channel: MediaSitesSettingsStore.ytDlpChannel)
+            _ = try await managed.checkNow(reason: .manual)
+        } catch {
+            Self.log.error("Manual check failed: \(error.localizedDescription, privacy: .public)")
+        }
+        refresh()
     }
 
     /// Fire-and-forget: the grabber is about to resolve links and may need
     /// yt-dlp present. Coalesces with any in-flight check.
     func kick() {
         Task {
-            _ = await managed.checkNow(reason: .resolveNeeded)
-            status = await managed.status()
+            _ = try? await managed.checkNow(reason: .resolveNeeded)
+            refresh()
         }
     }
 

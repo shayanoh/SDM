@@ -127,12 +127,15 @@ struct SDMApp: App {
             .debug("Rust core \((try? coreVersion()) ?? "unknown", privacy: .public)")
         let notification = NotificationManager()
         let managed = ManagedBinariesController(
-            notify: { body in Task { @MainActor in notification.postInfo(body) } })
-        let engine = EngineController(
-            notificationManager: notification, binaryLocator: managed.binaryLocator)
+            notify: { notification.postInfo($0) })
+        let engine = EngineController(notificationManager: notification)
         let clipboard = ClipboardWatcher()
-        let grabber = GrabberController(
-            binaryLocator: managed.binaryLocator, managedBinaries: managed)
+        let grabber = GrabberController(managedBinaries: managed, notifications: notification)
+        // The grabber learns of a newly installed ffmpeg through this; the
+        // engine and grabber binary lookups are invalidated inside the core.
+        managed.onBinariesMayHaveChanged = { [weak grabber] in
+            grabber?.refreshFfmpegAvailability()
+        }
         let activationPolicy = ActivationPolicyController()
         _notificationManager = State(initialValue: notification)
         _managedBinaries = State(initialValue: managed)
@@ -256,6 +259,7 @@ struct SDMApp: App {
         Window("Settings", id: "settings") {
             SettingsView()
                 .environment(controller)
+                .environment(grabberController)
                 .environment(managedBinaries)
                 .environment(themeStore)
                 .environment(activationPolicyController)

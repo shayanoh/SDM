@@ -8,7 +8,9 @@ import UniformTypeIdentifiers
     LinkRow(
         link:
             ProbedLink(
-                id: UUID(), originalURL: URL(fileURLWithPath: ""), finalURL: nil, stage: .done,
+                id: UUID(), originalUrl: URL(fileURLWithPath: ""),
+                finalUrl: URL(fileURLWithPath: ""),
+                stage: .done,
                 statusCode: 200, contentLength: 1_000_000_000, contentType: nil,
                 suggestedFilename: "Filename", validator: "validator", acceptsRanges: true,
                 sniffedSignature: nil, transportFailed: false, verdict: .online, isDuplicate: false),

@@ -53,6 +53,9 @@ async fn new_builds_a_production_session() {
             budget: GrabberBudget::default(),
             deep_sniff_enabled: true,
             binary_search_paths: vec![],
+            cookie_source: CookieSource::None,
+            max_playlist_videos: 50,
+            yt_dlp_extra_arguments: vec![],
             quality_preferences: QualityPreferences::default(),
             ffmpeg_available: false,
         })
@@ -248,6 +251,9 @@ async fn a_zero_budget_is_an_error_not_a_panic() {
         },
         deep_sniff_enabled: true,
         binary_search_paths: vec![],
+        cookie_source: CookieSource::None,
+        max_playlist_videos: 50,
+        yt_dlp_extra_arguments: vec![],
         quality_preferences: QualityPreferences::default(),
         ffmpeg_available: true,
     });

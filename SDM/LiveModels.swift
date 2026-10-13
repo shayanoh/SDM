@@ -112,10 +112,6 @@ final class ItemLiveModel {
 final class PackageLiveModel {
     let id: UUID
     private(set) var aggregate: PackageAggregate
-    /// Whether the package had a running item when last refreshed.
-    /// Bookkeeping for `EngineController.refreshLiveModels`, not something a
-    /// view reads — hence not observed.
-    @ObservationIgnored var hasRunningItems = false
 
     init(id: UUID, aggregate: PackageAggregate) {
         self.id = id
@@ -149,7 +145,8 @@ final class EngineStats {
     private(set) var recentGlobalSpeed: Double = 0
 
     func update(from snapshot: EngineSnapshot) {
-        let figures = EngineFigures(packages: snapshot.packages)
+        // Computed once per snapshot by the core.
+        let figures = snapshot.figures
         if runningCount != figures.runningCount { runningCount = figures.runningCount }
         if queuedCount != figures.queuedCount { queuedCount = figures.queuedCount }
         if overallFraction != figures.overallFraction {

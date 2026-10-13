@@ -39,6 +39,12 @@ pub struct GrabberConfig {
     pub quality_preferences: QualityPreferences,
     /// Whether `ffmpeg` is on disk, so muxed formats are offered.
     pub ffmpeg_available: bool,
+    /// Initial yt-dlp cookie source; change it later with `set_cookie_source`.
+    pub cookie_source: CookieSource,
+    /// Initial cap on playlist videos resolved (Swift's default was 50).
+    pub max_playlist_videos: u32,
+    /// Initial extra arguments for every yt-dlp invocation.
+    pub yt_dlp_extra_arguments: Vec<String>,
 }
 
 /// Refuses a budget the session would trap on.
@@ -120,7 +126,12 @@ impl GrabberSession {
     /// probe transport and the yt-dlp resolver.
     #[uniffi::constructor]
     pub fn new(config: GrabberConfig) -> Result<Arc<Self>, CoreError> {
-        let tools = Toolchain::new(config.binary_search_paths);
+        let tools = Toolchain::configured(
+            config.binary_search_paths,
+            config.cookie_source,
+            config.max_playlist_videos,
+            config.yt_dlp_extra_arguments,
+        );
         let settings = Arc::new(GrabberSettings::new(
             config.quality_preferences,
             config.ffmpeg_available,
