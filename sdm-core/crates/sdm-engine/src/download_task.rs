@@ -62,7 +62,7 @@ use tokio_util::sync::CancellationToken;
 use url::Url;
 use uuid::Uuid;
 
-use crate::http_transport::{HttpTransport, RangeRequest, TransportError};
+use crate::http_transport::{HttpTransport, RangeRequest, RangeResponse, TransportError};
 use crate::resume_sidecar::ResumeSidecar;
 use crate::sparse_file::{FinalizeError, SparseFile, SparseFileError};
 
@@ -770,8 +770,7 @@ impl Inner {
             .and_then(SourceUrl::as_url)
             .cloned();
         let mut probe = self
-            .transport
-            .fetch(RangeRequest::new(
+            .probe_fetch(RangeRequest::new(
                 pinned_url.clone().unwrap_or_else(|| source.clone()),
                 Some(ByteRange::new(0, 1)),
             ))
@@ -783,8 +782,7 @@ impl Inner {
         // comparison below, so a genuine remote change is still caught.
         if pinned_url.is_some() && !(200..300).contains(&probe.status_code) {
             probe = self
-                .transport
-                .fetch(RangeRequest::new(source, Some(ByteRange::new(0, 1))))
+                .probe_fetch(RangeRequest::new(source, Some(ByteRange::new(0, 1))))
                 .await?;
         }
         if !(200..300).contains(&probe.status_code) {
@@ -849,6 +847,24 @@ impl Inner {
         state.file = Some(opened);
         state.ticks_since_sync = 0;
         Ok(())
+    }
+
+    /// One of `prepare`'s probe requests, abandoned the moment the task is
+    /// cancelled (a stop, a removal or a quit), as URLSession abandons a
+    /// request when its Swift task is cancelled. Without the race a stop waits
+    /// out the transport's connect and header timeouts.
+    ///
+    /// A cancelled probe fails the attempt with
+    /// [`DownloadError::IncompleteAfterWorkersFinished`], which is what
+    /// `start()` reports when a pause lands during the probe and the probe
+    /// then returns: transient, so the engine returns the item to `Queued`
+    /// (or ignores the error when it is retiring the runner).
+    async fn probe_fetch(&self, request: RangeRequest) -> Result<RangeResponse, DownloadError> {
+        tokio::select! {
+            biased;
+            _ = self.cancel.cancelled() => Err(DownloadError::IncompleteAfterWorkersFinished),
+            fetched = self.transport.fetch(request) => Ok(fetched?),
+        }
     }
 
     fn file_size(path: &Path) -> Option<i64> {
