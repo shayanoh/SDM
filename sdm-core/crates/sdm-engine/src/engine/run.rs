@@ -347,6 +347,7 @@ pub(super) fn describe(error: &(dyn Error + 'static)) -> String {
             DownloadError::IncompleteAfterWorkersFinished => {
                 "incompleteAfterWorkersFinished".to_string()
             }
+            DownloadError::RangeNotHonored { .. } => download.to_string(),
             DownloadError::TruncatedResponse { expected, received } => {
                 format!("truncatedResponse(expected: {expected}, received: {received})")
             }

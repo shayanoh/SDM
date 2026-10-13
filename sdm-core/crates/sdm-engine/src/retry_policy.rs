@@ -93,6 +93,7 @@ impl RetryPolicy {
                 },
                 DownloadError::IncompleteAfterWorkersFinished => FailureKind::Transient,
                 DownloadError::TruncatedResponse { .. } => FailureKind::Transient,
+                DownloadError::RangeNotHonored { .. } => FailureKind::Transient,
                 // If the engine has a resolver it refreshes the URL and never
                 // reaches here; without one, treat it like any expired signed
                 // URL — transient, so it backs off and eventually terminates.

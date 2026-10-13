@@ -85,6 +85,16 @@ pub enum DownloadError {
     /// itself failed. Terminal.
     #[error("refreshing the URL failed: {reason}")]
     RefreshFailed { reason: String },
+    /// A worker whose claim starts past byte 0 asked for a `Range` and was
+    /// answered with something other than `206`. The body of such an answer
+    /// starts at byte 0, so writing it at the claim's offset would corrupt the
+    /// file; the attempt fails before any byte is written. Transient (the
+    /// retry policy decides how often to try again).
+    #[error(
+        "the server advertised byte ranges but answered a ranged request at offset {start} \
+         with HTTP {status} instead of 206"
+    )]
+    RangeNotHonored { status: u16, start: i64 },
     #[error("workers finished but the download is incomplete")]
     IncompleteAfterWorkersFinished,
     /// The origin's response body ended before the claimed range was fully
@@ -1115,6 +1125,17 @@ impl Inner {
             let response = fetched?;
             if !(200..300).contains(&response.status_code) {
                 return Err(self.status_error(response.status_code));
+            }
+            // A `200` to a ranged request carries the whole body from byte 0.
+            // That is only usable by the worker whose claim starts at 0 (it
+            // stops at its claim end, as for a Range-ignoring origin); at any
+            // other offset the bytes would land in the wrong place while the
+            // file still reached the right size.
+            if claim.start > 0 && response.status_code != 206 {
+                return Err(DownloadError::RangeNotHonored {
+                    status: response.status_code,
+                    start: claim.start,
+                });
             }
 
             let mut body = response.body;
