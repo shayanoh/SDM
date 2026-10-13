@@ -368,12 +368,13 @@ async fn dropping_an_ingest_caller_still_finishes_the_probes_and_reclusters() {
         drop(ingest);
 
         origin.release(&url);
-        wait_until(|| session.snapshot().links[0].verdict.is_some()).await;
+        // The recluster runs after the verdict is merged, so wait for it.
+        wait_until(|| !session.snapshot().packages.is_empty()).await;
 
         let snapshot = session.snapshot();
         assert_eq!(snapshot.links[0].stage, Stage::Done);
+        assert!(snapshot.links[0].verdict.is_some());
         assert_eq!(snapshot.checked_count, 1);
-        // The recluster that follows the probes ran too.
         assert_eq!(snapshot.packages.len(), 1);
     })
     .await;
@@ -394,6 +395,8 @@ async fn dropping_a_recheck_caller_still_finishes_the_probe() {
         poll_once_then_drop_after(&session, &ids, || origin.request_log().len() > before).await;
 
         origin.release(&url);
+        // The first ingest left a verdict behind, so wait on the stage: a
+        // recheck puts the link back to `Probing` until its probe is merged.
         wait_until(|| session.snapshot().links[0].stage == Stage::Done).await;
         assert!(session.snapshot().links[0].verdict.is_some());
     })
