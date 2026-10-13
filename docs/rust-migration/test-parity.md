@@ -81,12 +81,12 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | Swift file | Swift tests | Rust file | Rust tests | Notes |
 |---|---|---|---|---|
 | `FakeLinkResolver.swift` | 0 |  |  |  |
-| `FakeProbeOriginTests.swift` | 6 |  |  |  |
+| `FakeProbeOriginTests.swift` | 6 | `fake_probe_origin_tests.rs` | 6 |  |
 | `FileSignatureTests.swift` | 8 | `file_signature_tests.rs` | 8 |  |
 | `GrabberSessionOverrideTests.swift` | 6 |  |  |  |
 | `GrabberSessionTests.swift` | 9 |  |  |  |
-| `LinkProberStageTwoTests.swift` | 3 |  |  |  |
-| `LinkProberTests.swift` | 5 |  |  |  |
+| `LinkProberStageTwoTests.swift` | 3 | `link_prober_stage_two_tests.rs` | 3 |  |
+| `LinkProberTests.swift` | 5 | `link_prober_tests.rs` | 5 |  |
 | `MediaFormatMenuTests.swift` | 6 | `media_format_menu_tests.rs` | 6 | Byte counts use a hand-written `ByteCountFormatter` (.binary) twin; only the `~` marker and `360p` are asserted. |
 | `MediaHandoffTests.swift` | 6 | `media_handoff_tests.rs` | 6 |  |
 | `MediaMetadataTests.swift` | 3 | `media_metadata_tests.rs` | 3 |  |
@@ -97,7 +97,7 @@ One table per Swift test target, one row per file under `SDMKit/Tests/<target>/`
 | `ReleaseTagsTests.swift` | 4 | `release_tags_tests.rs` | 4 | The Swift `arguments:` test is one Rust test looping over the same six cases. |
 | `SmokeTests.swift` | 1 | `smoke_tests.rs` | 1 | Constructs a `GrabberSnapshot` instead of `#expect(true)`. |
 | `URLExtractorTests.swift` | 8 | `url_extractor_tests.rs` | 9 | `linkify` replaces `NSDataDetector`. One Rust-only test: a link written without a scheme is read as `http://`. |
-| `URLSessionProbeTransportTests.swift` | 6 |  |  |  |
+| `URLSessionProbeTransportTests.swift` | 6 | `reqwest_probe_transport_tests.rs` | 7 | The Swift tests exercise static helpers; the Rust ones drive the transport against a loopback server (HEAD/GET/Range, lowercased headers, timeout via a short idle timeout, DNS via a failing resolver, refused connection). One Rust-only test: the body cap (a GET with no range returns one byte, as in Swift) and the final URL after a redirect. |
 | `VerdictRulesTests.swift` | 9 | `verdict_rules_tests.rs` | 9 |  |
 | **Total SDMGrabberTests** | **115** |  |  |  |
 

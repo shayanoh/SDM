@@ -1613,11 +1613,22 @@ dependencies = [
 name = "sdm-grabber"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "bytes",
+ "futures",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "linkify",
  "percent-encoding",
  "regex",
+ "reqwest",
  "sdm-core",
  "sdm-resolve",
+ "thiserror",
+ "tokio",
+ "tokio-util",
+ "tracing",
  "unicode-segmentation",
  "url",
  "uuid",

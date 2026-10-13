@@ -5,14 +5,28 @@ version.workspace = true
 publish.workspace = true
 
 [dependencies]
+async-trait = "0.1.92"
+futures = "0.3.34"
 linkify = "0.11.0"
 percent-encoding = "2.3.2"
 regex = "1.13.1"
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "http2", "system-proxy", "stream", "cookies"] }
 sdm-core = { version = "0.1.0", path = "../sdm-core" }
 sdm-resolve = { version = "0.1.0", path = "../sdm-resolve" }
+thiserror = "2.0.21"
+tokio = { version = "1.53.2", features = ["sync"] }
+tracing = "0.1.44"
 unicode-segmentation = "1.13.3"
 url = "2.5.8"
 uuid = { version = "1.28.0", features = ["v4"] }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+bytes = "1.12.1"
+http-body-util = "0.1.5"
+hyper = { version = "1.12.0", features = ["server", "http1"] }
+hyper-util = { version = "0.1.21", features = ["tokio"] }
+tokio = { version = "1.53.2", features = ["macros", "rt-multi-thread", "net", "time", "io-util"] }
+tokio-util = "0.7.20"

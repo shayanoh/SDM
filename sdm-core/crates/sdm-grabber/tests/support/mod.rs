@@ -2,7 +2,13 @@
 //! format builders from the Swift `FakeLinkResolver.swift`, plus a
 //! `SourceUrl` shorthand). Each test file uses only some of them.
 
-#![allow(dead_code)]
+#![allow(dead_code, unused_imports)]
+
+mod loopback_server;
+
+pub use loopback_server::{
+    LoopbackBody, LoopbackRequest, LoopbackResponse, LoopbackServer, payload_handler,
+};
 
 use sdm_core::{AudioCodec, MediaContainer, MediaFormat, MediaKind, SourceUrl, VideoCodec};
 
@@ -46,4 +52,15 @@ pub fn af(id: &str, a: AudioCodec, c: MediaContainer) -> MediaFormat {
         Some(128.0),
         su(&format!("https://gv/{id}")),
     )
+}
+
+/// How long a loopback test may take before it fails instead of hanging.
+pub const TEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// Fails the test, rather than hanging the suite, if `future` takes longer
+/// than [`TEST_TIMEOUT`].
+pub async fn within<T>(future: impl std::future::Future<Output = T>) -> T {
+    tokio::time::timeout(TEST_TIMEOUT, future)
+        .await
+        .expect("timed out: the test hung")
 }
