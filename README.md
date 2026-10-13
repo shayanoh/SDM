@@ -54,17 +54,61 @@ A macOS download manager with segmented (multi-connection) transfers, robust res
 
 ## Building
 
-Open `SDM.xcodeproj` in Xcode and build the `SDM` scheme.
+SDM's core (download engine, scheduler, link grabber, yt-dlp resolver) is
+written in Rust and lives in `sdm-core/`. It is exposed to the SwiftUI app
+through UniFFI as the Swift module `SDMRust`; the `SDMKit` package targets
+(`SDMCore`, `SDMEngine`, `SDMGrabber`, `SDMResolve`) are thin adapters over it.
 
-A fresh clone needs Rust ([rustup](https://rustup.rs)) and one run of
-`scripts/build-rust-core.sh` before the project opens cleanly: it produces
-`SDMKit/Artifacts/SDMRust.xcframework` and the generated Swift bindings the
-`SDMRust` package target compiles. The `SDM` scheme re-runs it as a build
-pre-action.
+Prerequisites:
 
-The vendored `*.lzfse` blobs under `SDM/Resources/vendor/` are stored with
-**Git LFS** — run `git lfs install` once before cloning, or `git lfs pull`
-after, so they materialize.
+- Xcode with the macOS 15 SDK
+- Rust through [rustup](https://rustup.rs), with both macOS targets:
+  `rustup target add x86_64-apple-darwin aarch64-apple-darwin`.
+  The scripts put `~/.cargo/bin` first on `PATH`, so a Homebrew `cargo`
+  (which cannot cross-compile) is not used.
+- Git LFS, for the vendored blobs below: run `git lfs install` before
+  cloning, or `git lfs pull` after.
+
+`scripts/build-rust-core.sh [debug|release]` builds `sdm-ffi` with cargo
+(debug: the host triple; release: x86_64 and arm64, joined with `lipo`),
+generates the Swift bindings into `SDMKit/Sources/SDMRust/Generated/`, and
+packs the static library into `SDMKit/Artifacts/SDMRust.xcframework`. Both
+outputs are git-ignored. The script skips the work when nothing under
+`sdm-core/` has changed since the last run. A fresh clone must run it once
+before Xcode can open the package cleanly.
+
+To build in Xcode, open `SDM.xcodeproj` and build the `SDM` scheme. The scheme
+runs the script as a build pre-action (`debug` for Debug, `release` for
+Release), so Rust changes are picked up by `xcodebuild` as well as by the
+Xcode UI.
+
+`./build.sh` makes a universal (arm64 + x86_64) Release build, bumps the build
+number and installs the app into `/Applications`. It runs the Rust step itself.
+Options: `-v <version>` sets the marketing version, `--no-bump` skips the
+build-number bump, and `--no-install` stops after the build and leaves the app
+in `build/Build/Products/Release/`. Use `./build.sh --no-bump --no-install` to
+check that a Release build works without touching the installed app.
+
+## Testing
+
+`./test.sh` runs everything: the Rust workspace tests, then the `SDMKit`
+Swift tests (the `SDMRust` bindings and the shim targets) against a Debug
+build of the Rust core.
+
+To run the parts separately:
+
+```
+cd sdm-core && cargo test --workspace      # Rust core
+scripts/build-rust-core.sh debug && (cd SDMKit && swift test)   # Swift side
+```
+
+`./lint.sh` runs `swift-format lint` and `cargo clippy --workspace
+--all-targets -- -D warnings`. `./format.sh` runs `swift-format`, `prettier`
+and `cargo fmt --all`.
+
+The original all-Swift core is kept as a baseline in `legacy/SDMKitSwift/`. It
+is its own package and is not linked into the app. To run its tests:
+`cd legacy/SDMKitSwift && swift test`.
 
 ## Vendored binaries
 
@@ -79,7 +123,7 @@ live in `~/Library/Application Support/SDM/bin/`:
 
 yt-dlp is invoked with `--extractor-args youtube:jsruntime=quickjs` so it
 uses the bundled `qjs`. All of this is implemented in
-`SDMKit/Sources/SDMResolve/ManagedBinaries.swift` and driven by the app's
+`sdm-core/crates/sdm-resolve/src/managed_binaries.rs` (the Swift original is `legacy/SDMKitSwift/Sources/SDMResolve/ManagedBinaries.swift`) and driven by the app's
 `ManagedBinariesController`.
 
 To refresh the pinned `ffmpeg` / `qjs` versions, edit the version pins at the

@@ -20,10 +20,11 @@ let package = Package(
             name: "SDMRust",
             dependencies: ["SDMRustFFI"],
             swiftSettings: [.swiftLanguageMode(.v5)],
+            // reqwest's system-proxy lookup calls SystemConfiguration directly.
+            // Security and CoreFoundation arrive through Foundation, so
+            // they need no entry here (the Release link was verified without them).
             linkerSettings: [
-                .linkedFramework("Security"),
-                .linkedFramework("SystemConfiguration"),
-                .linkedFramework("CoreFoundation"),
+                .linkedFramework("SystemConfiguration")
             ]
         ),
         .target(name: "SDMCore", dependencies: ["SDMRust"]),
