@@ -1,9 +1,9 @@
 //! The link grabber: URL extraction, verdict rules, package clustering and
-//! the grabber's value types, and link probing. The session comes in a later
-//! task.
+//! the grabber's value types, link probing, and the grabber session.
 
 mod fake_probe_origin;
 mod file_signature;
+mod grabber_session;
 mod grabber_snapshot;
 mod link_prober;
 mod media_format_menu;
@@ -22,6 +22,10 @@ mod verdict_rules;
 
 pub use fake_probe_origin::{FakeProbeOrigin, FakeProbeOriginBehavior};
 pub use file_signature::FileSignature;
+pub use grabber_session::{
+    Clock, FfmpegAvailability, GrabberBudget, GrabberSession, GrabberSessionBuilder,
+    QualityPreferencesProvider,
+};
 pub use grabber_snapshot::GrabberSnapshot;
 pub use link_prober::LinkProber;
 pub use media_format_menu::{MediaFormatMenu, MediaFormatOption};

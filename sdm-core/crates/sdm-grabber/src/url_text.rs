@@ -41,3 +41,44 @@ pub(crate) fn host(url: &SourceUrl) -> Option<String> {
         .and_then(|parsed| parsed.host_str())
         .map(str::to_owned)
 }
+
+/// Swift `URL.deletingLastPathComponent().path`: the percent-decoded path
+/// with its last component removed. `""` for a URL with no path, `/..` for a
+/// bare root path (what Foundation answers), `/` for a file directly under
+/// the root. A trailing slash is not a component of its own (`/a/b/` gives
+/// `/a`).
+pub(crate) fn directory_path(url: &SourceUrl) -> String {
+    let path = decoded_path(url);
+    if path.is_empty() {
+        return String::new();
+    }
+    if path == "/" {
+        return "/..".into();
+    }
+    let trimmed = path.strip_suffix('/').unwrap_or(&path);
+    match trimmed.rfind('/') {
+        Some(0) | None => "/".into(),
+        Some(index) => trimmed[..index].to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dir(url: &str) -> String {
+        directory_path(&SourceUrl::new(url).unwrap())
+    }
+
+    /// Expected values were produced by Foundation's
+    /// `URL.deletingLastPathComponent().path`.
+    #[test]
+    fn directory_path_matches_foundation() {
+        assert_eq!(dir("https://h/a/b/file.zip"), "/a/b");
+        assert_eq!(dir("https://h/file.zip"), "/");
+        assert_eq!(dir("https://h/a/b/"), "/a");
+        assert_eq!(dir("https://h/?v=1"), "/..");
+        assert_eq!(dir("https://h/a%20b/c.zip"), "/a b");
+        assert_eq!(dir("https://h/a//c.zip"), "/a/");
+    }
+}

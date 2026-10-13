@@ -4,8 +4,10 @@
 
 #![allow(dead_code, unused_imports)]
 
+mod fake_link_resolver;
 mod loopback_server;
 
+pub use fake_link_resolver::{FakeLinkResolver, single_media};
 pub use loopback_server::{
     LoopbackBody, LoopbackRequest, LoopbackResponse, LoopbackServer, payload_handler,
 };
@@ -63,4 +65,38 @@ pub async fn within<T>(future: impl std::future::Future<Output = T>) -> T {
     tokio::time::timeout(TEST_TIMEOUT, future)
         .await
         .expect("timed out: the test hung")
+}
+
+/// Polls `condition` (yielding between looks) until it holds. Unbounded on
+/// its own: call it inside [`within`], whose timeout turns a hang into a
+/// failure.
+pub async fn wait_until(mut condition: impl FnMut() -> bool) {
+    while !condition() {
+        tokio::task::yield_now().await;
+    }
+}
+
+/// A clock the test moves by hand; stands in for `Date()`.
+#[derive(Clone)]
+pub struct ManualClock(std::sync::Arc<std::sync::Mutex<std::time::SystemTime>>);
+
+impl ManualClock {
+    pub fn new() -> Self {
+        Self(std::sync::Arc::new(std::sync::Mutex::new(
+            std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000),
+        )))
+    }
+
+    pub fn now(&self) -> std::time::SystemTime {
+        *self.0.lock().unwrap()
+    }
+
+    pub fn advance(&self, by: std::time::Duration) {
+        *self.0.lock().unwrap() += by;
+    }
+
+    pub fn provider(&self) -> impl Fn() -> std::time::SystemTime + Send + Sync + 'static {
+        let clone = self.clone();
+        move || clone.now()
+    }
 }
