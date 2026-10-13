@@ -1537,8 +1537,12 @@ dependencies = [
 name = "sdm-bench"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "bytes",
  "sdm-core",
  "sdm-engine",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

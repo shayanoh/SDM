@@ -31,6 +31,7 @@ let package = Package(
         .target(name: "SDMResolve", dependencies: ["SDMCore", "SDMRust"]),
         .target(name: "SDMEngine", dependencies: ["SDMCore", "SDMResolve", "SDMRust"]),
         .target(name: "SDMGrabber", dependencies: ["SDMCore", "SDMResolve", "SDMRust"]),
+        .executableTarget(name: "SDMFFIBench", dependencies: ["SDMEngine"]),
         .testTarget(name: "SDMRustTests", dependencies: ["SDMRust"]),
         .testTarget(
             name: "SDMShimTests",

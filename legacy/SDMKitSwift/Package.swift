@@ -25,6 +25,7 @@ let package = Package(
         .target(name: "SDMResolve", dependencies: ["SDMCore"]),
         .executableTarget(
             name: "FixtureDump", dependencies: ["SDMCore", "SDMEngine", "SDMResolve"]),
+        .executableTarget(name: "SDMBench", dependencies: ["SDMCore", "SDMEngine"]),
         .testTarget(name: "SDMCoreTests", dependencies: ["SDMCore"]),
         .testTarget(name: "SDMEngineTests", dependencies: ["SDMEngine", "SDMResolve"]),
         .testTarget(name: "SDMGrabberTests", dependencies: ["SDMGrabber", "SDMResolve"]),
