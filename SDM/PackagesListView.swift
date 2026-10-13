@@ -502,7 +502,9 @@ struct BottomPanel: View {
     private func multipleItemData(theme: Theme) -> some View {
         var speedHistory: [Double] = []
         var bytesPerSecond: Double = 0
-        var completedRangeSet = RangeSet()
+        // Every item's completed ranges, each offset by the sizes before it,
+        // merged by the core in one call after the loop.
+        var completedParts: [OffsetRangeSet] = []
         var downloadedBytes: Int64 = 0
         var totalBytes: Int64 = 0
         var sumFractionCompleted: Double = 0
@@ -514,14 +516,12 @@ struct BottomPanel: View {
             let completed = live.completed
             let bytes = live.totalBytes ?? 0
             guard bytes > 0 else { return }
-            completed.ranges.forEach({
-                completedRangeSet.insert(
-                    ByteRange(start: $0.start + totalBytes, end: $0.end + totalBytes))
-            })
+            completedParts.append(OffsetRangeSet(set: completed, offset: totalBytes))
             downloadedBytes += live.completedBytes
             totalBytes += bytes
             bytesPerSecond += live.bytesPerSecond
-            sumFractionCompleted += item.fractionCompleted
+            // The live model already holds the byte counts (`bytes > 0` here).
+            sumFractionCompleted += Double(live.completedBytes) / Double(bytes)
             activeSegments += live.activeSegments
             configuredSegments += live.configuredSegments
             let itemSpeedHistory = live.detailHistory ?? live.speedHistory
@@ -552,6 +552,7 @@ struct BottomPanel: View {
                 )
             }
         })
+        let completedRangeSet = (try? rangeSetUnion(parts: completedParts)) ?? RangeSet()
 
         Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 4) {
             GridRow {
@@ -1036,7 +1037,7 @@ private func headerAggregate(
 ) -> PackageAggregate {
     isLive
         ? controller.liveModel(for: package).aggregate
-        : PackageAggregate(items: package.items, globalRecentSpeed: 0)
+        : package.aggregate
 }
 
 /// The package header's live "completed / total" bytes readout. See
@@ -1364,14 +1365,17 @@ private struct DraggableItemRow<Content: View>: View {
         url: URL(fileURLWithPath: ""),
         filename: "Filename",
         totalBytes: 1_000_000,
-        completed: RangeSet([ByteRange(start: 10000, end: 20000)]),
+        completed: RangeSet(ranges: [ByteRange(start: 10000, end: 20000)]),
         state: .running,
         isEnabled: true,
         isResumable: true,
         activeSegments: 1,
         configuredSegments: 3,
         bytesPerSecond: 100000,
-        speedHistory: [100000, 90000, 80000])
+        speedHistory: [100000, 90000, 80000],
+        checkpointFailure: nil, remainingAttempts: nil, failedAttemptCount: nil,
+        lastFailureReason: nil, retryHoldSeconds: nil, fileMissing: false,
+        isAssembling: false, assembly: .none, partFilenames: ["Filename"], metadata: nil)
     let theme = ThemeCatalog.builtInThemes()[5]
     let controller = EngineController(notificationManager: NotificationManager())
     let row = { (index: Int, isSelected: Bool) in
@@ -1750,9 +1754,11 @@ private struct ItemETAText: View {
     private var eta: TimeInterval {
         var speed = model.recentAverageSpeed
         if speed == 0, isQueued { speed = stats.recentGlobalSpeed }
-        return estimatedSecondsRemaining(
-            totalBytes: model.totalBytes ?? 0, completedBytes: model.completedBytes,
-            speed: speed)
+        // A failed call reads as "no estimate", which the row shows as a dash.
+        return
+            (try? estimatedSecondsRemaining(
+                totalBytes: model.totalBytes ?? 0, completedBytes: model.completedBytes,
+                speed: speed)) ?? 0
     }
 
     var body: some View {

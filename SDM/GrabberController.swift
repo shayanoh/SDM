@@ -3,45 +3,128 @@ import Observation
 import SDMCore
 import SDMGrabber
 import SDMResolve
+import os.log
 
 /// Bridges `GrabberSession` to SwiftUI, mirroring `EngineController`'s role
 /// for `DownloadEngine`.
 @MainActor
 @Observable
 final class GrabberController {
-    private(set) var snapshot = GrabberSnapshot(
-        links: [], packages: [], checkedCount: 0, totalCount: 0)
+    private(set) var snapshot = GrabberSnapshot.empty
+    /// The verdict counts of `snapshot`, computed once when it changes.
+    private(set) var summary = GrabberSummary.empty
 
     private let session: GrabberSession
     private var autoClearTask: Task<Void, Never>?
     private let managedBinaries: ManagedBinariesController?
+    private let notifications: NotificationManager?
+    private nonisolated static let log = Logger(
+        subsystem: "com.shayanoh.SDM", category: "grabber")
 
     init(
-        binaryLocator: BinaryLocator = BinaryLocator(
-            searchPaths: [ManagedBinariesController.binDirectory]),
-        managedBinaries: ManagedBinariesController? = nil
+        managedBinaries: ManagedBinariesController? = nil,
+        notifications: NotificationManager? = nil
     ) {
         self.managedBinaries = managedBinaries
-        let processRunner = SystemProcessRunner()
-        session = GrabberSession(
-            prober: LinkProber(
-                transport: URLSessionProbeTransport(),
-                deepSniffEnabled: GrabberSettings.deepSniffEnabled
-            ),
-            budget: GrabberSession.Budget(
+        self.notifications = notifications
+        // Same defaults the Swift `GrabberSession.Budget` had for the resolve
+        // limit; the two probe limits follow the engine's connection settings.
+        let config = GrabberConfig(
+            budget: GrabberBudget(
                 globalMaxConcurrentProbes: EngineSettingsStore.globalMaxConnections,
-                maxConcurrentPerHost: EngineSettingsStore.maxConnectionsPerHost
-            ),
-            resolver: YtDlpResolver(
-                runner: processRunner, locator: binaryLocator,
-                cookieSource: { MediaSitesSettingsStore.cookieSource },
-                maxPlaylistVideos: { MediaSitesSettingsStore.maxPlaylistVideos },
-                extraArguments: { ManagedBinariesController.ytDlpExtraArguments }
-            ),
-            qualityPreferences: { MediaSitesSettingsStore.qualityPreferences },
-            ffmpegAvailable: { GrabberController.ffmpegOnDisk }
-        )
+                maxConcurrentPerHost: EngineSettingsStore.maxConnectionsPerHost,
+                maxConcurrentResolves: 4),
+            deepSniffEnabled: GrabberSettings.deepSniffEnabled,
+            binarySearchPaths: [ManagedBinariesController.binDirectory],
+            qualityPreferences: MediaSitesSettingsStore.qualityPreferences,
+            ffmpegAvailable: GrabberController.ffmpegOnDisk,
+            cookieSource: MediaSitesSettingsStore.cookieSource,
+            maxPlaylistVideos: UInt32(MediaSitesSettingsStore.maxPlaylistVideos),
+            ytDlpExtraArguments: ManagedBinariesController.ytDlpExtraArguments)
+        do {
+            session = try GrabberSession(config: config)
+        } catch {
+            // Built from clamped settings and fixed paths: a failure is a bug.
+            fatalError("SDM could not start the link grabber: \(error.localizedDescription)")
+        }
         startAutoClearLoop()
+    }
+
+    /// Re-sends the settings the Swift session read through closures on every
+    /// use: the quality preferences, the yt-dlp cookie source and playlist
+    /// cap, and whether `ffmpeg` is on disk. Called when Settings saves and
+    /// when the managed binaries change.
+    func applyStoredSettings() {
+        do {
+            try session.setQualityPreferences(
+                preferences: MediaSitesSettingsStore.qualityPreferences)
+            try session.setCookieSource(source: MediaSitesSettingsStore.cookieSource)
+            try session.setMaxPlaylistVideos(
+                count: UInt32(MediaSitesSettingsStore.maxPlaylistVideos))
+            try session.setFfmpegAvailable(available: Self.ffmpegOnDisk)
+        } catch {
+            report("apply the link grabber settings", error)
+        }
+    }
+
+    /// Tells the session whether `ffmpeg` is now on disk (it has no way to
+    /// find out itself): after the bundled blobs are inflated or an update
+    /// lands, muxed formats become offerable.
+    func refreshFfmpegAvailability() {
+        do {
+            try session.setFfmpegAvailable(available: Self.ffmpegOnDisk)
+        } catch {
+            report("update the ffmpeg status", error)
+        }
+    }
+
+    /// Points a binary (`"yt-dlp"`, `"ffmpeg"`) at a user-chosen path, or back
+    /// at the default lookup with `nil`.
+    func setBinaryOverride(name: String, path: URL?) {
+        do {
+            try session.setBinaryOverride(name: name, path: path)
+        } catch {
+            report("change the \(name) location", error)
+        }
+    }
+
+    private func report(_ action: String, _ error: Error) {
+        Self.log.error("Could not \(action, privacy: .public): \(error.localizedDescription)")
+        notifications?.postInfo("Could not \(action): \(error.localizedDescription)")
+    }
+
+    /// Re-reads the session's snapshot. A failure keeps the previous one: the
+    /// callers are refreshes, and the next one tries again.
+    private func refresh() {
+        do {
+            let newSnapshot = try session.snapshot()
+            if newSnapshot != snapshot {
+                snapshot = newSnapshot
+                summary = newSnapshot.summary
+            }
+        } catch {
+            Self.log.error("Snapshot failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Runs a synchronous session edit, reports a failure, and refreshes.
+    private func edit(_ action: String, _ body: () throws -> Void) {
+        do {
+            try body()
+        } catch {
+            report(action, error)
+        }
+        refresh()
+    }
+
+    /// Runs an asynchronous session call, reports a failure, and refreshes.
+    private func editAsync(_ action: String, _ body: () async throws -> Void) async {
+        do {
+            try await body()
+        } catch {
+            report(action, error)
+        }
+        refresh()
     }
 
     /// Once a minute, drops rows older than the "auto-clear grabbed links"
@@ -55,8 +138,9 @@ final class GrabberController {
                 guard let maxAge = GrabberSettings.autoClearGrabbedLinksAfter.seconds else {
                     continue
                 }
-                await self.session.pruneOlderThan(maxAge)
-                self.snapshot = await self.session.snapshot()
+                self.edit("clear old links") {
+                    try self.session.pruneOlderThan(maxAge: maxAge, now: Date())
+                }
             }
         }
     }
@@ -69,85 +153,78 @@ final class GrabberController {
     }
 
     func updateSnapshot() async {
-        let newSnapshot = await session.snapshot()
-        if newSnapshot != snapshot {
-            snapshot = newSnapshot
-        }
+        refresh()
     }
 
     func ingest(text: String) async {
         managedBinaries?.kick()
-        await session.ingest(text: text)
-        snapshot = await session.snapshot()
+        // Extract here, not in the session: the core keeps a link's string as
+        // its identity, and a URL that crossed through Foundation (which
+        // percent-encodes spaces and non-ASCII) must be the one it keeps, or
+        // the engine's copy of the same link would not match it when the
+        // known downloads are compared.
+        let links = URLExtractor.extractLinks(from: text)
+        await editAsync("add the links") { try await session.ingestUrls(urls: links) }
     }
 
     func ingest(urls: [URL]) async {
         managedBinaries?.kick()
-        await session.ingest(urls: urls)
-        snapshot = await session.snapshot()
+        await editAsync("add the links") { try await session.ingestUrls(urls: urls) }
     }
 
     func setKnownDownloadURLs(_ urls: Set<URL>) async {
-        await session.setKnownDownloadURLs(urls)
-        snapshot = await session.snapshot()
+        edit("update the known downloads") { try session.setKnownDownloadUrls(urls: urls) }
     }
 
     func removeLink(_ id: UUID) async {
-        await session.removeLink(id)
-        snapshot = await session.snapshot()
+        edit("remove the link") { try session.removeLink(id: id) }
     }
 
     func removePackage(_ id: UUID) async {
-        await session.removePackage(id)
-        snapshot = await session.snapshot()
+        edit("remove the package") { try session.removePackage(id: id) }
     }
 
     func clear() async {
-        await session.clear()
-        snapshot = await session.snapshot()
+        edit("clear the list") { try session.clear() }
     }
 
     func moveLink(_ id: UUID, toPackage packageID: UUID) async {
-        await session.moveLink(id, toPackage: packageID)
-        snapshot = await session.snapshot()
+        edit("move the link") { try session.moveLink(id: id, packageId: packageID) }
     }
 
     func renamePackage(_ id: UUID, to newName: String) async {
-        await session.renamePackage(id, to: newName)
-        snapshot = await session.snapshot()
+        edit("rename the package") { try session.renamePackage(id: id, newName: newName) }
     }
 
     func mergePackages(_ sourceID: UUID, into destinationID: UUID) async {
-        await session.mergePackages(sourceID, into: destinationID)
-        snapshot = await session.snapshot()
+        edit("merge the packages") {
+            try session.mergePackages(sourceId: sourceID, destinationId: destinationID)
+        }
     }
 
     func splitPackage(_ id: UUID) async {
-        await session.splitPackage(id)
-        snapshot = await session.snapshot()
+        edit("split the package") { try session.splitPackage(id: id) }
     }
 
     func recheckFailed() async {
-        await session.recheckFailed()
-        snapshot = await session.snapshot()
+        await editAsync("recheck the links") { try await session.recheckFailed() }
     }
 
     /// Re-probes / re-resolves exactly these rows — the per-item "Recheck"
     /// context-menu action, which retries regardless of current verdict.
     func recheck(_ ids: Set<UUID>) async {
-        await session.recheck(ids: ids)
-        snapshot = await session.snapshot()
+        await editAsync("recheck the links") { try await session.recheck(ids: ids) }
     }
 
     /// Stops in-flight probes/resolves — the header's "Cancel Checks" button.
     func cancelChecks() async {
-        await session.cancelChecks()
-        snapshot = await session.snapshot()
+        edit("cancel the checks") { try session.cancelChecks() }
     }
 
     func removeLinks(_ ids: Set<UUID>) async {
-        for id in ids { await session.removeLink(id) }
-        snapshot = await session.snapshot()
+        edit("remove the links") {
+            for id in ids { try session.removeLink(id: id) }
+        }
     }
 
     /// The URL shown by "Copy URL": a link's resolved/original address, or a
@@ -256,7 +333,6 @@ final class GrabberController {
     }
 
     func setFormatChoice(_ choice: FormatChoice, for rowID: UUID) async {
-        await session.setFormatChoice(choice, for: rowID)
-        snapshot = await session.snapshot()
+        edit("change the format") { try session.setFormatChoice(choice: choice, id: rowID) }
     }
 }

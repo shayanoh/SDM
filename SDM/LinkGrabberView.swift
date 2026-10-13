@@ -8,7 +8,9 @@ import UniformTypeIdentifiers
     LinkRow(
         link:
             ProbedLink(
-                id: UUID(), originalURL: URL(fileURLWithPath: ""), finalURL: nil, stage: .done,
+                id: UUID(), originalUrl: URL(fileURLWithPath: ""),
+                finalUrl: URL(fileURLWithPath: ""),
+                stage: .done,
                 statusCode: 200, contentLength: 1_000_000_000, contentType: nil,
                 suggestedFilename: "Filename", validator: "validator", acceptsRanges: true,
                 sniffedSignature: nil, transportFailed: false, verdict: .online, isDuplicate: false),
@@ -221,6 +223,7 @@ struct LinkGrabberView: View {
 
     private var header: some View {
         let snapshot = controller.snapshot
+        let summary = controller.summary
         return VStack(alignment: .leading, spacing: 6) {
             ProgressView(
                 value: Double(snapshot.checkedCount), total: Double(max(snapshot.totalCount, 1)))
@@ -229,11 +232,11 @@ struct LinkGrabberView: View {
                     .font(.caption)
                     .foregroundStyle(theme.textSecondaryColor)
                 Spacer()
-                statPill(label: "Online", count: snapshot.onlineCount, color: theme.onlineColor)
-                statPill(label: "Faulty", count: snapshot.faultyCount, color: theme.faultyColor)
-                statPill(label: "Offline", count: snapshot.offlineCount, color: theme.offlineColor)
+                statPill(label: "Online", count: summary.onlineCount, color: theme.onlineColor)
+                statPill(label: "Faulty", count: summary.faultyCount, color: theme.faultyColor)
+                statPill(label: "Offline", count: summary.offlineCount, color: theme.offlineColor)
                 statPill(
-                    label: "Check failed", count: snapshot.failedCount, color: theme.failedColor)
+                    label: "Check failed", count: summary.failedCount, color: theme.failedColor)
                 Button("Add all to downloads") {
                     addAllToDownloads(startImmediately: false)
                 }
@@ -244,7 +247,7 @@ struct LinkGrabberView: View {
                 }
                 .controlSize(.small)
                 .disabled(snapshot.packages.isEmpty)
-                if snapshot.isChecking {
+                if summary.isChecking {
                     Button("Cancel Checks", role: .destructive) {
                         Task { await controller.cancelChecks() }
                     }
@@ -254,7 +257,7 @@ struct LinkGrabberView: View {
                         Task { await controller.recheckFailed() }
                     }
                     .controlSize(.small)
-                    .disabled(snapshot.recheckableCount == 0)
+                    .disabled(summary.recheckableCount == 0)
                 }
                 Button("Clear", role: .destructive) {
                     Task { await controller.clear() }

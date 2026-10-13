@@ -105,7 +105,7 @@ nonisolated enum MediaSitesSettingsStore {
         if allowOpus { audio.insert(.opus) }
         if allowAAC { audio.insert(.aac) }
         return QualityPreferences(
-            maxHeight: maxHeight,
+            maxHeight: Int64(maxHeight),
             videoCodecs: video.isEmpty ? [.av1, .vp9, .h264] : video,
             containers: containers.isEmpty ? [.mp4, .webm] : containers,
             audioCodecs: audio.isEmpty ? [.opus, .aac] : audio)

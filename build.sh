@@ -26,6 +26,8 @@ Options:
                   Replaces every app-target MARKETING_VERSION line
                   (usually two).
   --no-bump       Skip the build-number bump (agvtool next-version).
+  --no-install    Stop after the build: do not touch $DEST_DIR. The built
+                  app stays in $DERIVED_DATA_PATH/Build/Products/$CONFIGURATION.
 
 Without --no-bump the build number is bumped. With -v, the marketing
 version is changed first and the build number is still bumped unless
@@ -34,6 +36,7 @@ EOF
 }
 
 NO_BUMP=false
+NO_INSTALL=false
 NEW_MARKETING_VERSION=""
 MV_UPDATED=false
 MV_FROM=""
@@ -65,6 +68,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-bump)
       NO_BUMP=true
+      shift
+      ;;
+    --no-install)
+      NO_INSTALL=true
       shift
       ;;
     *)
@@ -107,6 +114,10 @@ fi
 
 #rm -rf build
 
+# The Rust core (universal static library, UniFFI bindings) must exist before
+# Xcode resolves the SDMKit package.
+./scripts/build-rust-core.sh release
+
 xcodebuild \
   -project "$PROJECT" \
   -scheme "$SCHEME" \
@@ -123,6 +134,11 @@ if [ ! -d "$BUILT_APP" ]; then
 fi
 
 echo "Build succeeded. Architectures: $(lipo -info "$BUILT_APP/Contents/MacOS/SDM" | sed 's/^.*: //')"
+
+if [[ "$NO_INSTALL" == true ]]; then
+  echo "Skipping install (--no-install). Built app: $BUILT_APP"
+  exit 0
+fi
 
 if [ -d "$DEST_DIR/$APP_NAME" ]; then
   echo "Removing existing $DEST_DIR/$APP_NAME"

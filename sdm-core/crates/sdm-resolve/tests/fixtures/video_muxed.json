@@ -1,0 +1,16 @@
+{
+  "id": "dQw4w9WgXcQ",
+  "title": "Rick Astley - Never Gonna Give You Up",
+  "extractor": "youtube",
+  "duration": 213.0,
+  "formats": [
+    { "format_id": "sb0", "ext": "mhtml", "vcodec": "none", "acodec": "none", "protocol": "mhtml", "url": "https://i.ytimg.com/sb/x.jpg" },
+    { "format_id": "233", "ext": "mp4", "vcodec": "none", "acodec": "none", "protocol": "m3u8_native", "url": "https://manifest.googlevideo.com/x.m3u8" },
+    { "format_id": "140", "ext": "m4a", "vcodec": "none", "acodec": "mp4a.40.2", "tbr": 129.5, "filesize": 3456789, "protocol": "https", "url": "https://rr1---sn.googlevideo.com/audio140" },
+    { "format_id": "251", "ext": "webm", "vcodec": "none", "acodec": "opus", "tbr": 122.1, "filesize": 3311999, "protocol": "https", "url": "https://rr1---sn.googlevideo.com/audio251" },
+    { "format_id": "137", "ext": "mp4", "vcodec": "avc1.640028", "acodec": "none", "height": 1080, "width": 1920, "tbr": 4412.6, "filesize": 118000000, "protocol": "https", "url": "https://rr1---sn.googlevideo.com/video137" },
+    { "format_id": "248", "ext": "webm", "vcodec": "vp9", "acodec": "none", "height": 1080, "width": 1920, "tbr": 2800.4, "filesize": 74000000, "protocol": "https", "url": "https://rr1---sn.googlevideo.com/video248" },
+    { "format_id": "399", "ext": "mp4", "vcodec": "av01.0.08M.08", "acodec": "none", "height": 1080, "width": 1920, "tbr": 2400.0, "filesize": 64000000, "protocol": "https", "url": "https://rr1---sn.googlevideo.com/video399" },
+    { "format_id": "18", "ext": "mp4", "vcodec": "avc1.42001E", "acodec": "mp4a.40.2", "height": 360, "width": 640, "tbr": 696.7, "filesize": 18500000, "protocol": "https", "url": "https://rr1---sn.googlevideo.com/prog18" }
+  ]
+}

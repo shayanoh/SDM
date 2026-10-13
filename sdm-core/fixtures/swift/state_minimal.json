@@ -1,0 +1,41 @@
+{
+  "formatVersion" : 2,
+  "packages" : [
+    {
+      "id" : "00000000-0000-4000-8000-000000000010",
+      "items" : [
+        {
+          "assembly" : "none",
+          "components" : [
+            {
+              "completed" : {
+                "ranges" : [
+
+                ]
+              },
+              "id" : "00000000-0000-4000-8000-000000000111",
+              "origin" : {
+                "kind" : "http"
+              },
+              "partFilename" : "m.bin",
+              "url" : "https://example.com/m.bin"
+            }
+          ],
+          "id" : "00000000-0000-4000-8000-000000000011",
+          "isEnabled" : true,
+          "outputFilename" : "m.bin",
+          "position" : 0,
+          "sourceURL" : "https://example.com/m.bin",
+          "state" : {
+            "queued" : {
+
+            }
+          }
+        }
+      ],
+      "name" : "P",
+      "position" : 0,
+      "priority" : 2
+    }
+  ]
+}

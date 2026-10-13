@@ -18,6 +18,18 @@ macOS download manager. Segmented transfers, resume, clipboard link grabbing, Yo
 
 **Multi-site resolver + HLS/DASH wholesale (2026-09-03):** the yt-dlp gate is a curated ~50-site `SiteRegistry` (`SDMResolve`), not just YouTube — Vimeo, Twitch, TikTok, SoundCloud, Reddit, Aparat, the major adult tubes, etc. HLS/DASH-only videos (no single `Range`-capable URL) download via `YtDlpWholesaleDownloader` (yt-dlp as a downloader) driven by `WholesaleComponentTask` in the engine; that path is non-resumable and its progress is a synthesized `RangeSet`. Spec: `docs/superpowers/specs/2026-09-03-multi-site-resolver-design.md`.
 
+## Rust migration branch
+
+This section applies to the `rust-migration` branch only. The sections here that describe `SDMKit`'s Swift targets describe the baseline, which now lives under `legacy/SDMKitSwift`.
+
+The experiment ports the Swift core to Rust and keeps the SwiftUI app on top. Status, decisions, measurements and what is left are in [docs/rust-migration-roadmap.md](docs/rust-migration-roadmap.md); the design is in [docs/superpowers/specs/2026-10-12-rust-core-design.md](docs/superpowers/specs/2026-10-12-rust-core-design.md).
+
+- `sdm-core/` is a Cargo workspace. `sdm-core` holds the domain models and `RangeSet`; `sdm-resolve` holds yt-dlp, format selection and managed binaries; `sdm-engine` holds the engine, scheduler, transport and persistence; `sdm-grabber` holds extraction, probing, clustering and the session; `sdm-ffi` is the UniFFI export surface; `sdm-bench` and `uniffi-bindgen` are tools.
+- The SwiftUI app reaches the core through generated UniFFI bindings (`SDMKit/Sources/SDMRust`) and thin shims in `SDMKit/Sources/SDM*` that keep the four product names.
+- Translation rules (spec section 4): an actor becomes one mutex, with one lock scope per stretch that has no `await` and never a lock held across `.await`; Swift's implicit task cancellation becomes an explicit cancellation token; time is driven by `tick()` and there is no clock.
+- Build and test: `scripts/build-rust-core.sh` builds the Rust library, `./test.sh` runs the Rust and Swift tests, and `./build.sh --no-install` builds the app without touching `/Applications`.
+- `legacy/SDMKitSwift` is a frozen baseline for the tests and benchmarks. Do not edit it.
+
 ## Fixed decisions
 
 Do not relitigate these without asking; they were settled during design.

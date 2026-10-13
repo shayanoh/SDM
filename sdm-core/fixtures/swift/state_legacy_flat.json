@@ -1,0 +1,49 @@
+{
+  "formatVersion" : 1,
+  "packages" : [
+    {
+      "id" : "00000000-0000-4000-8000-000000000020",
+      "items" : [
+        {
+          "completed" : {
+            "ranges" : [
+              {
+                "end" : 1024,
+                "start" : 0
+              }
+            ]
+          },
+          "filename" : "f.bin",
+          "id" : "1B4E28BA-2FA1-11D2-883F-0016D3CCA427",
+          "isEnabled" : true,
+          "isResumable" : true,
+          "position" : 3,
+          "priority" : 3,
+          "state" : {
+            "stopped" : {
+
+            }
+          },
+          "totalBytes" : 2048,
+          "url" : "https://x/f.bin",
+          "validator" : "\"legacy-etag\""
+        },
+        {
+          "filename" : "g.bin",
+          "id" : "1B4E28BA-2FA1-11D2-883F-0016D3CCA428",
+          "isEnabled" : false,
+          "position" : 0,
+          "state" : {
+            "failed" : {
+              "reason" : "boom"
+            }
+          },
+          "url" : "https://x/g.bin"
+        }
+      ],
+      "name" : "Legacy",
+      "position" : 0,
+      "priority" : 2
+    }
+  ]
+}

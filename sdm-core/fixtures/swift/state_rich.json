@@ -1,0 +1,376 @@
+{
+  "formatVersion" : 2,
+  "packages" : [
+    {
+      "id" : "00000000-0000-4000-8000-000000000001",
+      "items" : [
+        {
+          "assembly" : "none",
+          "components" : [
+            {
+              "completed" : {
+                "ranges" : [
+
+                ]
+              },
+              "id" : "00000000-0000-4000-8000-000000001011",
+              "origin" : {
+                "kind" : "http"
+              },
+              "partFilename" : "a.zip",
+              "url" : "https://example.com/files/a.zip"
+            }
+          ],
+          "id" : "00000000-0000-4000-8000-000000000101",
+          "isEnabled" : false,
+          "outputFilename" : "a.zip",
+          "position" : 0,
+          "priority" : 0,
+          "sourceURL" : "https://example.com/files/a.zip",
+          "state" : {
+            "stopped" : {
+
+            }
+          }
+        },
+        {
+          "assembly" : "none",
+          "components" : [
+            {
+              "completed" : {
+                "ranges" : [
+
+                ]
+              },
+              "id" : "00000000-0000-4000-8000-000000001021",
+              "isResumable" : true,
+              "origin" : {
+                "kind" : "http"
+              },
+              "partFilename" : "b.iso",
+              "totalBytes" : 4294967296,
+              "url" : "https://example.com/files/b.iso",
+              "validator" : "\"etag-b\""
+            }
+          ],
+          "id" : "00000000-0000-4000-8000-000000000102",
+          "isEnabled" : true,
+          "metadata" : "1080p · WEB-DL · H.264",
+          "outputFilename" : "b.iso",
+          "position" : 1,
+          "priority" : 1,
+          "sourceURL" : "https://example.com/files/b.iso",
+          "state" : {
+            "queued" : {
+
+            }
+          }
+        },
+        {
+          "assembly" : "none",
+          "components" : [
+            {
+              "completed" : {
+                "ranges" : [
+                  {
+                    "end" : 1000000,
+                    "start" : 0
+                  },
+                  {
+                    "end" : 3500000,
+                    "start" : 2000000
+                  },
+                  {
+                    "end" : 9999999999,
+                    "start" : 5000000000
+                  }
+                ]
+              },
+              "id" : "00000000-0000-4000-8000-000000001031",
+              "isResumable" : false,
+              "origin" : {
+                "kind" : "http"
+              },
+              "partFilename" : "c.bin",
+              "totalBytes" : 10000000000,
+              "url" : "https://example.com/files/c.bin",
+              "validator" : "Wed, 21 Oct 2015 07:28:00 GMT"
+            }
+          ],
+          "id" : "00000000-0000-4000-8000-000000000103",
+          "isEnabled" : true,
+          "outputFilename" : "c.bin",
+          "position" : 2,
+          "priority" : 2,
+          "sourceURL" : "https://example.com/files/c.bin",
+          "state" : {
+            "running" : {
+
+            }
+          }
+        },
+        {
+          "assembly" : "none",
+          "components" : [
+            {
+              "completed" : {
+                "ranges" : [
+                  {
+                    "end" : 2048,
+                    "start" : 0
+                  }
+                ]
+              },
+              "id" : "00000000-0000-4000-8000-000000001041",
+              "isResumable" : true,
+              "origin" : {
+                "kind" : "http"
+              },
+              "partFilename" : "d.pdf",
+              "totalBytes" : 2048,
+              "url" : "https://example.com/files/d.pdf"
+            }
+          ],
+          "id" : "00000000-0000-4000-8000-000000000104",
+          "isEnabled" : true,
+          "outputFilename" : "d.pdf",
+          "position" : 3,
+          "priority" : 3,
+          "sourceURL" : "https://example.com/files/d.pdf",
+          "state" : {
+            "completed" : {
+
+            }
+          }
+        }
+      ],
+      "name" : "Mixed HTTP",
+      "position" : 0,
+      "priority" : 2
+    },
+    {
+      "id" : "00000000-0000-4000-8000-000000000002",
+      "items" : [
+        {
+          "assembly" : "mux",
+          "components" : [
+            {
+              "completed" : {
+                "ranges" : [
+                  {
+                    "end" : 25000000,
+                    "start" : 0
+                  }
+                ]
+              },
+              "id" : "00000000-0000-4000-8000-000000002011",
+              "isResumable" : true,
+              "origin" : {
+                "formatID" : "137",
+                "kind" : "resolved"
+              },
+              "partFilename" : "Clip.f137.mp4",
+              "totalBytes" : 50000000,
+              "url" : "https://rr1.googlevideo.com/videoplayback?id=v",
+              "validator" : "v-etag"
+            },
+            {
+              "completed" : {
+                "ranges" : [
+                  {
+                    "end" : 5000000,
+                    "start" : 0
+                  }
+                ]
+              },
+              "id" : "00000000-0000-4000-8000-000000002012",
+              "origin" : {
+                "formatID" : "251",
+                "kind" : "resolved"
+              },
+              "partFilename" : "Clip.f251.webm",
+              "totalBytes" : 5000000,
+              "url" : "https://rr1.googlevideo.com/videoplayback?id=a"
+            }
+          ],
+          "id" : "00000000-0000-4000-8000-000000000201",
+          "isEnabled" : true,
+          "metadata" : "1080p · AV1 · mp4 · youtube",
+          "outputFilename" : "Clip.mp4",
+          "position" : 0,
+          "priority" : 4,
+          "sourceURL" : "https://www.youtube.com/watch?v=abc123",
+          "state" : {
+            "running" : {
+
+            }
+          }
+        }
+      ],
+      "name" : "YouTube",
+      "position" : 1,
+      "priority" : 3
+    },
+    {
+      "id" : "00000000-0000-4000-8000-000000000003",
+      "items" : [
+        {
+          "assembly" : "none",
+          "components" : [
+            {
+              "completed" : {
+                "ranges" : [
+
+                ]
+              },
+              "id" : "00000000-0000-4000-8000-000000003011",
+              "isResumable" : true,
+              "origin" : {
+                "formatID" : "bv*+ba/b",
+                "kind" : "wholesale"
+              },
+              "partFilename" : "Stream.mp4",
+              "url" : "https://cdn.example.net/master.m3u8"
+            }
+          ],
+          "id" : "00000000-0000-4000-8000-000000000301",
+          "isEnabled" : true,
+          "metadata" : "HLS · 720p",
+          "outputFilename" : "Stream.mp4",
+          "position" : 0,
+          "sourceURL" : "https://vimeo.com/123456",
+          "state" : {
+            "queued" : {
+
+            }
+          }
+        },
+        {
+          "assembly" : "none",
+          "components" : [
+            {
+              "completed" : {
+                "ranges" : [
+                  {
+                    "end" : 10,
+                    "start" : 0
+                  }
+                ]
+              },
+              "id" : "00000000-0000-4000-8000-000000003021",
+              "isResumable" : true,
+              "lastError" : {
+                "message" : "HTTP 404"
+              },
+              "origin" : {
+                "kind" : "http"
+              },
+              "partFilename" : "gone.bin",
+              "totalBytes" : 1000,
+              "url" : "https://example.com/gone.bin"
+            }
+          ],
+          "id" : "00000000-0000-4000-8000-000000000302",
+          "isEnabled" : true,
+          "outputFilename" : "gone.bin",
+          "position" : 1,
+          "priority" : 2,
+          "sourceURL" : "https://example.com/gone.bin",
+          "state" : {
+            "failed" : {
+              "reason" : "HTTP 404"
+            }
+          }
+        },
+        {
+          "assembly" : "none",
+          "components" : [
+            {
+              "completed" : {
+                "ranges" : [
+
+                ]
+              },
+              "id" : "00000000-0000-4000-8000-000000003031",
+              "origin" : {
+                "kind" : "http"
+              },
+              "partFilename" : "ü file.bin",
+              "url" : "https://EXAMPLE.com:443/a%2520b/%C3%BC?x=&y=1#frag"
+            }
+          ],
+          "id" : "00000000-0000-4000-8000-000000000303",
+          "isEnabled" : true,
+          "outputFilename" : "ü file.bin",
+          "position" : 2,
+          "sourceURL" : "https://EXAMPLE.com:443/a%2520b/%C3%BC?x=&y=1#frag",
+          "state" : {
+            "stopped" : {
+
+            }
+          }
+        },
+        {
+          "assembly" : "none",
+          "components" : [
+            {
+              "completed" : {
+                "ranges" : [
+
+                ]
+              },
+              "id" : "00000000-0000-4000-8000-000000003041",
+              "origin" : {
+                "kind" : "http"
+              },
+              "partFilename" : "space.bin",
+              "url" : "https://EXAMPLE.com:443/a%20b/c?x=&y=1#frag"
+            }
+          ],
+          "id" : "00000000-0000-4000-8000-000000000304",
+          "isEnabled" : true,
+          "outputFilename" : "space.bin",
+          "position" : 3,
+          "sourceURL" : "https://EXAMPLE.com:443/a%20b/c?x=&y=1#frag",
+          "state" : {
+            "queued" : {
+
+            }
+          }
+        },
+        {
+          "assembly" : "none",
+          "components" : [
+            {
+              "completed" : {
+                "ranges" : [
+
+                ]
+              },
+              "id" : "00000000-0000-4000-8000-000000003051",
+              "origin" : {
+                "kind" : "http"
+              },
+              "partFilename" : "dot.bin",
+              "url" : "https://example.com./p?"
+            }
+          ],
+          "id" : "00000000-0000-4000-8000-000000000305",
+          "isEnabled" : true,
+          "outputFilename" : "dot.bin",
+          "position" : 4,
+          "sourceURL" : "https://example.com./p?",
+          "state" : {
+            "queued" : {
+
+            }
+          }
+        }
+      ],
+      "name" : "Odd ones",
+      "note" : "3 of 320 videos",
+      "position" : 2,
+      "priority" : 0
+    }
+  ]
+}

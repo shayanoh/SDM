@@ -1,0 +1,36 @@
+[bindings.swift]
+ffi_module_name = "SDMRustFFI"
+ffi_module_filename = "sdm_ffiFFI"
+
+# Swift faces of the custom types declared in src/custom_types.rs.
+
+[bindings.swift.custom_types.Uuid]
+type_name = "UUID"
+imports = ["Foundation"]
+lift = "UUID(uuidString: {})!"
+lower = "{}.uuidString"
+
+# The string a Swift URL hands over is its absoluteString, kept byte for byte
+# by SourceUrl. Rust -> Swift is soft on purpose: a string URL(string:)
+# rejects (the core accepted it, Foundation will not) becomes a placeholder
+# URL instead of throwing out of a snapshot the UI polls five times a second.
+# The row stays visible; its address is unusable. The placeholder string is
+# `UNUSABLE_URL_PLACEHOLDER` in src/custom_types.rs, which refuses it (and
+# every other `about:` URL) when it comes back from Swift.
+[bindings.swift.custom_types.SourceUrl]
+type_name = "URL"
+imports = ["Foundation"]
+lift = "(URL(string: {}) ?? URL(string: \"about:invalid\")!)"
+lower = "{}.absoluteString"
+
+[bindings.swift.custom_types.PathBuf]
+type_name = "URL"
+imports = ["Foundation"]
+lift = "URL(fileURLWithPath: {})"
+lower = "{}.path"
+
+# usize crosses as UInt64 and is Int in Swift, as the Swift core used Int.
+[bindings.swift.custom_types.usize]
+type_name = "Int"
+lift = "Int(clamping: {})"
+lower = "UInt64(clamping: {})"
