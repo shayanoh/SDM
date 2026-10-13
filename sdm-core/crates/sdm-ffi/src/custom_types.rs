@@ -34,12 +34,31 @@ pub fn uuid_from_string(text: &str) -> Result<Uuid, CoreError> {
     Uuid::parse_str(text).map_err(|error| CoreError::invalid("uuid", error.to_string()))
 }
 
+/// The URL the Swift conversion substitutes (see `uniffi.toml`) for a string
+/// Rust holds but Foundation's `URL(string:)` rejects, so that a polled
+/// snapshot never has to throw. It is a stand-in for "no usable address", so
+/// it is refused when it comes back as data (see [`source_url_from_string`]).
+pub const UNUSABLE_URL_PLACEHOLDER: &str = "about:invalid";
+
 /// Builds a [`SourceUrl`] from the `absoluteString` of a Swift `URL`,
 /// keeping that string byte for byte (never routed through `url::Url`'s
 /// normalization). An empty or unparseable string is an error: the core
-/// refuses a URL it could not probe or download.
+/// refuses a URL it could not probe or download. So is the Swift
+/// conversion's placeholder for an unusable address
+/// ([`UNUSABLE_URL_PLACEHOLDER`], or anything else with an `about:` scheme):
+/// it must not re-enter the core as a real link.
 pub fn source_url_from_string(text: &str) -> Result<SourceUrl, CoreError> {
-    SourceUrl::new(text).map_err(|error| CoreError::invalid("url", error.to_string()))
+    let url = SourceUrl::new(text).map_err(|error| CoreError::invalid("url", error.to_string()))?;
+    if url
+        .as_url()
+        .is_some_and(|parsed| parsed.scheme().eq_ignore_ascii_case("about"))
+    {
+        return Err(CoreError::invalid(
+            "url",
+            format!("`{text}` is not a downloadable address"),
+        ));
+    }
+    Ok(url)
 }
 
 /// A file path from a Swift file URL's `path`. An empty path is refused; a

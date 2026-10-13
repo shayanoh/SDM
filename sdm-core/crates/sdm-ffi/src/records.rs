@@ -44,7 +44,11 @@ pub struct ByteRange {
     pub end: i64,
 }
 
+// `repr(i64)` and the explicit values mirror the real type; the compiler does
+// not compare them (only UniFFI's metadata sees them), so
+// `tests/functions_ffi_tests.rs` pins each variant's value.
 #[uniffi::remote(Enum)]
+#[repr(i64)]
 pub enum Priority {
     Lowest = 0,
     Low = 1,

@@ -140,7 +140,9 @@ pub(crate) fn invalidate_all_locators() {
 /// The yt-dlp / ffmpeg tooling one engine or grabber owns.
 pub struct Toolchain {
     pub(crate) settings: Arc<ResolverSettings>,
-    pub(crate) locator: Arc<BinaryLocator>,
+    /// The locator the resolver, muxer and downloader share.
+    #[doc(hidden)]
+    pub locator: Arc<BinaryLocator>,
     runner: Arc<dyn ProcessRunner>,
 }
 
@@ -150,6 +152,16 @@ impl Toolchain {
             settings: Arc::new(ResolverSettings::new()),
             locator: new_locator(search_paths),
             runner: Arc::new(SystemProcessRunner::new()),
+        }
+    }
+
+    /// A toolchain whose subprocesses go through `runner`. For tests that
+    /// need to see the command lines the settings produce.
+    #[doc(hidden)]
+    pub fn with_runner(search_paths: Vec<PathBuf>, runner: Arc<dyn ProcessRunner>) -> Self {
+        Self {
+            runner,
+            ..Self::new(search_paths)
         }
     }
 
@@ -171,7 +183,7 @@ impl Toolchain {
         toolchain
     }
 
-    pub(crate) fn resolver(&self) -> Arc<dyn LinkResolver> {
+    pub fn resolver(&self) -> Arc<dyn LinkResolver> {
         let cookies = Arc::clone(&self.settings);
         let playlist = Arc::clone(&self.settings);
         let extra = Arc::clone(&self.settings);
@@ -184,7 +196,7 @@ impl Toolchain {
         ))
     }
 
-    pub(crate) fn wholesale_downloader(&self) -> Arc<dyn WholesaleDownloader> {
+    pub fn wholesale_downloader(&self) -> Arc<dyn WholesaleDownloader> {
         let cookies = Arc::clone(&self.settings);
         let extra = Arc::clone(&self.settings);
         Arc::new(YtDlpWholesaleDownloader::new(
@@ -195,7 +207,7 @@ impl Toolchain {
         ))
     }
 
-    pub(crate) fn muxer(&self) -> Arc<dyn Muxer> {
+    pub fn muxer(&self) -> Arc<dyn Muxer> {
         Arc::new(FfmpegMuxer::new(
             Arc::clone(&self.runner),
             Arc::clone(&self.locator),

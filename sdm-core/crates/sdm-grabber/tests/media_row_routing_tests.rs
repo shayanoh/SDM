@@ -259,3 +259,51 @@ async fn a_generic_yt_dlp_failure_shows_the_stderr_verbatim() {
     })
     .await;
 }
+
+/// A panic that unwinds while the session's lock is held (here, from the
+/// ffmpeg provider, which the session calls under its lock) must not disable
+/// the session: the polled `snapshot()` and later edits keep working.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_panic_under_the_session_lock_does_not_disable_the_session() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    within(async {
+        let explode = Arc::new(AtomicBool::new(false));
+        let provider_flag = Arc::clone(&explode);
+        let session =
+            GrabberSession::builder(LinkProber::new(Arc::new(FakeProbeOrigin::new()), false))
+                .resolver(Arc::new(FakeLinkResolver::new(|_| {
+                    Ok(single_media("abc", "Song", pair()))
+                })))
+                .ffmpeg_available(move || {
+                    assert!(!provider_flag.load(Ordering::SeqCst), "provider exploded");
+                    true
+                })
+                .build();
+        session.ingest_urls(&[su("https://youtu.be/abc")]).await;
+        let id = session.snapshot().media_rows[0].id;
+        let muxed = FormatChoice::new(
+            Some(vf("137", 1080, VideoCodec::H264, MediaContainer::Mp4)),
+            Some(af("140", AudioCodec::Aac, MediaContainer::M4a)),
+            MediaContainer::Mp4,
+            Some(1100),
+        );
+
+        explode.store(true, Ordering::SeqCst);
+        let result = catch_unwind(AssertUnwindSafe(|| {
+            session.set_format_choice(muxed.clone(), id);
+        }));
+        assert!(result.is_err(), "the provider must have panicked");
+        explode.store(false, Ordering::SeqCst);
+
+        // The lock was poisoned by that unwind; the session still answers.
+        assert_eq!(session.snapshot().media_rows.len(), 1);
+        session.set_format_choice(muxed, id);
+        assert_eq!(
+            session.snapshot().media_rows[0].state,
+            MediaRowState::Resolved
+        );
+    })
+    .await;
+}

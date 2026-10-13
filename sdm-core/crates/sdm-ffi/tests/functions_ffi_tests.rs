@@ -249,3 +249,199 @@ fn package_aggregate_for_items_matches_the_engine_computation() {
     assert_eq!(empty, sdm_engine::PackageAggregate::new(&[], 0.0));
     assert_eq!(empty.total_bytes, 0);
 }
+
+fn finished_item(total: i64, bytes_per_second: f64) -> sdm_engine::ItemSnapshot {
+    let mut completed = sdm_core::RangeSet::new();
+    completed.insert(ByteRange::new(0, total));
+    sdm_engine::ItemSnapshot::new(
+        uuid::Uuid::new_v4(),
+        su("https://example.com/a.bin"),
+        "a.bin",
+        Some(total),
+        completed,
+        sdm_core::ItemState::Completed,
+        true,
+        Some(true),
+        0,
+        1,
+        bytes_per_second,
+        vec![],
+    )
+}
+
+#[test]
+fn package_aggregate_for_items_sums_the_items_like_the_engine() {
+    let items = vec![finished_item(100, 5.0), finished_item(300, 7.0)];
+    let aggregate = package_aggregate_for_items(items.clone(), 12.0).unwrap();
+    assert_eq!(aggregate, sdm_engine::PackageAggregate::new(&items, 12.0));
+    assert_eq!(aggregate.total_bytes, 400);
+    assert_eq!(aggregate.completed_bytes, 400);
+}
+
+#[test]
+fn item_snapshot_helpers_forward_to_the_engine_rules() {
+    let mut item = finished_item(200, 0.0);
+    item.completed = sdm_core::RangeSet::new();
+    item.completed.insert(ByteRange::new(0, 50));
+    assert_eq!(
+        item_snapshot_fraction_completed(item.clone()).unwrap(),
+        0.25
+    );
+    item.total_bytes = None;
+    assert_eq!(item_snapshot_fraction_completed(item.clone()).unwrap(), 0.0);
+
+    item.state = sdm_core::ItemState::Queued;
+    assert!(!item_snapshot_is_retrying(item.clone()).unwrap());
+    item.failed_attempt_count = Some(1);
+    assert!(item_snapshot_is_retrying(item.clone()).unwrap());
+    item.state = sdm_core::ItemState::Running;
+    assert!(!item_snapshot_is_retrying(item).unwrap());
+}
+
+#[test]
+fn container_extensions_come_from_the_core() {
+    assert_eq!(
+        media_container_file_extension(MediaContainer::Mp4).unwrap(),
+        "mp4"
+    );
+    assert_eq!(
+        media_container_file_extension(MediaContainer::M4a).unwrap(),
+        "m4a"
+    );
+    assert_eq!(
+        media_container_file_extension(MediaContainer::Other("ogg".into())).unwrap(),
+        "ogg"
+    );
+}
+
+/// UserDefaults already holds these strings; they must never change.
+#[test]
+fn cookie_source_raw_values_are_the_persisted_strings() {
+    use sdm_resolve::CookieSource::*;
+    let expected = [
+        (None, "none"),
+        (Safari, "safari"),
+        (Chrome, "chrome"),
+        (Firefox, "firefox"),
+        (Edge, "edge"),
+        (Brave, "brave"),
+    ];
+    assert_eq!(
+        cookie_source_all().unwrap(),
+        expected.iter().map(|(s, _)| *s).collect::<Vec<_>>()
+    );
+    for (source, raw) in expected {
+        assert_eq!(cookie_source_raw_value(source).unwrap(), raw);
+        assert_eq!(
+            cookie_source_from_raw_value(raw.to_owned()).unwrap(),
+            Some(source)
+        );
+    }
+    for bad in ["", "Safari", "bogus"] {
+        assert_eq!(
+            cookie_source_from_raw_value(bad.to_owned()).unwrap(),
+            Option::None
+        );
+    }
+}
+
+#[test]
+fn channel_raw_values_are_the_persisted_strings() {
+    use sdm_resolve::YtDlpChannel::*;
+    assert_eq!(yt_dlp_channel_all().unwrap(), vec![Stable, Nightly]);
+    for (channel, raw) in [(Stable, "stable"), (Nightly, "nightly")] {
+        assert_eq!(yt_dlp_channel_raw_value(channel).unwrap(), raw);
+        assert_eq!(
+            yt_dlp_channel_from_raw_value(raw.to_owned()).unwrap(),
+            Some(channel)
+        );
+    }
+    assert_eq!(yt_dlp_channel_from_raw_value(String::new()).unwrap(), None);
+}
+
+#[test]
+fn quality_preferences_default_is_the_core_default() {
+    assert_eq!(
+        quality_preferences_default().unwrap(),
+        QualityPreferences::default()
+    );
+    assert_eq!(quality_preferences_default().unwrap().max_height, 1080);
+}
+
+#[test]
+fn engine_settings_defaults_match_the_core_and_validate() {
+    let folder = std::path::PathBuf::from("/tmp/x");
+    let settings = engine_settings_defaults(2, 4, 16, folder.clone()).unwrap();
+    assert_eq!(
+        settings,
+        sdm_engine::EngineSettings::new(2, 4, 16, folder.clone())
+    );
+    assert_eq!(settings.max_connections_per_host, 8);
+    assert_eq!(settings.checkpoint_interval_bytes, 8 * 1024 * 1024);
+    assert_eq!(settings.min_segment_size_bytes, 10 * 1024 * 1024);
+    for (a, b, c) in [(0, 1, 1), (1, 0, 1), (1, 1, 0)] {
+        assert!(matches!(
+            engine_settings_defaults(a, b, c, folder.clone()),
+            Err(CoreError::InvalidArgument { .. })
+        ));
+    }
+}
+
+#[test]
+fn range_set_union_shifts_and_merges() {
+    let set = |ranges: &[(i64, i64)]| RangeSetData {
+        ranges: ranges.iter().map(|(s, e)| ByteRange::new(*s, *e)).collect(),
+    };
+    // Item A: 100 bytes, all done. Item B starts at 100, first 50 done and 80..100.
+    let merged = range_set_union(vec![
+        OffsetRangeSet {
+            set: set(&[(0, 100)]),
+            offset: 0,
+        },
+        OffsetRangeSet {
+            set: set(&[(0, 50), (80, 100)]),
+            offset: 100,
+        },
+    ])
+    .unwrap();
+    assert_eq!(merged, set(&[(0, 150), (180, 200)]));
+    assert_eq!(range_set_union(vec![]).unwrap(), set(&[]));
+    assert!(matches!(
+        range_set_union(vec![OffsetRangeSet {
+            set: set(&[(0, 1)]),
+            offset: -1
+        }]),
+        Err(CoreError::InvalidArgument { .. })
+    ));
+    assert!(matches!(
+        range_set_union(vec![OffsetRangeSet {
+            set: set(&[(0, 1)]),
+            offset: i64::MAX
+        }]),
+        Err(CoreError::InvalidArgument { .. })
+    ));
+}
+
+#[test]
+fn priority_raw_values_are_pinned() {
+    use sdm_core::Priority::*;
+    for (priority, raw) in [
+        (Lowest, 0i64),
+        (Low, 1),
+        (Normal, 2),
+        (High, 3),
+        (Highest, 4),
+    ] {
+        assert_eq!(priority as i64, raw);
+    }
+}
+
+#[test]
+fn source_url_text_round_trips_and_refuses_the_placeholder() {
+    let url = source_url_parse("https://EXAMPLE.com/a b".to_owned()).unwrap();
+    assert_eq!(source_url_text(url).unwrap(), "https://EXAMPLE.com/a b");
+    assert!(matches!(
+        source_url_parse("about:invalid".to_owned()),
+        Err(CoreError::InvalidArgument { .. })
+    ));
+}

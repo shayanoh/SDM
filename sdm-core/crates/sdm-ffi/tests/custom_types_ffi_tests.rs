@@ -151,3 +151,28 @@ fn range_set_refuses_an_inverted_or_negative_range() {
         );
     }
 }
+
+/// The Swift conversion's stand-in for an address Foundation rejects must
+/// not come back in as a real link, through the converter nor any export.
+#[test]
+fn the_unusable_url_placeholder_is_refused_when_lifted() {
+    for text in [
+        sdm_ffi::custom_types::UNUSABLE_URL_PLACEHOLDER,
+        "about:invalid",
+        "ABOUT:blank",
+        "about:invalid#x",
+    ] {
+        assert!(
+            matches!(
+                source_url_from_string(text),
+                Err(CoreError::InvalidArgument { .. })
+            ),
+            "{text}"
+        );
+        assert!(
+            <SourceUrl as Lift<UniFfiTag>>::try_lift(buffer_of_string(text)).is_err(),
+            "{text}"
+        );
+    }
+    assert!(source_url_from_string("https://example.com/about:invalid").is_ok());
+}

@@ -7,11 +7,10 @@
 //! from small stored copies, because those closures run while the session's
 //! lock is held and must neither block nor call back into the session.
 //!
-//! Unlike the engine's, the session's state lock is not poison-recovering
-//! (`sdm-grabber` expects it): a panic raised while it is held is reported to
-//! that caller as [`CoreError::Panicked`] and every later call on the session
-//! reports the same. That fails loudly instead of continuing over a
-//! half-updated link table; the app can build a new session.
+//! Like the engine's, the session's state lock recovers from poisoning: a
+//! panic raised while it is held is reported to that caller as
+//! [`CoreError::Panicked`], and later calls (the polled `snapshot` included)
+//! carry on over whatever the half-run update left, which is a valid state.
 
 use std::collections::HashSet;
 use std::path::PathBuf;

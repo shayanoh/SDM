@@ -260,6 +260,108 @@ async fn a_zero_budget_is_an_error_not_a_panic() {
     assert!(matches!(refused, Err(CoreError::InvalidArgument { .. })));
 }
 
+/// The setters change what the session's next yt-dlp run is given, and what
+/// its provider closures answer: cookie source, extra arguments, playlist cap
+/// and binary override reach the command line; the ffmpeg flag decides a muxed
+/// choice's row state; the quality preferences land in the stored copy the
+/// session's provider reads (their effect on a pick needs a resolved video,
+/// which the engine-side tests of `FormatSelector` cover).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn settings_setters_change_what_the_session_does() {
+    use sdm_resolve::testing::{FakeProcessRunner, ok};
+    use std::os::unix::fs::PermissionsExt;
+
+    within(async {
+        let dir = support::scratch_directory();
+        let entries: Vec<String> = (0..30)
+            .map(|i| {
+                format!(
+                    r#"{{"id":"v{i}","url":"https://www.youtube.com/watch?v=v{i}","title":"T{i}"}}"#
+                )
+            })
+            .collect();
+        let playlist = format!(
+            r#"{{"_type":"playlist","title":"P","entries":[{}]}}"#,
+            entries.join(",")
+        );
+        let mut runner = FakeProcessRunner::new();
+        runner.responses = vec![("--flat-playlist".into(), ok(playlist))];
+        let runner = Arc::new(runner);
+        let tools = Toolchain::with_runner(vec![], runner.clone());
+        let resolver = tools.resolver();
+        let settings = Arc::new(GrabberSettings::new(QualityPreferences::default(), true));
+        let origin = Arc::new(FakeProbeOrigin::new());
+        let session = GrabberSession::with_dependencies(
+            LinkProber::new(origin, false),
+            GrabberBudget::default(),
+            Some(resolver),
+            settings.clone(),
+            tools,
+            None,
+        )
+        .unwrap();
+
+        let fake_binary = |name: &str| {
+            let path = dir.path().join(name);
+            std::fs::write(&path, "#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            path
+        };
+        let first = fake_binary("yt-dlp-first");
+        session
+            .set_binary_override("yt-dlp".to_owned(), Some(first.clone()))
+            .unwrap();
+        session.set_cookie_source(CookieSource::Chrome).unwrap();
+        session.set_max_playlist_videos(10).unwrap();
+        session
+            .set_yt_dlp_extra_arguments(vec!["--sentinel-extra".to_owned()])
+            .unwrap();
+        session
+            .ingest_urls(vec![su("https://www.youtube.com/playlist?list=PLx")])
+            .await
+            .unwrap();
+
+        let snapshot = session.snapshot().unwrap();
+        assert_eq!(snapshot.media_rows.len(), 10, "the playlist cap applied");
+        let call = runner.calls().remove(0);
+        assert_eq!(call.executable, first);
+        let args = call.arguments.join(" ");
+        assert!(args.contains("--cookies-from-browser chrome"), "{args}");
+        assert!(args.ends_with("--sentinel-extra"), "{args}");
+
+        // set_ffmpeg_available decides whether a muxed choice can be used.
+        let id = snapshot.media_rows[0].id;
+        let muxed = FormatChoice::new(
+            Some(support::video_format("v", 1080)),
+            Some(support::audio_format("a")),
+            MediaContainer::Mp4,
+            Some(1100),
+        );
+        session.set_ffmpeg_available(false).unwrap();
+        session.set_format_choice(muxed.clone(), id).unwrap();
+        assert_eq!(
+            session.snapshot().unwrap().media_rows[0].state,
+            sdm_grabber::MediaRowState::NeedsFfmpeg
+        );
+        session.set_ffmpeg_available(true).unwrap();
+        session.set_format_choice(muxed, id).unwrap();
+        assert_eq!(
+            session.snapshot().unwrap().media_rows[0].state,
+            sdm_grabber::MediaRowState::Resolved
+        );
+
+        let preferences = QualityPreferences {
+            max_height: 480,
+            ..QualityPreferences::default()
+        };
+        session
+            .set_quality_preferences(preferences.clone())
+            .unwrap();
+        assert_eq!(settings.quality_preferences(), preferences);
+    })
+    .await;
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_provider_closures_read_the_latest_setter_values() {
     // The session's ffmpeg and quality providers run under its lock; the

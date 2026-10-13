@@ -57,7 +57,7 @@
 //! work launches is Swift's.
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
 
 use sdm_core::{
@@ -547,7 +547,13 @@ struct PendingProbe {
 
 impl Inner {
     fn state(&self) -> MutexGuard<'_, State> {
-        self.state.lock().expect("grabber session state poisoned")
+        // Recovers from poisoning, like the engine's lock: a panic that
+        // unwound with the lock held (a provider closure, for instance) must
+        // not turn every later call, the polled `snapshot()` included, into
+        // a permanent failure. The state is a set of tables each update
+        // writes entry by entry, so what a half-run update leaves is still a
+        // valid state, and the next probe result or edit overwrites it.
+        self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     async fn ingest_urls(self: &Arc<Self>, urls: &[SourceUrl]) {

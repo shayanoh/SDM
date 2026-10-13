@@ -14,7 +14,9 @@ lower = "{}.uuidString"
 # by SourceUrl. Rust -> Swift is soft on purpose: a string URL(string:)
 # rejects (the core accepted it, Foundation will not) becomes a placeholder
 # URL instead of throwing out of a snapshot the UI polls five times a second.
-# The row stays visible; its address is unusable.
+# The row stays visible; its address is unusable. The placeholder string is
+# `UNUSABLE_URL_PLACEHOLDER` in src/custom_types.rs, which refuses it (and
+# every other `about:` URL) when it comes back from Swift.
 [bindings.swift.custom_types.SourceUrl]
 type_name = "URL"
 imports = ["Foundation"]

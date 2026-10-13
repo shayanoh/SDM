@@ -16,8 +16,9 @@ pub enum CoreError {
     #[error("invalid argument `{argument}`: {message}")]
     InvalidArgument { argument: String, message: String },
     /// Rust code panicked inside the call. The call's effects are undefined,
-    /// but the core stays usable: the engine and grabber recover a poisoned
-    /// state lock rather than propagating it.
+    /// but the core stays usable: the engine, the grabber session and this
+    /// crate's own locks all recover a poisoned lock rather than propagating
+    /// it.
     #[error("the Rust core panicked: {message}")]
     Panicked { message: String },
     /// An operation failed for a reason outside the caller's control (the

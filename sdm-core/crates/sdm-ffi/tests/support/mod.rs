@@ -11,8 +11,8 @@ use std::time::Duration;
 
 use sdm_core::{DownloadItem, DownloadPackage, SourceUrl};
 use sdm_engine::{
-    EngineSettings, FakeOrigin, HttpTransport, InMemoryStateStore, JsonStateStore, RetryPolicy,
-    StateStore, Trash,
+    EngineSettings, FakeOrigin, FakeOriginBehavior, HttpTransport, InMemoryStateStore,
+    JsonStateStore, RetryPolicy, StateStore, Trash,
 };
 use sdm_ffi::{DownloadEngine, EngineDependencies};
 use uuid::Uuid;
@@ -138,4 +138,111 @@ pub fn package(name: &str, file: &str, enabled: bool) -> DownloadPackage {
     let item =
         DownloadItem::http(su(&format!("https://example.com/{file}")), file).with_enabled(enabled);
     DownloadPackage::new(name).with_items(vec![item])
+}
+
+/// A transport whose requests wait at a gate until it is opened, so a
+/// download can be held `Running` for as long as a test needs; once open it
+/// serves `origin` (which a test can also program to fail).
+#[derive(Clone)]
+pub struct GateTransport {
+    pub origin: FakeOrigin,
+    open: Arc<std::sync::atomic::AtomicBool>,
+    wake: Arc<tokio::sync::Notify>,
+}
+
+impl GateTransport {
+    pub fn new(origin: FakeOrigin) -> Self {
+        Self {
+            origin,
+            open: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            wake: Arc::new(tokio::sync::Notify::new()),
+        }
+    }
+
+    pub fn set_open(&self, open: bool) {
+        self.open.store(open, Ordering::SeqCst);
+        self.wake.notify_waiters();
+    }
+}
+
+#[async_trait::async_trait]
+impl HttpTransport for GateTransport {
+    /// The response arrives at once (the engine's probe must not block its
+    /// own calls); its body waits at the gate.
+    async fn fetch(
+        &self,
+        request: sdm_engine::RangeRequest,
+    ) -> Result<sdm_engine::RangeResponse, sdm_engine::TransportError> {
+        use futures::StreamExt;
+        let mut response = self.origin.fetch(request).await?;
+        let (open, wake) = (Arc::clone(&self.open), Arc::clone(&self.wake));
+        let body = std::mem::replace(&mut response.body, Box::pin(futures::stream::empty()));
+        response.body = Box::pin(
+            futures::stream::once(async move {
+                loop {
+                    let notified = wake.notified();
+                    if open.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    notified.await;
+                }
+                body
+            })
+            .flatten(),
+        );
+        Ok(response)
+    }
+}
+
+/// An engine over `transport` with the given settings and an in-memory store.
+pub fn engine_with(
+    transport: impl HttpTransport + 'static,
+    settings: EngineSettings,
+) -> (Arc<DownloadEngine>, Arc<ScratchTrash>) {
+    let trash = Arc::new(ScratchTrash::new());
+    let engine = DownloadEngine::with_dependencies(
+        settings,
+        dependencies(
+            transport,
+            Arc::new(InMemoryStateStore::new()),
+            trash.clone(),
+        ),
+        DownloadEngine::default_tools(),
+    )
+    .expect("build the engine");
+    (engine, trash)
+}
+
+/// A video-only 1080p-style format at `https://gv/<id>`.
+pub fn video_format(id: &str, height: i64) -> sdm_core::MediaFormat {
+    sdm_core::MediaFormat::new(
+        id,
+        sdm_core::MediaKind::VideoOnly,
+        Some(height),
+        Some(height * 16 / 9),
+        Some(sdm_core::VideoCodec::H264),
+        None,
+        sdm_core::MediaContainer::Mp4,
+        Some(1000),
+        None,
+        Some(1000.0),
+        su(&format!("https://gv/{id}")),
+    )
+}
+
+/// An audio-only format at `https://gv/<id>`.
+pub fn audio_format(id: &str) -> sdm_core::MediaFormat {
+    sdm_core::MediaFormat::new(
+        id,
+        sdm_core::MediaKind::AudioOnly,
+        None,
+        None,
+        None,
+        Some(sdm_core::AudioCodec::Aac),
+        sdm_core::MediaContainer::M4a,
+        Some(100),
+        None,
+        Some(128.0),
+        su(&format!("https://gv/{id}")),
+    )
 }

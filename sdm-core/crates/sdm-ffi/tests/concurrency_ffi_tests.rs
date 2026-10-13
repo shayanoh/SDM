@@ -280,11 +280,15 @@ async fn a_panic_inside_the_engine_surfaces_as_an_error_and_later_calls_still_wo
     assert_eq!(engine.snapshot().await.unwrap().packages.len(), 2);
 }
 
-/// A trash that panics, called by `remove_item(delete_file: true)`.
-struct PanickingTrash;
+/// A trash that panics, called by `remove_item(delete_file: true)`. It counts
+/// its calls so a test can show the removal really reached it.
+struct PanickingTrash {
+    calls: Arc<AtomicUsize>,
+}
 
 impl Trash for PanickingTrash {
     fn trash(&self, _path: &Path) -> std::io::Result<()> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
         panic!("the trash exploded");
     }
 }
@@ -292,13 +296,16 @@ impl Trash for PanickingTrash {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_panic_while_removing_files_does_not_poison_the_engine() {
     let dir = scratch_directory();
+    let trash_calls = Arc::new(AtomicUsize::new(0));
     let engine = DownloadEngine::with_dependencies(
         engine_settings(dir.path()),
         {
             let mut deps = dependencies(
                 FakeOrigin::new(payload(16)),
                 Arc::new(sdm_engine::InMemoryStateStore::new()),
-                Arc::new(PanickingTrash),
+                Arc::new(PanickingTrash {
+                    calls: Arc::clone(&trash_calls),
+                }),
             );
             deps.retry_policy = RetryPolicy::new();
             deps
@@ -318,7 +325,14 @@ async fn a_panic_while_removing_files_does_not_poison_the_engine() {
     std::fs::create_dir_all(&folder).unwrap();
     std::fs::write(folder.join("doomed.bin"), b"data").unwrap();
 
-    let _ = engine.remove_item(id, true).await; // Ok or Panicked: both are errors-as-values
+    // The trash panics on the engine's worker; a panic there is reported
+    // however it surfaces (an error from the call or a failed removal), but
+    // the removal must have reached the trash.
+    let _ = engine.remove_item(id, true).await;
+    assert!(
+        trash_calls.load(Ordering::SeqCst) >= 1,
+        "remove_item must have called the trash"
+    );
     engine.snapshot().await.expect("snapshot still answers");
     engine.tick().await.expect("tick still answers");
     engine
@@ -349,4 +363,56 @@ fn a_poisoned_settings_mutex_is_recovered_not_propagated() {
     assert!(mutex.is_poisoned());
     // `lock` hands the value back instead of panicking.
     assert_eq!(*lock(&mutex), vec!["a".to_owned()]);
+}
+
+/// A hand-built record can drive the engine into a panic while it holds its
+/// state lock: two items of `i64::MAX` bytes overflow the figures the
+/// snapshot sums (test builds check overflow). That really poisons the
+/// engine's std mutex; the call reports `Panicked`, and later calls recover
+/// the lock and work.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_panic_under_the_engine_lock_poisons_it_and_later_calls_recover() {
+    let dir = scratch_directory();
+    let (engine, _trash) = engine_over(payload(16), dir.path());
+    engine
+        .add(package("Fine", "fine.bin", false))
+        .await
+        .unwrap();
+
+    let huge = |file: &str| {
+        let mut item = DownloadItem::http(su(&format!("https://example.com/{file}")), file)
+            .with_enabled(false);
+        item.components[0].total_bytes = Some(i64::MAX);
+        item
+    };
+    let huge_items = vec![huge("h1.bin"), huge("h2.bin")];
+    let huge_ids: Vec<_> = huge_items.iter().map(|item| item.id).collect();
+    engine
+        .add(DownloadPackage::new("Huge").with_items(huge_items))
+        .await
+        .unwrap();
+    let panicked = engine.snapshot().await;
+    assert!(
+        matches!(panicked, Err(CoreError::Panicked { .. })),
+        "summing the sizes must overflow under the lock: {panicked:?}"
+    );
+
+    // The lock is poisoned now. Calls recover it: removing the offending
+    // items makes the snapshot work again.
+    for id in huge_ids {
+        engine
+            .remove_item(id, false)
+            .await
+            .expect("remove_item recovers the poisoned lock");
+    }
+    let snapshot = engine
+        .snapshot()
+        .await
+        .expect("snapshot recovers the poisoned lock");
+    assert!(snapshot.packages.iter().any(|p| p.name == "Fine"));
+    engine.tick().await.expect("tick recovers too");
+    engine
+        .add(package("After", "after.bin", false))
+        .await
+        .expect("add recovers too");
 }

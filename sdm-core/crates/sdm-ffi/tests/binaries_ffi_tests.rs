@@ -2,6 +2,7 @@ mod support;
 
 use std::sync::Arc;
 
+use sdm_ffi::shared::Toolchain;
 use sdm_ffi::{CoreError, ManagedBinaries, ManagedBinariesConfig};
 use sdm_resolve::testing::{FakeBinaryFetcher, FakeProcessRunner};
 use sdm_resolve::{BinaryFetchError, CheckOutcome, CheckReason, VendorAsset, YtDlpChannel};
@@ -102,4 +103,63 @@ async fn an_empty_bin_directory_is_an_error() {
         Arc::new(FakeProcessRunner::new()),
     );
     assert!(matches!(refused, Err(CoreError::InvalidArgument { .. })));
+}
+
+/// A successful update produces exactly one notification for the app to
+/// take, and the locators the engine and grabber built forget a lookup that
+/// missed before the install (the replacement for Swift's shared locator).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_update_notifies_once_and_invalidates_the_locators() {
+    use sha2::{Digest, Sha256};
+
+    within(async {
+        let dir = scratch_directory();
+        let bin = dir.path().join("bin");
+        let tag = "2026.08.19";
+        let binary = b"YTDLP-BINARY".to_vec();
+        let channel = YtDlpChannel::Stable;
+        let fetcher = Arc::new(FakeBinaryFetcher::new());
+        fetcher.set_response(
+            Ok(format!("{{\"tag_name\":\"{tag}\"}}").into_bytes()),
+            &channel.releases_api(),
+        );
+        fetcher.set_response(Ok(binary.clone()), &channel.asset_url(tag));
+        fetcher.set_response(
+            Ok(format!("{}  yt-dlp_macos\n", hex::encode(Sha256::digest(&binary))).into_bytes()),
+            &channel.sums_url(tag),
+        );
+        let managed = ManagedBinaries::with_dependencies(
+            ManagedBinariesConfig {
+                bin_directory: bin.clone(),
+                vendor_assets: vec![],
+                channel,
+            },
+            fetcher,
+            Arc::new(FakeProcessRunner::new()),
+        )
+        .unwrap();
+
+        // A toolchain searching the managed directory, which does not hold
+        // yt-dlp yet: the miss is memoized.
+        let tools = Toolchain::new(vec![bin.clone()]);
+        assert_eq!(tools.locator.locate("yt-dlp"), None);
+
+        let outcome = managed.check_now(CheckReason::Launch).await.unwrap();
+        assert_eq!(outcome, CheckOutcome::Updated(tag.to_owned()));
+        assert_eq!(
+            tools.locator.locate("yt-dlp"),
+            Some(bin.join("yt-dlp")),
+            "the install invalidated the memoized miss"
+        );
+
+        assert_eq!(
+            managed.take_notifications().unwrap(),
+            vec![format!("yt-dlp updated to {tag}")]
+        );
+        assert!(
+            managed.take_notifications().unwrap().is_empty(),
+            "taken exactly once"
+        );
+    })
+    .await;
 }
