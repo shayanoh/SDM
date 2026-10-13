@@ -26,21 +26,21 @@ core.
 - [x] 1.1 `SDMCore` port: domain models, `RangeSet`, themes — with tests
 - [x] 1.2 `SDMResolve` port: process runner, yt-dlp JSON, format selection,
       site registry, managed binaries, wholesale downloader — with tests
-- [ ] 1.3 `SDMEngine` port: transport, `FakeOrigin`, download task, scheduler,
+- [x] 1.3 `SDMEngine` port: transport, `FakeOrigin`, download task, scheduler,
       persistence, engine, muxing, wholesale task — with tests
-      (in progress: plan Tasks 11–15 of 11–19 implemented and reviewed)
 - [ ] 1.4 `SDMGrabber` port: extraction, probing, verdicts, clustering, session
-      — with tests
+      — with tests (in progress: plan Task 20 of 20–22 implemented)
 - [ ] 1.5 Binding surface and Swift adapter: the app's controllers run on the
       Rust core; Swift `SDMKit` sources removed from the branch
 - [ ] 1.6 App builds in Xcode (Debug and universal Release), manual smoke test
 - [ ] 1.7 Performance comparison against `main`, results recorded below
 
-### Status and how to resume (updated 2026-10-12)
+### Status and how to resume (updated 2026-10-13)
 
-Plan Tasks 1–15 of 27 are implemented, reviewed and committed; review gate C
-(Tasks 11–15) is done and its fixes are in `b747e83`. **Next: Task 16, the
-engine core**, then Tasks 17–19 and review gate D.
+Plan Tasks 1–19 of 27 are implemented, reviewed and committed; review gate D
+(Tasks 16–19, the engine) is done and its fixes are in `1c7d928` and
+`1d28c5d`. Task 20 (the grabber's pure functions) is implemented and waits for
+review gate E. **Next: Tasks 21–22 (probing, grabber session)**, then gate E.
 
 The app does not run on the Rust core yet (that is Task 24) and there are no
 benchmark numbers yet (Task 26). Xcode Debug builds with the Rust skeleton
@@ -87,6 +87,25 @@ Settled at review gate C:
   core intends the same but sweeps them: `YtDlpWholesaleDownloader` throws
   `WholesaleError.cancelled` while `WholesaleComponentTask` only treats
   `CancellationError` as a pause. That is a bug on `main`, not fixed here.
+
+Settled at review gate D (all three are deliberate differences from the Swift
+core, which has the bug in each case):
+
+- A download whose last byte lands just as it is stopped or preempted finishes
+  as Completed. In Swift it stays Stopped next to an already-finished file and
+  the next start fails with "A file already exists at the destination".
+- A stop that interrupts the mux step is resumable: the next start goes
+  straight to muxing. In Swift it re-downloads the first part and then fails
+  the same way.
+- Removing or resetting an item hides it from the scheduler until its files
+  are dealt with. Swift's actor made that sequence atomic; the Rust engine
+  needs an explicit guard.
+
+Made while porting the grabber:
+
+- Link extraction uses the `linkify` crate in place of `NSDataDetector`, with
+  scheme-less links (`example.com/file.zip`) read as `http://` as Foundation
+  does. Trimming of trailing punctuation may differ in rare cases.
 
 ### Measurements
 
