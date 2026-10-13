@@ -18,7 +18,7 @@
 
 Wall spread is (max - min) / median of the wall times over the runs.
 
-The transfer wall times still varied by about 11 to 27 percent between runs in both runs. Read the wall-time medians for `transfer` with that in mind; the CPU time and memory were steadier.
+The transfer wall times varied between runs by 11.2% (Rust) and 26.9% (Swift) in the recorded run, and by about 25% and 27% in the run before it. Read the wall-time medians for `transfer` with that in mind; the CPU time and memory were steadier.
 
 ## Every run
 
@@ -74,7 +74,7 @@ All four scenarios are measured from outside (`/usr/bin/time -l`), so the figure
 4. checks the size of each output file;
 5. deletes the 2 GiB of output (the temp directory) before the process exits.
 
-Only step 3 is the transfer. The tick count bounds its length: with a tick at the start and then at most one per 200 ms (the loop looks every 20 ms, so a tick is at most about 220 ms apart), 3 ticks means the wait lasted roughly 0.4 to 0.7 seconds for the Rust core, and 18 or 19 ticks roughly 3.4 to 4.2 seconds for the Swift core. That is an inference from the code and the tick count; the programs do not print the duration of step 3 on its own, and the benchmarks were not re-run to measure it. The remaining wall time is the payload build, the file check and the deletion of the output (plus process start-up), none of which is separated either. The `transfer` wall and CPU figures therefore mix the transfer with that fixed work, which is the same code on both sides apart from the payload build and the fake origin's copying (see "Making the work identical"). They do not isolate the cost of the transfer path, and the difference between the cores in the table should not be read as the difference in transfer speed.
+Only step 3 is the transfer. The tick count bounds its length: with a tick at the start and then at most one per 200 ms (the loop looks every 20 ms, so a tick is at most about 220 ms apart), 3 ticks means the wait lasted at least about 0.4 seconds for the Rust core, and 18 or 19 ticks at least about 3.4 seconds for the Swift core. These are lower bounds, not durations: a tick or the completion check can itself wait on the engine while a file is being flushed, so the real wait can be longer by an amount the tick count does not show. The programs do not print the duration of step 3 on its own, and the benchmarks were not re-run to measure it. The remaining wall time is the payload build, the file check and the deletion of the output (plus process start-up), none of which is separated either. The `transfer` wall and CPU figures therefore mix the transfer with that fixed work, which is the same code on both sides apart from the payload build and the fake origin's copying (see "Making the work identical"). They do not isolate the cost of the transfer path, and the difference between the cores in the table should not be read as the difference in transfer speed.
 
 At 3 ticks in the Rust run no sidecar rewrite (every 25th tick) or data-file flush (every 300th tick) is reached, and in the Swift run (18 ticks) none is either; the checkpoint work that grew with loop speed in the earlier version of these programs is therefore small in both now.
 
@@ -91,7 +91,7 @@ No network (both cores read from an in-process fake origin; neither exercises `U
 
 ## Caveats
 
-- **Run-to-run spread is over 15% for `transfer` on both cores.** It was over 15% in two complete runs of the script (the second is the one recorded above; the first gave Rust 11.12 s median / 36% spread and Swift 13.63 s / 42% spread, with CPU 5.03 s and 11.00 s). The transfer writes 2 GiB through the page cache on a laptop with 16 GB of memory, and the wall time and system CPU vary with how the kernel flushes it; the user-mode CPU is steady. The median wall times of the two cores are therefore close to the noise and should not be read as a difference. Peak RSS and the `ticks` figures are stable (spread under 6%).
+- **Run-to-run spread for `transfer` is large.** In the recorded run it was 11.2% for the Rust core and 26.9% for the Swift core; in the run before it (same commit, shown under "First full run" below) it was 25.4% and 27.2%. The transfer writes 2 GiB through the page cache on a laptop with 16 GB of memory, and the wall time and system CPU vary with how the kernel flushes it; the user-mode CPU is steady. The median wall times of the two cores are therefore close to the noise and should not be read as a difference. Peak RSS and the `ticks` figures are stable (spread under 6%).
 - The machine is an Intel MacBook Pro (x86_64); the Apple Silicon slice of the Rust core was not run.
 - The runs were on AC power; a code-review agent was working in the same repository and no build was seen running when the runs started.
 - Both cores moved exactly 2,147,483,648 bytes in `transfer`.

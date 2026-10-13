@@ -186,3 +186,17 @@ These test the UniFFI surface (`sdm-ffi` and the generated Swift) and the thin S
 ## Benchmark programs (no tests)
 
 `sdm-core/crates/sdm-bench` (Rust), `legacy/SDMKitSwift/Sources/SDMBench` (Swift core) and `SDMKit/Sources/SDMFFIBench` (Rust core through the bindings) are measurement programs, not tests: they have 0 tests each and are run by `scripts/` and recorded in [benchmarks.md](benchmarks.md).
+
+## Added after the final review
+
+The final whole-branch review led to 20 more Rust tests. They are not included in the tables and totals above, which were counted before it; with them, `cargo test --workspace` gives 744 passed, 0 failed (measured after the fixes).
+
+| Crate | Rust test file | Tests | What it pins |
+|---|---|---:|---|
+| `sdm-core` | `src/safe_path_component.rs` (unit tests) | 3 | A filename or package name is reduced to one safe path component; ordinary names are unchanged. |
+| `sdm-engine` | `filename_safety_tests.rs` | 5 | A hostile filename or package name (absolute, `..`, separators) stays inside the download folder. |
+| `sdm-engine` | `probe_cancel_tests.rs` | 4 | Stop, remove and shutdown return at once while a download's first request is still unanswered. |
+| `sdm-engine` | `ranged_200_tests.rs` | 1 | A `200` reply to a ranged request fails the attempt and is never written at the wrong offset. |
+| `sdm-engine` | `trash_guard_tests.rs` | 2 | An engine built without a trash moves nothing, and no test or benchmark source names the system Trash. |
+| `sdm-grabber` | `filename_safety_tests.rs` | 4 | A percent-encoded slash in a URL and an absolute `Content-Disposition` name cannot choose the folder. |
+| `sdm-ffi` | `snapshot_if_changed_ffi_tests.rs` | 1 | `snapshot_if_changed` returns nothing for an unchanged engine and a newer snapshot after a change. |

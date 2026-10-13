@@ -274,10 +274,11 @@ tick five times a second from the wall clock.
 | ffi-snapshot-if-changed (same, `snapshotIfChanged`) | Rust | 1.17 | 1.18 | 23 | 600 |
 
 `transfer` does not isolate the transfer. The wall time includes building the
-256 MB payload, checking the output and deleting 2 GiB, and the tick count
-shows the wait for the items lasted only about half a second (Rust) or about
-four seconds (Swift). That duration is inferred from the tick count, not
-printed by the programs. The wall-time spread was 11.2 percent (Rust) and 26.9
+256 MB payload, checking the output and deleting 2 GiB. The tick count gives
+only a lower bound on the wait for the items: at least about 0.4 seconds
+(Rust) and at least about 3.4 seconds (Swift). A tick can itself wait on the
+engine while a file is flushed, so the real wait can be longer; the programs
+do not print it. The wall-time spread was 11.2 percent (Rust) and 26.9
 percent (Swift). The `transfer` figures also include the two fake origins (the
 Swift fake copies every chunk, the Rust fake slices a shared buffer), which
 affects peak memory and some CPU. Neither a faster nor a slower core can be
