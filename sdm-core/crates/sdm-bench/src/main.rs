@@ -9,6 +9,16 @@
 //! sdm-bench ticks      1,000 items in 20 packages, 8 running, 600 x (tick + snapshot)
 //! ```
 //!
+//! `transfer` ticks at the app's real cadence, `AppTiming::TICKS_PER_SECOND`
+//! (5) per second, from the wall clock, and polls for completion separately
+//! at a finer interval. Every tick checkpoints the running items and every
+//! 25th rewrites their sidecars, so the amount of that work depends on the
+//! tick rate; ticking as fast as the loop spins would make it depend on how
+//! fast each core's loop happens to run. A benchmark may read the clock; the
+//! no-real-clock rule is for tests. Each result line carries `ticks=<n>`.
+//! `ticks` keeps its fixed 600 iterations at loop speed: it measures the cost
+//! of one tick.
+//!
 //! `SDM_BENCH_SCALE` (a positive integer, default 1) divides the transfer item
 //! size and the tick count for quick debugging; both programs read it
 //! identically and the recorded run leaves it unset.
@@ -16,10 +26,11 @@
 use std::path::Path;
 use std::process::ExitCode;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use sdm_core::{DownloadItem, DownloadPackage, ItemState, SourceUrl};
+use sdm_core::{AppTiming, DownloadItem, DownloadPackage, ItemState, SourceUrl};
 use sdm_engine::{
     DownloadEngine, EngineSettings, FakeOrigin, FakeOriginBehavior, HttpTransport,
     InMemoryStateStore, RangeRequest, RangeResponse, RetryPolicy, TransportError,
@@ -28,6 +39,9 @@ use sdm_engine::{
 /// Bytes per chunk the fake origin emits. 64 KiB on both sides (the fake's
 /// default of 64 bytes would measure the stream plumbing, not the transfer).
 const CHUNK_SIZE: usize = 64 * 1024;
+
+/// How often `transfer` looks for completion between ticks.
+const COMPLETION_POLL: Duration = Duration::from_millis(20);
 
 /// Same bytes as the Swift side's `makePayload`: index-derived, so the origin
 /// costs the same to build and any byte can be checked independently.
@@ -117,8 +131,17 @@ async fn run_transfer(directory: &Path) -> Result<String, String> {
         .add(DownloadPackage::new("Batch").with_items(items))
         .await;
 
+    let tick_interval = Duration::from_secs_f64(1.0 / AppTiming::TICKS_PER_SECOND as f64);
+    let mut ticks = 0u64;
+    let mut last_tick = Instant::now();
+    engine.tick().await;
+    ticks += 1;
     loop {
-        engine.tick().await;
+        if last_tick.elapsed() >= tick_interval {
+            last_tick = Instant::now();
+            engine.tick().await;
+            ticks += 1;
+        }
         let snapshot = engine.snapshot().await;
         let mut completed = 0usize;
         for item in snapshot.packages.iter().flat_map(|package| &package.items) {
@@ -131,7 +154,7 @@ async fn run_transfer(directory: &Path) -> Result<String, String> {
         if completed == item_count {
             break;
         }
-        tokio::task::yield_now().await;
+        tokio::time::sleep(COMPLETION_POLL).await;
     }
 
     let mut total = 0usize;
@@ -146,7 +169,7 @@ async fn run_transfer(directory: &Path) -> Result<String, String> {
         total += size;
     }
     Ok(format!(
-        "scenario=transfer ok=true items={item_count} bytes={total}"
+        "scenario=transfer ok=true items={item_count} bytes={total} ticks={ticks}"
     ))
 }
 
@@ -188,7 +211,9 @@ async fn run_ticks(directory: &Path) -> Result<String, String> {
             iterations * package_count
         ));
     }
-    Ok(format!("scenario=ticks ok=true items={item_count} bytes=0"))
+    Ok(format!(
+        "scenario=ticks ok=true items={item_count} bytes=0 ticks={iterations}"
+    ))
 }
 
 fn main() -> ExitCode {

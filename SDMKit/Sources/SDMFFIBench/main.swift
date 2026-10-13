@@ -102,7 +102,7 @@ func runFFISnapshot(directory: URL, scenario: String) async throws -> String {
         }
     }
     try await engine.shutdown()
-    return "scenario=\(scenario) ok=true items=\(itemCount) bytes=0"
+    return "scenario=\(scenario) ok=true items=\(itemCount) bytes=0 ticks=\(iterations)"
 }
 
 // MARK: - Entry point

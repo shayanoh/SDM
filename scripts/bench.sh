@@ -144,6 +144,7 @@ with open(path) as handle:
                 rss=int(rss) / 1048576,
                 items=int(fields["items"]),
                 bytes=int(fields["bytes"]),
+                ticks=int(fields["ticks"]),
             )
         )
 
@@ -161,8 +162,8 @@ groups = {}
 for row in rows:
     groups.setdefault((row["scenario"], row["core"]), []).append(row)
 
-print("| Scenario | Core | Wall (s) | CPU user+sys (s) | Peak RSS (MB) | Wall spread | Items | Bytes |")
-print("|---|---|---:|---:|---:|---:|---:|---:|")
+print("| Scenario | Core | Wall (s) | CPU user+sys (s) | Peak RSS (MB) | Wall spread | Items | Bytes | Ticks |")
+print("|---|---|---:|---:|---:|---:|---:|---:|---:|")
 for (scenario, core), group in groups.items():
     wall = statistics.median(r["real"] for r in group)
     cpu_time = statistics.median(r["cpu"] for r in group)
@@ -171,7 +172,8 @@ for (scenario, core), group in groups.items():
     flag = " (over 15%)" if spread > 15 else ""
     print(
         f"| {scenario} | {core} | {wall:.2f} | {cpu_time:.2f} | {rss:.0f} | "
-        f"{spread:.1f}%{flag} | {group[0]['items']} | {group[0]['bytes']} |"
+        f"{spread:.1f}%{flag} | {group[0]['items']} | {group[0]['bytes']} | "
+        f"{statistics.median(r['ticks'] for r in group):.0f} |"
     )
 print()
 print("Wall spread is (max - min) / median of the wall times over the runs.")

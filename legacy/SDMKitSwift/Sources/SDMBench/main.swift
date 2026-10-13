@@ -10,6 +10,15 @@ import SDMEngine
 //   SDMBench transfer   8 items x 256 MB in one package, run to completion
 //   SDMBench ticks      1,000 items in 20 packages, 8 running, 600 x (tick + snapshot)
 //
+// `transfer` ticks at the app's real cadence, 5 ticks per second, from the wall
+// clock, and polls for completion separately at a finer interval. Every tick
+// checkpoints the running items and every 25th rewrites their sidecars, so the
+// amount of that work depends on the tick rate; ticking as fast as the loop
+// spins would make it depend on how fast each core's loop happens to run. A
+// benchmark may read the clock; the no-real-clock rule is for tests. Each
+// result line carries `ticks=<n>`. `ticks` keeps its fixed 600 iterations at
+// loop speed: it measures the cost of one tick.
+//
 // `SDM_BENCH_SCALE` (a positive integer, default 1) divides the transfer item
 // size and the tick count for quick debugging; both programs read it
 // identically and the recorded run leaves it unset.
@@ -36,6 +45,12 @@ func makePayload(_ count: Int) -> Data {
 /// Bytes per chunk the fake origin emits. 64 KiB on both sides (the fake's
 /// default of 64 bytes would measure the stream plumbing, not the transfer).
 let chunkSize = 64 * 1024
+
+/// The app's heartbeat rate.
+let ticksPerSecond = AppTiming.ticksPerSecond
+
+/// How often `transfer` looks for completion between ticks.
+let completionPoll = Duration.milliseconds(20)
 
 /// A gate that is never opened: waiters are kept, not resumed.
 actor ClosedGate {
@@ -106,15 +121,25 @@ func runTransfer(directory: URL) async throws -> String {
     }
     await engine.add(DownloadPackage(name: "Batch", items: items))
 
+    let tickInterval = Duration.milliseconds(1000 / ticksPerSecond)
+    let clock = ContinuousClock()
+    var ticks = 0
+    var lastTick = clock.now
+    await engine.tick()
+    ticks += 1
     while true {
-        await engine.tick()
+        if clock.now - lastTick >= tickInterval {
+            lastTick = clock.now
+            await engine.tick()
+            ticks += 1
+        }
         let snapshot = await engine.snapshot()
         let states = snapshot.packages.flatMap(\.items).map(\.state)
         for case .failed(let reason) in states {
             throw BenchError.failed("an item failed: \(reason)")
         }
         if states.count == itemCount, states.allSatisfy({ $0 == .completed }) { break }
-        await Task.yield()
+        try await Task.sleep(for: completionPoll)
     }
 
     var total = 0
@@ -131,7 +156,7 @@ func runTransfer(directory: URL) async throws -> String {
         }
         total += size
     }
-    return "scenario=transfer ok=true items=\(itemCount) bytes=\(total)"
+    return "scenario=transfer ok=true items=\(itemCount) bytes=\(total) ticks=\(ticks)"
 }
 
 func runTicks(directory: URL) async throws -> String {
@@ -163,7 +188,7 @@ func runTicks(directory: URL) async throws -> String {
         throw BenchError.failed(
             "snapshots held \(packagesSeen) packages, expected \(iterations * packageCount)")
     }
-    return "scenario=ticks ok=true items=\(itemCount) bytes=0"
+    return "scenario=ticks ok=true items=\(itemCount) bytes=0 ticks=\(iterations)"
 }
 
 // MARK: - Entry point
