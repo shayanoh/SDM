@@ -448,6 +448,12 @@ Open questions for Shayan:
 
 ## Step 2 — Tauri UI
 
+> **Superseded 2026-10-14.** The Tauri UI is now a real product UI for Windows,
+> Linux and macOS, not a Mac-only comparison, and the Touch Bar is dropped. It
+> is tracked in [docs/tauri-roadmap.md](tauri-roadmap.md). The checklist below
+> is kept as history.
+
+
 Rebuild the UI in Tauri on the Rust core, matching the SwiftUI app screen for
 screen, to see how it differs in look, feel and resource use.
 
@@ -464,6 +470,8 @@ Known up front: Liquid Glass is dropped; the menu bar panel is a positioned
 window rather than a native popover.
 
 ## Step 3 — .NET UI for Windows and Linux (optional)
+
+> **Superseded 2026-10-14** by the Tauri roadmap above. Not planned.
 
 Undecided. An Avalonia UI over the Rust core through C# bindings.
 
