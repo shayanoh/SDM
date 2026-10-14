@@ -40,7 +40,7 @@ _spec draft_, _spec approved_, _plan written_, _in progress_, _done_.
 
 | #   | Spec                    | Contents                                                                                                                                | Status                                                                         |
 | --- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| 1   | **Foundation**          | `sdm-app` crate, Tauri shell, patch protocol, a minimal live list, Windows/Linux core portability, build tooling, the performance gate  | spec draft — [design](superpowers/specs/2026-10-14-tauri-foundation-design.md) |
+| 1   | **Foundation**          | `sdm-app` crate, Tauri shell, patch protocol, a minimal live list, Windows/Linux core portability, build tooling, the performance gate  | spec approved — [design](superpowers/specs/2026-10-14-tauri-foundation-design.md) |
 | 2   | **Main window**         | Package and item list, toolbar, details panel, graphs, drag and drop, selection, context menus, Mica/Acrylic window effects             | not started                                                                    |
 | 3   | **Link grabber**        | Grabber window, link verdicts and clustering display, format picker, playlists, Add Links sheet                                         | not started                                                                    |
 | 4   | **Settings and themes** | All Settings tabs, theme roles as CSS variables, media-sites list, YouTube/managed-binaries tab                                         | not started                                                                    |
@@ -124,4 +124,4 @@ Newest first. One line per event: date, what happened, where to look.
 - 2026-10-14 — Brainstorming done; decisions T1–T9 settled. Spec 1 drafted:
   `docs/superpowers/specs/2026-10-14-tauri-foundation-design.md`. Core
   portability survey found Unix-only code in `sdm-engine` and `sdm-resolve`
-  (see spec section 7). Awaiting spec review.
+  (see spec section 7). Spec approved by Shayan the same day; next is the implementation plan.

@@ -1,6 +1,6 @@
 # Tauri foundation — design (spec 1 of 6)
 
-Status: DRAFT, awaiting review (2026-10-14).
+Status: APPROVED (2026-10-14).
 Roadmap: [docs/tauri-roadmap.md](../../tauri-roadmap.md) — read it first for where this spec sits.
 
 ## 1. Purpose
