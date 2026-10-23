@@ -17,12 +17,15 @@ case "${1:-}" in
     # The repo is mounted, so keep the container from touching the Mac's build
     # state: Linux node_modules go in throwaway volumes (the Mac's hold macOS
     # binaries) and Cargo builds into target/linux instead of target/release.
-    # The cargo registry is a named volume so crates download once.
+    # The cargo registry and pnpm store are named volumes so packages download
+    # once and nothing is written into the repo.
     docker run --rm \
       -v "$PWD/..":/work -w /work/sdm-tauri \
       -v /work/sdm-tauri/node_modules \
       -v /work/sdm-tauri/web/node_modules \
       -v sdm-linux-cargo-registry:/root/.cargo/registry \
+      -v sdm-linux-pnpm-store:/pnpm-store \
+      -e npm_config_store_dir=/pnpm-store \
       -e CARGO_TARGET_DIR=/work/sdm-core/target/linux \
       sdm-linux-build bash -c \
       "pnpm install --frozen-lockfile && pnpm tauri build --bundles deb"
