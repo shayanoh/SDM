@@ -1,0 +1,45 @@
+/* Layout and typography only. Every color is a theme role (`var(--…)`) that
+   `theme_css` supplies; nothing here holds a color literal. */
+
+:root {
+  --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --row-height: 56px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font: 13px/1.4 var(--font);
+  color: var(--text-primary);
+  background: var(--surface-primary);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+button {
+  font: inherit;
+  padding: 3px 10px;
+  color: var(--text-primary);
+  background: var(--surface-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+input {
+  font: inherit;
+}

@@ -34,3 +34,6 @@ brag-output/
 sdm-tauri/web/dist/
 sdm-tauri/node_modules/
 sdm-tauri/src-tauri/gen/
+.playwright-mcp/
+sdm-tauri/web/test-results/
+sdm-tauri/web/playwright-report/
