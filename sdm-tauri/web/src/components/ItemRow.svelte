@@ -2,7 +2,7 @@
   import { errorMessage, useBridge, useUi } from "../lib/context";
   import { formatBytes, formatSpeed } from "../lib/format";
   import type { ItemModel } from "../lib/store.svelte";
-  import ProgressCanvas from "./ProgressCanvas.svelte";
+  import SegmentedBar from "./SegmentedBar.svelte";
   import Sparkline from "./Sparkline.svelte";
 
   let { item, selected }: { item: ItemModel; selected: boolean } = $props();
@@ -78,7 +78,7 @@
       </button>
     </span>
   </div>
-  <ProgressCanvas completed={item.completed} total={item.totalBytes} />
+  <SegmentedBar completed={item.completed} total={item.totalBytes} />
 </div>
 
 <style>

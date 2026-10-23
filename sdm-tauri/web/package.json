@@ -26,6 +26,7 @@
     "vitest": "^5.0.5"
   },
   "dependencies": {
+    "@lucide/svelte": "^1.61.0",
     "@tauri-apps/api": "^2.12.4"
   }
 }

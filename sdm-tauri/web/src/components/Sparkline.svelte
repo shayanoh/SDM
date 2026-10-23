@@ -1,40 +1,31 @@
 <script lang="ts">
-  let { samples }: { samples: number[] } = $props();
+  import { sparklinePoints } from "../lib/graphs";
 
-  const WIDTH = 64;
-  const HEIGHT = 16;
+  /** One 1 px `graph-stroke` path, y-scaled to its own maximum, clipped to its box. */
+  let {
+    samples,
+    width = 64,
+    height = 16,
+  }: { samples: number[]; width?: number; height?: number } = $props();
 
-  const points = $derived.by(() => {
-    if (samples.length < 2) return "";
-    const peak = Math.max(1, ...samples);
-    const step = WIDTH / (samples.length - 1);
-    return samples
-      .map((value, index) => {
-        const y = HEIGHT - (Math.max(0, value) / peak) * HEIGHT;
-        return `${(index * step).toFixed(1)},${y.toFixed(1)}`;
-      })
-      .join(" ");
-  });
+  const points = $derived(sparklinePoints(samples, width, height));
 </script>
 
-<svg
-  viewBox="0 0 {WIDTH} {HEIGHT}"
-  preserveAspectRatio="none"
-  aria-hidden="true"
->
+<svg {width} {height} viewBox="0 0 {width} {height}" aria-hidden="true">
   {#if points}
-    <polyline {points} fill="none" stroke="var(--graph-stroke)" />
+    <polyline
+      {points}
+      fill="none"
+      stroke="var(--graph-stroke)"
+      stroke-width="1"
+    />
   {/if}
 </svg>
 
 <style>
   svg {
     display: block;
-    width: 64px;
-    height: 16px;
-  }
-  polyline {
-    stroke-width: 1;
-    vector-effect: non-scaling-stroke;
+    flex: none;
+    overflow: hidden;
   }
 </style>
