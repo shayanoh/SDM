@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import Shell from "./components/Shell.svelte";
   import { errorMessage, useBridge, useStore, useUi } from "./lib/context";
+  import { resetThemeColors } from "./lib/colors";
   import { syncVibrancy } from "./lib/vibrancy";
 
   const bridge = useBridge();
@@ -30,6 +31,7 @@
         new URLSearchParams(location.search).get("theme") ?? undefined;
       style.textContent = await bridge.themeCss(themeId);
       document.head.append(style);
+      resetThemeColors();
       await bridge.attach(store.apply.bind(store));
       await syncVibrancy(bridge);
     });

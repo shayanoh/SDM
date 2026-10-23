@@ -8,7 +8,7 @@ macOS download manager. Segmented transfers, resume, clipboard link grabbing, Yo
 
 **All five phases are complete and merged to `main`** (Phase 1 merged 2026-08-04, Phase 5 merged 2026-09-02). ~549 tests, no network and no real clock anywhere in the suite.
 
-**Tauri UI (2026-10-23):** a Tauri v2 + Svelte 5 UI for Windows and Linux (and macOS for testing) lives in `sdm-tauri/` on top of the `sdm-core/crates/sdm-app` controller crate; its roadmap and status are in `docs/tauri-roadmap.md`. The SwiftUI app stays the macOS app.
+**Tauri UI (2026-10-24):** a Tauri v2 + Svelte 5 UI for Windows and Linux (and macOS for testing) lives in `sdm-tauri/` on top of the `sdm-core/crates/sdm-app` controller crate; its roadmap and status are in `docs/tauri-roadmap.md`. Specs 1 (foundation) and 2 (the main window: list, sidebar, toolbar, menus, details panel, drag and drop) are built; the Linkgrabber view, Settings, tray and browser extension are specs 3 to 6. The SwiftUI app stays the macOS app.
 
 `SDMKit/` is a local SPM package with **four library targets** — `SDMCore`, `SDMEngine`, `SDMGrabber`, `SDMResolve` — linked into the `SDM` app target. The engine, scheduler, persistence, linkgrabber, menu bar, notifications, theming, activation-policy modes, and the yt-dlp/YouTube feature (multi-component downloads, `ffmpeg` muxing, silent 403 URL refresh, playlists, format picker, YouTube Settings tab) all work end to end.
 

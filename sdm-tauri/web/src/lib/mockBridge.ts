@@ -42,6 +42,8 @@ export interface MockSeed {
 
 export interface MockOptions {
   seed?: MockSeed[];
+  /** How many items download at once (the engine's default is three). */
+  maxRunning?: number;
   /** Pretend the window has a Mica/Acrylic backdrop (`?vibrancy=on` in the browser). */
   vibrancy?: boolean;
 }
@@ -417,9 +419,11 @@ export class MockBridge implements Bridge {
   #globalHistory: number[] = [];
   #detail = new Map<string, Set<string>>();
   #vibrancy: boolean;
+  #maxRunning: number;
 
   constructor(options: MockOptions = {}) {
     this.#vibrancy = options.vibrancy ?? false;
+    this.#maxRunning = options.maxRunning ?? MAX_RUNNING;
     for (const seed of options.seed ?? REFERENCE_SEED) {
       this.#packages.push({
         id: newId(),
@@ -753,7 +757,7 @@ export class MockBridge implements Bridge {
     const items = this.#allItems();
     let running = items.filter((i) => i.state.kind === "running").length;
     for (const item of items) {
-      if (running >= MAX_RUNNING) break;
+      if (running >= this.#maxRunning) break;
       if (item.state.kind === "queued" && item.enabled) {
         item.state = { kind: "running" };
         running += 1;
@@ -903,4 +907,19 @@ export class MockBridge implements Bridge {
         .map((item) => ({ id: item.id, speedHistory: item.history })),
     });
   }
+}
+
+/** `count` items spread over ten packages, for load checks (`?simulate=500:50`). */
+export function loadSeed(count: number): MockSeed[] {
+  const packages = 10;
+  return Array.from({ length: packages }, (_, p) => ({
+    name: `Simulated ${p + 1}`,
+    items: Array.from({ length: Math.ceil(count / packages) }, (_, n) => ({
+      name: `file-${p * Math.ceil(count / packages) + n}.bin`,
+      size: 64 * MB,
+      state: "running" as const,
+      fraction: 0.01,
+      resumable: true,
+    })),
+  }));
 }

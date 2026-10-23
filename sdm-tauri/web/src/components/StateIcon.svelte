@@ -30,7 +30,7 @@
   );
 </script>
 
-<span class="icon tone-{spec.tone}" class:breathing={state.kind === "running"}>
+<span class="icon tone-{spec.tone}">
   {#if spec.ring}
     <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
       <g
@@ -91,22 +91,5 @@
   }
   .tone-secondary {
     color: var(--text-secondary);
-  }
-  .breathing {
-    animation: breathe 2.4s ease-in-out infinite;
-  }
-  @keyframes breathe {
-    0%,
-    100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0.6;
-    }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .breathing {
-      animation: none;
-    }
   }
 </style>

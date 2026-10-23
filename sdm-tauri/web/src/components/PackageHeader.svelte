@@ -69,16 +69,18 @@
   .header {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 3px;
     height: 100%;
-    padding: 6px 16px 6px 12px;
+    padding: 6px 16px 6px 10px;
   }
   .chevron {
     flex: none;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 14px;
+    align-self: flex-start;
+    margin-top: 3px;
+    width: 12px;
     height: 14px;
     padding: 0;
     color: var(--text-secondary);

@@ -114,8 +114,9 @@
     display: inline-flex;
     color: var(--accent);
   }
-  .breathing {
-    animation: breathe 2.4s ease-in-out infinite;
+  /* The selection tint can be the accent itself, so the icon turns white there. */
+  .row.selected .icon {
+    color: var(--text-primary);
   }
   .label {
     flex: 1;
@@ -140,22 +141,5 @@
     margin: 0 0 6px;
     font-weight: 600;
     color: var(--text-secondary);
-  }
-  @keyframes breathe {
-    0%,
-    100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0.55;
-    }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .breathing {
-      animation: none;
-    }
-  }
-  :global(html[data-vibrancy="on"]) .sidebar {
-    background: color-mix(in srgb, var(--sidebar-background) 78%, transparent);
   }
 </style>

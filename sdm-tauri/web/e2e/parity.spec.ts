@@ -67,3 +67,26 @@ test("07 delete sheet", async ({ page }) => {
   await page.waitForTimeout(500);
   await page.screenshot(shot("07-delete-sheet"));
 });
+
+test("08 09 completed tab", async ({ page }) => {
+  await page.goto("/?theme=deep-purple");
+  await page.waitForTimeout(1500);
+  await page.getByRole("button", { name: "Completed" }).click();
+  await page.waitForTimeout(500);
+  await page.screenshot(shot("08-completed-tab"));
+  await page.locator('[data-row-id][data-kind="item"]').first().click();
+  await page.waitForTimeout(500);
+  await page.screenshot(shot("09-completed-item-details"));
+});
+
+test("10 11 collapsed package and hidden panel", async ({ page }) => {
+  await page.goto("/?theme=deep-purple");
+  await page.waitForTimeout(2000);
+  await page.getByRole("button", { name: "Collapse Linux ISOs" }).click();
+  await page.waitForTimeout(400);
+  await page.screenshot(shot("10-package-collapsed"));
+  await page.getByRole("button", { name: "Expand Linux ISOs" }).click();
+  await page.getByRole("button", { name: "Info Panel" }).click();
+  await page.waitForTimeout(400);
+  await page.screenshot(shot("11-info-panel-hidden"));
+});

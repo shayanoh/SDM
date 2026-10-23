@@ -40,3 +40,32 @@ Thresholds (spec §10): idle < 1 % of a core; 50 active < 15 % of a core and < 4
 
 If a row fails later, record the profile and the first optimization tried (coarsened ranges,
 spec §4.3) before spec 2 starts.
+
+## Spec 2: the main window (2026-10-24)
+
+Same machine, same release build and method, with the full main window (sidebar, windowed package
+list, toolbar, details panel, context menus) on screen. `--simulate 500 50` against the in-process
+`SlowOrigin`. **The machine was busy** (a virtual machine pinned at about 99 % of a core, Time
+Machine and a backup daemon; load average 6.5 falling to 3.4 over the series), so these numbers are
+noisier and probably higher than a quiet run.
+
+| Load                       | CPU, % of one core (median of 60 s, one row per run) | Peak RSS (MB) |
+| -------------------------- | ---------------------------------------------------- | ------------- |
+| idle (500 paused)          | 0.2 (max 0.4)                                        | 227           |
+| 50 active, first build     | 23.0 (max 34.3)                                      | 255           |
+| 50 active, no animations   | 15.8 (max 28.7)                                      | 234           |
+| 50 active, final: run 1    | 12.9 (max 43.5)                                      | 228           |
+| 50 active, final: run 2    | 15.8 (max 25.2)                                      | 241           |
+| 50 active, final: run 3    | 14.5 (max 27.0)                                      | 232           |
+
+- Idle: **PASS** (0.2 % < 1 %).
+- 50 active: **borderline PASS**. The median of the three final runs is 14.5 % (< 15 %), but one run
+  was 15.8 %, and the maximum single sample reaches 43.5 %. Memory is 241 MB at most (< 400 MB).
+  The spec 1 skeleton measured 10.3 % on a quieter machine; a quiet re-run is still owed.
+- What it took: the infinite "breathing" CSS animations on running rows and on the sidebar icon cost
+  about 7 points of CPU in WKWebView, so they were **dropped** (the SwiftUI app has them). The canvases
+  now resize their backing store only when the size changes, theme colors are read once instead of
+  with `getComputedStyle` on every redraw, and the list renders 3 rows beyond each edge instead of 6.
+  Profiled in Chromium with the mock at the same load (`?simulate=500:50`): the UI's JavaScript is
+  under 3 % of a core, so what remains is WebKit style, layout and paint.
+- Windows rows (WebView2) are still pending.
