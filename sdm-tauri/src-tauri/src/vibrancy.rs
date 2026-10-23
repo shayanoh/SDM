@@ -3,6 +3,8 @@
 //! theme colors.
 
 /// A translucent window backdrop.
+// Only the Windows build applies an effect; elsewhere only the tests use these.
+#[cfg_attr(not(windows), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Effect {
     /// Windows 11.
@@ -12,8 +14,10 @@ pub enum Effect {
 }
 
 /// Best first: Mica where the OS has it, else Acrylic.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub const PREFERENCE: [Effect; 2] = [Effect::Mica, Effect::Acrylic];
 
+#[cfg_attr(not(windows), allow(dead_code))]
 /// Tries each effect in `order` until `apply` reports one took; nothing is
 /// tried after a success.
 pub fn first_that_applies(

@@ -24,6 +24,8 @@ impl Trash for ScratchTrash {
     }
 }
 
+// Each test binary uses a different subset of the harness.
+#[allow(dead_code)]
 pub struct Harness {
     pub app: Arc<App>,
     pub sink: Arc<RecordingSink>,
