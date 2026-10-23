@@ -7,6 +7,8 @@
 #![cfg_attr(not(test), allow(dead_code))]
 
 pub mod error;
+pub mod host;
+pub mod notify;
 pub mod protocol;
 
 mod convert;
