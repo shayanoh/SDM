@@ -94,6 +94,20 @@ fn parse_id(text: &str) -> Result<Uuid, AppError> {
     Uuid::parse_str(text.trim()).map_err(|_| AppError::invalid("id", "that is not a valid item id"))
 }
 
+/// Parses a batch of ids, rejecting the whole call on the first bad one and
+/// dropping duplicates (first occurrence wins, order kept).
+fn parse_ids(ids: &[String]) -> Result<Vec<Uuid>, AppError> {
+    let mut seen = HashSet::new();
+    let mut parsed = Vec::with_capacity(ids.len());
+    for id in ids {
+        let id = parse_id(id)?;
+        if seen.insert(id) {
+            parsed.push(id);
+        }
+    }
+    Ok(parsed)
+}
+
 fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
     if let Some(text) = payload.downcast_ref::<&str>() {
         (*text).to_owned()
@@ -383,33 +397,90 @@ impl App {
         self.publish(false).await
     }
 
-    pub async fn start_item(&self, id: &str) -> Result<(), AppError> {
-        let id = parse_id(id)?;
-        self.engine.start_item(id).await;
+    pub async fn start_items(&self, ids: &[String]) -> Result<(), AppError> {
+        let ids = parse_ids(ids)?;
+        for id in &ids {
+            self.engine.start_item(*id).await;
+        }
+        self.publish_if_any(&ids).await
+    }
+
+    pub async fn stop_items(&self, ids: &[String]) -> Result<(), AppError> {
+        let ids = parse_ids(ids)?;
+        for id in &ids {
+            self.engine.stop_item(*id).await;
+        }
+        self.publish_if_any(&ids).await
+    }
+
+    pub async fn retry_items(&self, ids: &[String]) -> Result<(), AppError> {
+        let ids = parse_ids(ids)?;
+        for id in &ids {
+            self.engine.retry(*id).await;
+        }
+        self.publish_if_any(&ids).await
+    }
+
+    pub async fn retry_mux_items(&self, ids: &[String]) -> Result<(), AppError> {
+        let ids = parse_ids(ids)?;
+        for id in &ids {
+            self.engine.retry_mux(*id).await;
+        }
+        self.publish_if_any(&ids).await
+    }
+
+    /// Discards the progress of each item. A running item is skipped: a worker
+    /// is writing to its file, so the engine only resets it as a backstop.
+    pub async fn reset_items(&self, ids: &[String]) -> Result<(), AppError> {
+        let ids = parse_ids(ids)?;
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let running: HashSet<Uuid> = self
+            .engine
+            .snapshot()
+            .await
+            .packages
+            .iter()
+            .flat_map(|package| package.items.iter())
+            .filter(|item| item.state == sdm_core::ItemState::Running)
+            .map(|item| item.id)
+            .collect();
+        for id in ids.iter().filter(|id| !running.contains(id)) {
+            self.engine.reset_download(*id).await;
+        }
         self.publish(false).await
     }
 
-    pub async fn stop_item(&self, id: &str) -> Result<(), AppError> {
-        let id = parse_id(id)?;
-        self.engine.stop_item(id).await;
-        self.publish(false).await
+    pub async fn set_items_enabled(&self, ids: &[String], enabled: bool) -> Result<(), AppError> {
+        let ids = parse_ids(ids)?;
+        for id in &ids {
+            self.engine.set_enabled(enabled, *id).await;
+        }
+        self.publish_if_any(&ids).await
     }
 
-    pub async fn retry_item(&self, id: &str) -> Result<(), AppError> {
-        let id = parse_id(id)?;
-        self.engine.retry(id).await;
-        self.publish(false).await
-    }
-
-    pub async fn remove_item(&self, id: &str, delete_file: bool) -> Result<(), AppError> {
-        let id = parse_id(id)?;
-        self.engine.remove_item(id, delete_file).await;
+    pub async fn remove_items(&self, ids: &[String], delete_files: bool) -> Result<(), AppError> {
+        let ids = parse_ids(ids)?;
+        for id in &ids {
+            self.engine.remove_item(*id, delete_files).await;
+        }
         {
             // An open details panel for a removed item must not keep fetching.
             let mut state = lock(&self.state);
-            for ids in state.detail_items.values_mut() {
-                ids.remove(&id);
+            for open in state.detail_items.values_mut() {
+                for id in &ids {
+                    open.remove(id);
+                }
             }
+        }
+        self.publish_if_any(&ids).await
+    }
+
+    /// Publishes once after a batch; an empty batch changed nothing.
+    async fn publish_if_any(&self, ids: &[Uuid]) -> Result<(), AppError> {
+        if ids.is_empty() {
+            return Ok(());
         }
         self.publish(false).await
     }

@@ -199,7 +199,7 @@ async fn commands_reject_bad_ids_and_urls_without_panicking() {
     let h = harness(FakeOrigin::new(payload(10))).await;
     for bad in ["", "zzz", "00000000-0000-0000-0000-000000000000"] {
         // A well-formed but unknown id is not an error: the engine ignores it.
-        let result = h.app.stop_item(bad).await;
+        let result = h.app.stop_items(&[bad.to_owned()]).await;
         if bad == "00000000-0000-0000-0000-000000000000" {
             assert!(result.is_ok());
         } else {
@@ -276,7 +276,10 @@ async fn removing_an_item_with_open_details_stops_its_histories() {
         .await
         .unwrap();
 
-    h.app.remove_item(&id, false).await.unwrap();
+    h.app
+        .remove_items(std::slice::from_ref(&id), false)
+        .await
+        .unwrap();
     h.sink.take();
     for _ in 0..3 {
         h.app.tick().await.unwrap();
