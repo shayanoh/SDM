@@ -249,8 +249,14 @@ impl App {
     /// Fetches the snapshot if it changed, handles notifications, builds a
     /// patch and sends it. `force_full` is an explicit request for a full patch.
     async fn publish(&self, force_full: bool) -> Result<(), AppError> {
+        let folder = lock(&self.settings).download_folder();
         let (since, histories_wanted) = {
-            let state = lock(&self.state);
+            let mut state = lock(&self.state);
+            if state.differ.set_download_folder(folder) {
+                // Package folders changed with no engine change to trigger a
+                // new snapshot, so ask for one.
+                state.need_full = true;
+            }
             let since = if force_full || state.need_full {
                 None
             } else {

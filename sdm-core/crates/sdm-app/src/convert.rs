@@ -1,6 +1,8 @@
 //! Engine snapshot types -> wire types.
 
-use sdm_core::ItemState;
+use std::path::Path;
+
+use sdm_core::{Assembly, ItemState};
 use sdm_engine::{EngineSnapshot, ItemSnapshot, PackageSnapshot};
 
 use crate::protocol::*;
@@ -21,11 +23,12 @@ fn state_dto(state: &ItemState) -> ItemStateDto {
     }
 }
 
-pub(crate) fn structure_package(package: &PackageSnapshot) -> StructurePackage {
+pub(crate) fn structure_package(package: &PackageSnapshot, folder: &Path) -> StructurePackage {
     StructurePackage {
         id: package.id.to_string(),
         name: package.name.clone(),
         priority: package.priority as u32,
+        folder: folder.join(&package.name).to_string_lossy().into_owned(),
         items: package
             .items
             .iter()
@@ -37,6 +40,10 @@ pub(crate) fn structure_package(package: &PackageSnapshot) -> StructurePackage {
                 is_enabled: item.is_enabled,
                 is_resumable: item.is_resumable,
                 is_assembling: item.is_assembling,
+                assembly: match item.assembly {
+                    Assembly::None => AssemblyDto::None,
+                    Assembly::Mux => AssemblyDto::Mux,
+                },
                 file_missing: item.file_missing,
                 metadata: item.metadata.clone(),
             })
@@ -64,6 +71,7 @@ pub(crate) fn item_figures(item: &ItemSnapshot) -> ItemFigures {
         speed_history: item.speed_history.clone(),
         retry_hold_seconds: item.retry_hold_seconds.map(count),
         failed_attempt_count: item.failed_attempt_count.map(count),
+        remaining_attempts: item.remaining_attempts.map(count),
         last_failure_reason: item.last_failure_reason.clone(),
         checkpoint_failure: item.checkpoint_failure.clone(),
     }
@@ -161,7 +169,7 @@ mod tests {
             0.0,
             1,
         );
-        let structure = structure_package(&package);
+        let structure = structure_package(&package, Path::new("dl"));
         assert_eq!(structure.priority, 3);
         assert_eq!(
             structure.items[0].state,

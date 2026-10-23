@@ -25,6 +25,8 @@ export const commands = {
 /**  What a command reports to the UI. `kind` is stable; `message` is for people. */
 export type AppError = { kind: "invalidArgument"; argument: string; message: string } | { kind: "failed"; message: string } | { kind: "internal"; message: string };
 
+export type AssemblyDto = "none" | "mux";
+
 export type BinariesStatusDto = {
 	ytDlpVersion: string | null,
 	latestKnown: string | null,
@@ -58,6 +60,7 @@ export type ItemFigures = {
 	speedHistory: (number | null)[],
 	retryHoldSeconds: number | null,
 	failedAttemptCount: number | null,
+	remainingAttempts: number | null,
 	lastFailureReason: string | null,
 	checkpointFailure: string | null,
 };
@@ -116,6 +119,8 @@ export type StructureItem = {
 	isEnabled: boolean,
 	isResumable: boolean | null,
 	isAssembling: boolean,
+	/**  What happens once every component has downloaded. */
+	assembly: AssemblyDto,
 	fileMissing: boolean,
 	metadata: string | null,
 };
@@ -125,6 +130,11 @@ export type StructurePackage = {
 	name: string,
 	/**  `Priority` as 0 (lowest) to 4 (highest). */
 	priority: number,
+	/**
+	 *  The absolute destination folder: the download folder joined with the
+	 *  package name.
+	 */
+	folder: string,
 	items: StructureItem[],
 };
 

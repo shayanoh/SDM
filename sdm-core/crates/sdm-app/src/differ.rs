@@ -6,6 +6,7 @@
 //! idle or mostly idle list cheap.
 
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 
 use sdm_engine::EngineSnapshot;
 use uuid::Uuid;
@@ -27,12 +28,30 @@ pub(crate) struct Differ {
     items: HashMap<String, ItemFigures>,
     packages: HashMap<String, PackageFigures>,
     stats: Option<EngineStats>,
+    download_folder: PathBuf,
 }
 
 impl Differ {
-    /// Forgets everything sent, so the next diff is a full one.
+    /// Forgets everything sent, so the next diff is a full one. The download
+    /// folder is configuration, not sent state, so it stays.
     pub(crate) fn reset(&mut self) {
-        *self = Self::default();
+        let download_folder = std::mem::take(&mut self.download_folder);
+        *self = Self {
+            download_folder,
+            ..Self::default()
+        };
+    }
+
+    /// Sets the folder package folders are built from. Returns whether it
+    /// changed; a change forgets every package revision, so the next diff
+    /// re-evaluates (and re-sends the structure of) every package.
+    pub(crate) fn set_download_folder(&mut self, folder: PathBuf) -> bool {
+        if self.download_folder == folder {
+            return false;
+        }
+        self.download_folder = folder;
+        self.revisions.clear();
+        true
     }
 
     /// The change since the last call, or `None` when nothing changed.
@@ -69,7 +88,7 @@ impl Differ {
             let entry = match (revision_unchanged, old) {
                 (true, Some(old)) => old,
                 (_, old) => {
-                    let fresh = convert::structure_package(package);
+                    let fresh = convert::structure_package(package, &self.download_folder);
                     if old.as_ref() != Some(&fresh) {
                         structure_changed = true;
                     }
@@ -393,6 +412,52 @@ mod tests {
         assert!(
             differ.diff(&snap).is_none(),
             "after full the snapshot counts as sent"
+        );
+    }
+
+    #[test]
+    fn structure_carries_folder_and_assembly() {
+        let f = fixture(1);
+        let muxed = item(f.item_ids[0], ItemState::Running, 10, 5.0)
+            .with_assembly(sdm_core::Assembly::Mux)
+            .with_remaining_attempts(2);
+        let mut differ = Differ::default();
+        differ.set_download_folder(std::path::PathBuf::from("dl"));
+        let delta = differ
+            .diff(&snapshot(&f, 1, 1, vec![muxed]))
+            .expect("first diff");
+        let structure = delta.structure.expect("structure sent first time");
+        assert_eq!(
+            structure.packages[0].folder,
+            std::path::Path::new("dl").join("Pack").to_string_lossy()
+        );
+        assert_eq!(structure.packages[0].items[0].assembly, AssemblyDto::Mux);
+        assert_eq!(delta.items[0].remaining_attempts, Some(2));
+    }
+
+    #[test]
+    fn changing_the_download_folder_changes_the_structure() {
+        let f = fixture(1);
+        let snap = snapshot(
+            &f,
+            1,
+            1,
+            vec![item(f.item_ids[0], ItemState::Running, 10, 5.0)],
+        );
+        let mut differ = Differ::default();
+        assert!(differ.set_download_folder(std::path::PathBuf::from("a")));
+        differ.diff(&snap);
+        assert!(
+            !differ.set_download_folder(std::path::PathBuf::from("a")),
+            "the same folder is not a change"
+        );
+        assert!(differ.set_download_folder(std::path::PathBuf::from("b")));
+        let delta = differ
+            .diff(&snap)
+            .expect("a new folder must re-send the structure even at the same revision");
+        assert_eq!(
+            delta.structure.unwrap().packages[0].folder,
+            std::path::Path::new("b").join("Pack").to_string_lossy()
         );
     }
 

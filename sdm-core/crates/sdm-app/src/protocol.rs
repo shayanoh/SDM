@@ -35,6 +35,9 @@ pub struct StructurePackage {
     pub name: String,
     /// `Priority` as 0 (lowest) to 4 (highest).
     pub priority: u32,
+    /// The absolute destination folder: the download folder joined with the
+    /// package name.
+    pub folder: String,
     pub items: Vec<StructureItem>,
 }
 
@@ -48,8 +51,17 @@ pub struct StructureItem {
     pub is_enabled: bool,
     pub is_resumable: Option<bool>,
     pub is_assembling: bool,
+    /// What happens once every component has downloaded.
+    pub assembly: AssemblyDto,
     pub file_missing: bool,
     pub metadata: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum AssemblyDto {
+    None,
+    Mux,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
@@ -84,6 +96,7 @@ pub struct ItemFigures {
     pub speed_history: Vec<f64>,
     pub retry_hold_seconds: Option<u32>,
     pub failed_attempt_count: Option<u32>,
+    pub remaining_attempts: Option<u32>,
     pub last_failure_reason: Option<String>,
     pub checkpoint_failure: Option<String>,
 }

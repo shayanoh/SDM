@@ -218,6 +218,7 @@ export class MockBridge implements Bridge {
         id: `p-${item.id}`,
         name: item.filename,
         priority: 2,
+        folder: `${this.#settings.downloadFolder}/${item.filename}`,
         items: [
           {
             id: item.id,
@@ -227,6 +228,7 @@ export class MockBridge implements Bridge {
             isEnabled: item.state.kind !== "stopped",
             isResumable: true,
             isAssembling: false,
+            assembly: "none" as const,
             fileMissing: false,
             metadata: null,
           },
@@ -248,6 +250,7 @@ export class MockBridge implements Bridge {
       speedHistory: item.history,
       retryHoldSeconds: null,
       failedAttemptCount: null,
+      remainingAttempts: null,
       lastFailureReason: null,
       checkpointFailure: null,
     };

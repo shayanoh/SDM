@@ -286,3 +286,46 @@ async fn removing_an_item_with_open_details_stops_its_histories() {
         "a removed item must not keep producing histories"
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn package_folder_follows_the_download_folder_setting() {
+    let h = harness(FakeOrigin::new(payload(2000))).await;
+    h.app
+        .add_url("https://example.com/a.bin", Some("Pack"))
+        .await
+        .unwrap();
+    let first_folder = h
+        .sink
+        .patches()
+        .iter()
+        .rev()
+        .find_map(|p| p.structure.as_ref())
+        .map(|s| s.packages[0].folder.clone())
+        .expect("a structure with the package");
+    assert!(
+        first_folder.starts_with(&*h.downloads.path().to_string_lossy()),
+        "{first_folder}"
+    );
+
+    let elsewhere = tempfile::tempdir().unwrap();
+    h.sink.take();
+    h.app
+        .update_settings(sdm_app::protocol::SettingsDto {
+            download_folder: elsewhere.path().to_string_lossy().into_owned(),
+        })
+        .await
+        .unwrap();
+    h.app.tick().await.unwrap();
+    let moved = h
+        .sink
+        .patches()
+        .iter()
+        .rev()
+        .find_map(|p| p.structure.as_ref())
+        .map(|s| s.packages[0].folder.clone())
+        .expect("changing the folder re-sends the structure");
+    assert!(
+        moved.starts_with(&*elsewhere.path().to_string_lossy()),
+        "{moved}"
+    );
+}
