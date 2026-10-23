@@ -17,6 +17,8 @@ case "${1:-}" in
     # The repo is mounted, so keep the container from touching the Mac's build
     # state: Linux node_modules go in throwaway volumes (the Mac's hold macOS
     # binaries) and Cargo builds into target/linux instead of target/release.
+    # APPIMAGE_EXTRACT_AND_RUN lets the AppImage tools run without FUSE, which
+    # a container does not have.
     # The cargo registry and pnpm store are named volumes so packages download
     # once and nothing is written into the repo.
     docker run --rm \
@@ -25,11 +27,13 @@ case "${1:-}" in
       -v /work/sdm-tauri/web/node_modules \
       -v sdm-linux-cargo-registry:/root/.cargo/registry \
       -v sdm-linux-pnpm-store:/pnpm-store \
-      -e npm_config_store_dir=/pnpm-store \
+      -e pnpm_config_store_dir=/pnpm-store \
+      -e APPIMAGE_EXTRACT_AND_RUN=1 \
       -e CARGO_TARGET_DIR=/work/sdm-core/target/linux \
       sdm-linux-build bash -c \
-      "pnpm install --frozen-lockfile && pnpm tauri build --bundles deb"
-    echo "Package: $(ls ../sdm-core/target/linux/release/bundle/deb/*.deb)"
+      "pnpm install --frozen-lockfile && pnpm tauri build --bundles deb,rpm,appimage"
+    # .deb for Debian/Ubuntu, .rpm for Fedora/openSUSE, .AppImage for any distro.
+    ls -1 ../sdm-core/target/linux/release/bundle/{deb/*.deb,rpm/*.rpm,appimage/*.AppImage}
     ;;
   *)
     echo "usage: $0 mac|windows|linux" >&2
