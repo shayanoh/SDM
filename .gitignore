@@ -29,3 +29,8 @@ SDMKit/Sources/SDMRust/Generated/
 
 ## Brag
 brag-output/
+
+## Tauri UI
+sdm-tauri/web/dist/
+sdm-tauri/node_modules/
+sdm-tauri/src-tauri/gen/
