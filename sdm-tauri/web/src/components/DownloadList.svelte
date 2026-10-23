@@ -1,7 +1,7 @@
 <script lang="ts">
   import { useStore } from "../lib/context";
   import { OVERSCAN, ROW_HEIGHT } from "../lib/layout";
-  import { visibleRange } from "../lib/windowing";
+  import { buildOffsets, visibleRange } from "../lib/windowing";
   import ItemRow from "./ItemRow.svelte";
   import PackageHeader from "./PackageHeader.svelte";
 
@@ -19,14 +19,9 @@
       ...pkg.itemIds.map((id) => ({ kind: "item" as const, id })),
     ]),
   );
+  const offsets = $derived(buildOffsets(rows.map(() => ROW_HEIGHT)));
   const range = $derived(
-    visibleRange({
-      scrollTop,
-      viewport,
-      rowHeight: ROW_HEIGHT,
-      count: rows.length,
-      overscan: OVERSCAN,
-    }),
+    visibleRange({ offsets, scrollTop, viewport, overscan: OVERSCAN }),
   );
   const visible = $derived(
     rows
