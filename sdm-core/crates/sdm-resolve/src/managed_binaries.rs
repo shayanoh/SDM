@@ -6,11 +6,13 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+#[cfg(target_os = "macos")]
 use std::time::Duration;
 
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use tokio::sync::watch;
+#[cfg(target_os = "macos")]
 use tokio_util::sync::CancellationToken;
 
 use crate::binary_fetching::{BinaryFetchError, BinaryFetching};
@@ -18,7 +20,7 @@ use crate::binary_locator::is_executable_file;
 use crate::lzfse;
 use crate::managed_binaries_types::{
     BinariesManifest, CheckOutcome, CheckReason, ManagedBinariesStatus, VendorAsset, YtDlpChannel,
-    YtDlpVersion,
+    YtDlpVersion, yt_dlp_asset_name,
 };
 use crate::process_runner::ProcessRunner;
 
@@ -47,6 +49,8 @@ pub struct ManagedBinaries {
 struct Inner {
     bin_directory: PathBuf,
     fetcher: Arc<dyn BinaryFetching>,
+    /// Only the macOS ad-hoc re-signing step runs a process.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     runner: Arc<dyn ProcessRunner>,
     vendor_assets: VendorAssets,
     channel: ChannelSource,
@@ -247,7 +251,8 @@ impl Drop for ClearInFlight {
 
 impl Inner {
     fn yt_dlp_path(&self) -> PathBuf {
-        self.bin_directory.join("yt-dlp")
+        self.bin_directory
+            .join(crate::binary_locator::executable_name("yt-dlp"))
     }
 
     fn manifest_path(&self) -> PathBuf {
@@ -372,38 +377,41 @@ impl Inner {
         let bytes = self.fetcher.data(&channel.asset_url(tag)).await?;
         let sums_bytes = self.fetcher.data(&channel.sums_url(tag)).await?;
         let sums = String::from_utf8_lossy(&sums_bytes);
-        verify(&bytes, &sums, "yt-dlp_macos")?;
+        verify(&bytes, &sums, yt_dlp_asset_name())?;
 
         let yt_dlp = self.yt_dlp_path();
         let mut staging_name = OsString::from(yt_dlp.as_os_str());
         staging_name.push(".new");
         let staging = PathBuf::from(staging_name);
         self.write_executable(&bytes, &staging)?;
-        // Swift `try?`: a failed or missing xattr/codesign is not fatal.
-        let cancel = CancellationToken::new();
-        let _ = self
-            .runner
-            .run(
-                Path::new("/usr/bin/xattr"),
-                &["-c".to_owned(), staging.to_string_lossy().into_owned()],
-                Duration::from_secs(20),
-                &cancel,
-            )
-            .await;
-        let _ = self
-            .runner
-            .run(
-                Path::new("/usr/bin/codesign"),
-                &[
-                    "-s".to_owned(),
-                    "-".to_owned(),
-                    "--force".to_owned(),
-                    staging.to_string_lossy().into_owned(),
-                ],
-                Duration::from_secs(30),
-                &cancel,
-            )
-            .await;
+        #[cfg(target_os = "macos")]
+        {
+            // Swift `try?`: a failed or missing xattr/codesign is not fatal.
+            let cancel = CancellationToken::new();
+            let _ = self
+                .runner
+                .run(
+                    Path::new("/usr/bin/xattr"),
+                    &["-c".to_owned(), staging.to_string_lossy().into_owned()],
+                    Duration::from_secs(20),
+                    &cancel,
+                )
+                .await;
+            let _ = self
+                .runner
+                .run(
+                    Path::new("/usr/bin/codesign"),
+                    &[
+                        "-s".to_owned(),
+                        "-".to_owned(),
+                        "--force".to_owned(),
+                        staging.to_string_lossy().into_owned(),
+                    ],
+                    Duration::from_secs(30),
+                    &cancel,
+                )
+                .await;
+        }
         promote(&staging, &yt_dlp)?;
 
         manifest.yt_dlp_version = Some(tag.to_owned());
@@ -414,13 +422,17 @@ impl Inner {
     }
 
     fn write_executable(&self, data: &[u8], path: &Path) -> std::io::Result<()> {
-        use std::os::unix::fs::PermissionsExt;
         fs::create_dir_all(&self.bin_directory)?;
         if path.exists() {
             fs::remove_file(path)?;
         }
         write_atomically(path, data)?;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o755))
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755))?;
+        }
+        Ok(())
     }
 
     fn load_manifest(&self) -> BinariesManifest {
@@ -467,9 +479,12 @@ fn verify(bytes: &[u8], sums: &str, filename: &str) -> Result<(), ManagedBinarie
 /// Swift `replaceItemAt` / `moveItem`: on POSIX, `rename(2)` replaces an
 /// existing destination atomically, so one call covers both branches.
 fn promote(staging: &Path, destination: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
     fs::rename(staging, destination)?;
-    let _ = fs::set_permissions(destination, fs::Permissions::from_mode(0o755));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(destination, fs::Permissions::from_mode(0o755));
+    }
     Ok(())
 }
 

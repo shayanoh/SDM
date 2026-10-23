@@ -1,7 +1,5 @@
 use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
-use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Stdio};
 use std::sync::{Arc, Mutex};
@@ -59,40 +57,42 @@ impl SystemProcessRunner {
     ) -> HashMap<OsString, OsString> {
         let mut env: HashMap<OsString, OsString> = inherited.into_iter().collect();
 
+        #[cfg_attr(windows, allow(unused_mut))]
         let mut tool_dirs: Vec<PathBuf> = vec![
             executable
                 .parent()
                 .map(Path::to_path_buf)
                 .unwrap_or_default(),
         ];
-        for dir in [
-            "/opt/homebrew/bin",
-            "/opt/homebrew/sbin",
-            "/usr/local/bin",
-            "/usr/local/sbin",
-            "/opt/local/bin",
-            "/opt/local/sbin",
-            "/usr/bin",
-            "/bin",
-            "/usr/sbin",
-            "/sbin",
-        ] {
-            tool_dirs.push(PathBuf::from(dir));
+        #[cfg(unix)]
+        {
+            for dir in [
+                "/opt/homebrew/bin",
+                "/opt/homebrew/sbin",
+                "/usr/local/bin",
+                "/usr/local/sbin",
+                "/opt/local/bin",
+                "/opt/local/sbin",
+                "/usr/bin",
+                "/bin",
+                "/usr/sbin",
+                "/sbin",
+            ] {
+                tool_dirs.push(PathBuf::from(dir));
+            }
+            tool_dirs.push(home.join(".local/bin"));
         }
-        let mut home_bin = home.as_os_str().as_bytes().to_vec();
-        while home_bin.ends_with(b"/") {
-            home_bin.pop();
+        #[cfg(windows)]
+        {
+            let _ = &home;
         }
-        home_bin.extend_from_slice(b"/.local/bin");
-        tool_dirs.push(PathBuf::from(OsString::from_vec(home_bin)));
 
-        let existing: Vec<PathBuf> = env
-            .get(OsStr::new("PATH"))
+        let original_path = env.get(OsStr::new("PATH")).cloned();
+        let existing: Vec<PathBuf> = original_path
+            .as_deref()
             .map(|p| {
-                p.as_bytes()
-                    .split(|&b| b == b':')
-                    .filter(|s| !s.is_empty())
-                    .map(|s| PathBuf::from(OsStr::from_bytes(s)))
+                std::env::split_paths(p)
+                    .filter(|d| !d.as_os_str().is_empty())
                     .collect()
             })
             .unwrap_or_default();
@@ -102,14 +102,17 @@ impl SystemProcessRunner {
             .chain(existing)
             .filter(|d| !d.as_os_str().is_empty() && seen.insert(d.clone()))
             .collect();
-        let mut path = Vec::new();
-        for (index, dir) in merged.iter().enumerate() {
-            if index > 0 {
-                path.push(b':');
+        // An entry containing the separator makes `join_paths` fail; an empty
+        // `PATH` would break the child, so keep the inherited value then.
+        match (std::env::join_paths(&merged), original_path) {
+            (Ok(path), _) => {
+                env.insert(OsString::from("PATH"), path);
             }
-            path.extend_from_slice(dir.as_os_str().as_bytes());
+            (Err(_), Some(original)) => {
+                env.insert(OsString::from("PATH"), original);
+            }
+            (Err(_), None) => {}
         }
-        env.insert(OsString::from("PATH"), OsString::from_vec(path));
 
         if env.get(OsStr::new("HOME")).is_none_or(|h| h.is_empty()) {
             env.insert(OsString::from("HOME"), home.into_os_string());
@@ -232,7 +235,7 @@ async fn execute(
             Err(ProcessRunError::Cancelled)
         }
         Some(status) => status
-            .map(|s| s.code().or_else(|| s.signal()).unwrap_or(-1))
+            .map(exit_code)
             .map_err(|e| ProcessRunError::LaunchFailed(e.to_string())),
         None => {
             guard.terminate();
@@ -243,6 +246,20 @@ async fn execute(
     guard.child = None;
     stop_and_join(&stop_out, &stop_err, pumps).await;
     result
+}
+
+/// The exit code, or on Unix the terminating signal number when there is no
+/// code; `-1` when neither is known.
+fn exit_code(status: ExitStatus) -> i32 {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        status.code().or_else(|| status.signal()).unwrap_or(-1)
+    }
+    #[cfg(not(unix))]
+    {
+        status.code().unwrap_or(-1)
+    }
 }
 
 /// How long a cancelled child gets to exit on its own after SIGTERM so it
@@ -317,7 +334,8 @@ struct ChildGuard {
 }
 
 impl ChildGuard {
-    fn terminate(&self) {
+    fn terminate(&mut self) {
+        #[cfg(unix)]
         if let Some(pid) = self.child.as_ref().and_then(Child::id) {
             // A pid that does not fit `pid_t` cannot be a real child: skip.
             let Ok(pid) = libc::pid_t::try_from(pid) else {
@@ -328,6 +346,13 @@ impl ChildGuard {
             unsafe {
                 libc::kill(pid, libc::SIGTERM);
             }
+        }
+        // Windows has no SIGTERM: ask the OS to end the process now. The
+        // bounded wait that follows (`drain_after_terminate`) is unchanged.
+        // yt-dlp's `--continue` resumes from its fragment files after this.
+        #[cfg(windows)]
+        if let Some(child) = self.child.as_mut() {
+            let _ = child.start_kill();
         }
     }
 }
@@ -403,5 +428,38 @@ impl LineStreamer {
         {
             (self.on_line)(trailing);
         }
+    }
+}
+
+#[cfg(test)]
+mod portability_tests {
+    use super::*;
+    use std::ffi::OsString;
+
+    #[test]
+    fn child_path_keeps_the_executable_directory_first_and_has_no_duplicates() {
+        let executable = Path::new(if cfg!(windows) {
+            r"C:\tools\yt-dlp.exe"
+        } else {
+            "/opt/tools/yt-dlp"
+        });
+        let inherited_path = std::env::join_paths(["/usr/bin", "/usr/bin", "/extra"]).unwrap();
+        let env = SystemProcessRunner::child_environment_from(
+            executable,
+            [(OsString::from("PATH"), inherited_path)],
+            PathBuf::from(if cfg!(windows) {
+                r"C:\Users\me"
+            } else {
+                "/home/me"
+            }),
+        );
+        let path = env.get(std::ffi::OsStr::new("PATH")).expect("PATH is set");
+        let dirs: Vec<PathBuf> = std::env::split_paths(path).collect();
+        assert_eq!(dirs[0], executable.parent().unwrap());
+        let mut seen = std::collections::HashSet::new();
+        assert!(
+            dirs.iter().all(|d| seen.insert(d.clone())),
+            "duplicate PATH entries: {dirs:?}"
+        );
     }
 }

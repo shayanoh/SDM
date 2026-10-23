@@ -25,7 +25,7 @@ pub use format_selector::FormatSelector;
 pub use managed_binaries::{BinariesChangedFuture, ManagedBinaries, ManagedBinariesError};
 pub use managed_binaries_types::{
     BinariesManifest, CheckOutcome, CheckReason, ManagedBinariesStatus, VendorAsset, YtDlpChannel,
-    YtDlpVersion,
+    YtDlpVersion, yt_dlp_asset_name,
 };
 pub use process_runner::{ProcessOutput, ProcessRunError, ProcessRunner};
 pub use site_registry::{HostMatch, SitePattern, SiteRegistry};
