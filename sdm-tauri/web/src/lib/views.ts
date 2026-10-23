@@ -25,7 +25,9 @@ export function completedView(
 ): ListView {
   const packages: PackageOrder[] = [];
   for (const pkg of order) {
-    const itemIds = pkg.itemIds.filter((id) => items.get(id)?.state.kind === "completed");
+    const itemIds = pkg.itemIds.filter(
+      (id) => items.get(id)?.state.kind === "completed",
+    );
     if (itemIds.length > 0) packages.push({ id: pkg.id, itemIds });
   }
   return { packages };
@@ -48,7 +50,10 @@ export function completedAggregate(
 }
 
 /** Header, then items, for every package; a collapsed package shows only its header. */
-export function flatRows(view: ListView, collapsed: ReadonlySet<string>): Row[] {
+export function flatRows(
+  view: ListView,
+  collapsed: ReadonlySet<string>,
+): Row[] {
   const rows: Row[] = [];
   view.packages.forEach((pkg, packageIndex) => {
     rows.push({
@@ -60,7 +65,13 @@ export function flatRows(view: ListView, collapsed: ReadonlySet<string>): Row[] 
     });
     if (collapsed.has(pkg.id)) return;
     pkg.itemIds.forEach((id, itemIndex) =>
-      rows.push({ kind: "item", id, height: ITEM_HEIGHT, packageId: pkg.id, index: itemIndex }),
+      rows.push({
+        kind: "item",
+        id,
+        height: ITEM_HEIGHT,
+        packageId: pkg.id,
+        index: itemIndex,
+      }),
     );
   });
   return rows;
@@ -71,11 +82,17 @@ export const itemOrder = (view: ListView): string[] =>
   view.packages.flatMap((pkg) => pkg.itemIds);
 
 /** The items a selection stands for: package keys expand to their items. List order, no repeats. */
-export function selectedItemIds(selection: ReadonlySet<string>, view: ListView): string[] {
+export function selectedItemIds(
+  selection: ReadonlySet<string>,
+  view: ListView,
+): string[] {
   const wanted = new Set<string>();
   for (const pkg of view.packages) {
     if (selection.has(pkg.id)) pkg.itemIds.forEach((id) => wanted.add(id));
-    else pkg.itemIds.filter((id) => selection.has(id)).forEach((id) => wanted.add(id));
+    else
+      pkg.itemIds
+        .filter((id) => selection.has(id))
+        .forEach((id) => wanted.add(id));
   }
   return itemOrder(view).filter((id) => wanted.has(id));
 }

@@ -8,7 +8,10 @@ import type {
 } from "../bindings";
 
 /** Wire-shaped test data, with every field a test is unlikely to care about filled in. */
-export function structureItem(id: string, over: Partial<StructureItem> = {}): StructureItem {
+export function structureItem(
+  id: string,
+  over: Partial<StructureItem> = {},
+): StructureItem {
   return {
     id,
     url: `https://e.com/${id}`,
@@ -24,7 +27,10 @@ export function structureItem(id: string, over: Partial<StructureItem> = {}): St
   };
 }
 
-export function figures(id: string, over: Partial<ItemFigures> = {}): ItemFigures {
+export function figures(
+  id: string,
+  over: Partial<ItemFigures> = {},
+): ItemFigures {
   return {
     id,
     completed: [],
@@ -70,7 +76,12 @@ export const patch = (seq: number, over: Partial<Patch> = {}): Patch => ({
 export type PackageSpec = {
   id: string;
   name?: string;
-  items: { id: string; state?: ItemStateDto; over?: Partial<StructureItem>; fig?: Partial<ItemFigures> }[];
+  items: {
+    id: string;
+    state?: ItemStateDto;
+    over?: Partial<StructureItem>;
+    fig?: Partial<ItemFigures>;
+  }[];
 };
 
 export function structurePackages(specs: PackageSpec[]): StructurePackage[] {
@@ -80,7 +91,10 @@ export function structurePackages(specs: PackageSpec[]): StructurePackage[] {
     priority: 2,
     folder: `/dl/${spec.name ?? spec.id}`,
     items: spec.items.map((i) =>
-      structureItem(i.id, { ...(i.state ? { state: i.state } : {}), ...i.over }),
+      structureItem(i.id, {
+        ...(i.state ? { state: i.state } : {}),
+        ...i.over,
+      }),
     ),
   }));
 }

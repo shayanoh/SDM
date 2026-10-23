@@ -17,7 +17,11 @@ const specs: PackageSpec[] = [
     id: "p1",
     items: [
       { id: "a", state: done, fig: { completedBytes: 100, totalBytes: 100 } },
-      { id: "b", state: { kind: "running" }, fig: { completedBytes: 40, totalBytes: 100 } },
+      {
+        id: "b",
+        state: { kind: "running" },
+        fig: { completedBytes: 40, totalBytes: 100 },
+      },
     ],
   },
   { id: "p2", items: [{ id: "c", state: { kind: "queued" } }] },
@@ -49,7 +53,14 @@ describe("completedView", () => {
 
   it("is empty when nothing has completed", () => {
     const store = new DownloadStore(() => {});
-    store.apply(fullPatchOf(1, [{ id: "p", items: [{ id: "x", state: { kind: "failed", reason: "r" } }] }]));
+    store.apply(
+      fullPatchOf(1, [
+        {
+          id: "p",
+          items: [{ id: "x", state: { kind: "failed", reason: "r" } }],
+        },
+      ]),
+    );
     expect(completedView(store.order, store.items).packages).toEqual([]);
   });
 });
@@ -65,17 +76,32 @@ describe("completedAggregate", () => {
       completedBytes: 100,
       totalBytes: 100,
     });
-    expect(completedAggregate([], store.items)).toEqual({ completedBytes: 0, totalBytes: 0 });
+    expect(completedAggregate([], store.items)).toEqual({
+      completedBytes: 0,
+      totalBytes: 0,
+    });
   });
 
   it("counts an item with an unknown size as zero bytes", () => {
     const store = new DownloadStore(() => {});
     store.apply(
       fullPatchOf(1, [
-        { id: "p", items: [{ id: "x", state: done, fig: { totalBytes: null, completedBytes: 5 } }] },
+        {
+          id: "p",
+          items: [
+            {
+              id: "x",
+              state: done,
+              fig: { totalBytes: null, completedBytes: 5 },
+            },
+          ],
+        },
       ]),
     );
-    expect(completedAggregate(["x"], store.items)).toEqual({ completedBytes: 5, totalBytes: 0 });
+    expect(completedAggregate(["x"], store.items)).toEqual({
+      completedBytes: 5,
+      totalBytes: 0,
+    });
   });
 });
 
@@ -93,8 +119,16 @@ describe("flatRows", () => {
       "item:d",
       "item:e",
     ]);
-    expect(rows[0]).toMatchObject({ height: HEADER_HEIGHT, index: 0, packageId: "p1" });
-    expect(rows[2]).toMatchObject({ height: ITEM_HEIGHT, index: 1, packageId: "p1" });
+    expect(rows[0]).toMatchObject({
+      height: HEADER_HEIGHT,
+      index: 0,
+      packageId: "p1",
+    });
+    expect(rows[2]).toMatchObject({
+      height: ITEM_HEIGHT,
+      index: 1,
+      packageId: "p1",
+    });
     expect(rows[5]).toMatchObject({ kind: "package", index: 2 });
   });
 
@@ -109,12 +143,22 @@ describe("selectedItemIds", () => {
   it("expands a package into its items, in list order, without repeats", () => {
     const store = storeOf();
     const view = { packages: store.order };
-    expect(selectedItemIds(new Set(["p3", "b", "d"]), view)).toEqual(["b", "d", "e"]);
+    expect(selectedItemIds(new Set(["p3", "b", "d"]), view)).toEqual([
+      "b",
+      "d",
+      "e",
+    ]);
     expect(selectedItemIds(new Set(["ghost"]), view)).toEqual([]);
   });
 
   it("lists every item in list order", () => {
     const store = storeOf();
-    expect(itemOrder({ packages: store.order })).toEqual(["a", "b", "c", "d", "e"]);
+    expect(itemOrder({ packages: store.order })).toEqual([
+      "a",
+      "b",
+      "c",
+      "d",
+      "e",
+    ]);
   });
 });

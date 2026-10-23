@@ -7,8 +7,8 @@ test.beforeEach(async ({ page }) => {
   ).toBeVisible();
 });
 
-test("the header shows a download speed", async ({ page }) => {
-  await expect(page.getByTestId("total-speed")).not.toHaveText("—");
+test("the sidebar shows the global download speed", async ({ page }) => {
+  await expect(page.getByText(/\d+(\.\d+)? [KMG]B\/s/).first()).toBeVisible();
 });
 
 test("a running row paints part of its progress bar", async ({ page }) => {
@@ -34,6 +34,7 @@ test("a running row paints part of its progress bar", async ({ page }) => {
 test("a bad address shows a banner and a good one adds a row", async ({
   page,
 }) => {
+  await page.getByRole("button", { name: "Linkgrabber" }).click();
   const input = page.getByLabel("Download address");
   await input.fill("nope");
   await input.press("Enter");
@@ -42,6 +43,7 @@ test("a bad address shows a banner and a good one adds a row", async ({
   await input.fill("https://example.com/files/new.bin");
   await input.press("Enter");
   // The list is windowed and the new package lands last.
+  await page.getByRole("button", { name: "Downloads" }).click();
   await page
     .locator(".scroller")
     .evaluate((element) => (element.scrollTop = element.scrollHeight));

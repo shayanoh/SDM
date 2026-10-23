@@ -61,7 +61,10 @@ export class UiState {
 
   setPanelHeight(height: number) {
     if (!Number.isFinite(height)) return;
-    this.panelHeight = Math.min(MAX_PANEL_HEIGHT, Math.max(MIN_PANEL_HEIGHT, height));
+    this.panelHeight = Math.min(
+      MAX_PANEL_HEIGHT,
+      Math.max(MIN_PANEL_HEIGHT, height),
+    );
   }
 
   isCollapsed(tab: ListTab, packageId: string): boolean {

@@ -26,6 +26,7 @@ export class ItemModel {
   isEnabled = $state(true);
   isResumable = $state<boolean | null>(null);
   isAssembling = $state(false);
+  assembly = $state<"none" | "mux">("none");
   fileMissing = $state(false);
   metadata = $state<string | null>(null);
 
@@ -53,6 +54,7 @@ export class ItemModel {
     this.isEnabled = s.isEnabled;
     this.isResumable = s.isResumable;
     this.isAssembling = s.isAssembling;
+    this.assembly = s.assembly;
     this.fileMissing = s.fileMissing;
     this.metadata = s.metadata;
   }
@@ -76,6 +78,8 @@ export class PackageModel {
   id: string;
   name = $state("");
   priority = $state(2);
+  /** The package's absolute destination folder. */
+  folder = $state("");
   completedBytes = $state(0);
   totalBytes = $state(0);
   bytesPerSecond = $state(0);
@@ -156,6 +160,7 @@ export class DownloadStore {
       if (!pm) this.packages.set(pkg.id, (pm = new PackageModel(pkg.id)));
       pm.name = pkg.name;
       pm.priority = pkg.priority;
+      pm.folder = pkg.folder;
       const itemIds: string[] = [];
       for (const s of pkg.items) {
         liveItems.add(s.id);

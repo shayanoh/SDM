@@ -66,14 +66,18 @@ describe("wireSelectionPruning", () => {
     const store = new DownloadStore(() => {});
     const ui = new UiState();
     wireSelectionPruning(store, ui);
-    store.apply(fullPatchOf(1, [{ id: "p", items: [{ id: "a" }, { id: "b" }] }]));
+    store.apply(
+      fullPatchOf(1, [{ id: "p", items: [{ id: "a" }, { id: "b" }] }]),
+    );
     ui.selection.setOrder(["p", "a", "b"]);
     ui.selection.click("a");
     ui.selection.toggle("b");
 
     store.apply(
       patch(2, {
-        structure: { packages: structurePackages([{ id: "p", items: [{ id: "b" }] }]) },
+        structure: {
+          packages: structurePackages([{ id: "p", items: [{ id: "b" }] }]),
+        },
       }),
     );
 
@@ -93,7 +97,11 @@ describe("wireSelectionPruning", () => {
     ui.selection.setOrder(["p1", "a", "p2", "b"]);
     ui.selection.click("p2");
     store.apply(
-      patch(2, { structure: { packages: structurePackages([{ id: "p1", items: [{ id: "a" }] }]) } }),
+      patch(2, {
+        structure: {
+          packages: structurePackages([{ id: "p1", items: [{ id: "a" }] }]),
+        },
+      }),
     );
     expect(ui.selected.size).toBe(0);
   });
