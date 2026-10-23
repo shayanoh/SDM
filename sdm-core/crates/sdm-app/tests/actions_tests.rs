@@ -222,3 +222,131 @@ async fn an_empty_id_list_is_ok_and_publishes_nothing() {
     h.app.remove_items(&[], true).await.unwrap();
     assert!(h.sink.take().is_empty());
 }
+
+fn package_of(h: &Harness, item_id: &str) -> StructurePackage {
+    packages(h)
+        .into_iter()
+        .find(|p| p.items.iter().any(|i| i.id == item_id))
+        .unwrap_or_else(|| panic!("item {item_id} is in no package"))
+}
+
+fn names(package: &StructurePackage) -> Vec<String> {
+    package.items.iter().map(|i| i.filename.clone()).collect()
+}
+
+/// Three stopped items, each in its own package (`add_url` makes one each).
+async fn three_stopped(h: &Harness) -> Vec<String> {
+    let ids = add(h, &["a.bin", "b.bin", "c.bin"]).await;
+    h.app.stop_items(&ids).await.unwrap();
+    ids
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn move_items_to_new_package_creates_it_and_moves_the_items() {
+    let h = harness(FakeOrigin::new(payload(BIG))).await;
+    let ids = three_stopped(&h).await;
+
+    h.app
+        .move_items_to_new_package(&ids[..1], "  Fresh  ")
+        .await
+        .unwrap();
+
+    let package = package_of(&h, &ids[0]);
+    assert_eq!(package.name, "Fresh");
+    assert_eq!(names(&package), ["a.bin"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_blank_package_name_is_rejected() {
+    let h = harness(FakeOrigin::new(payload(BIG))).await;
+    let ids = three_stopped(&h).await;
+    for blank in ["", "   ", "\t\n"] {
+        let result = h.app.move_items_to_new_package(&ids[..1], blank).await;
+        assert!(
+            matches!(result, Err(AppError::InvalidArgument { .. })),
+            "{blank:?}"
+        );
+    }
+    assert_eq!(packages(&h).len(), 3, "no package may have been created");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn move_items_into_another_package_at_an_index() {
+    let h = harness(FakeOrigin::new(payload(BIG))).await;
+    let ids = three_stopped(&h).await;
+    let target = package_of(&h, &ids[0]).id;
+
+    h.app.move_items(&ids[2..], &target, Some(0)).await.unwrap();
+    assert_eq!(names(&package_of(&h, &ids[0])), ["c.bin", "a.bin"]);
+
+    h.app.move_items(&ids[1..2], &target, None).await.unwrap();
+    assert_eq!(
+        names(&package_of(&h, &ids[0])),
+        ["c.bin", "a.bin", "b.bin"],
+        "no index appends"
+    );
+    assert_eq!(
+        packages(&h).len(),
+        1,
+        "the engine drops packages that were emptied by the move"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn moving_a_running_item_is_refused_without_error() {
+    let h = harness(FakeOrigin::new(payload(BIG))).await;
+    let ids = add(&h, &["run.bin", "other.bin"]).await;
+    assert!(tick_until_state(&h, &ids[0], ItemStateDto::Running).await);
+    let target = package_of(&h, &ids[1]).id;
+
+    h.app.move_items(&ids[..1], &target, None).await.unwrap();
+
+    assert_eq!(names(&package_of(&h, &ids[0])), ["run.bin"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reorder_items_sets_the_order_in_the_structure() {
+    let h = harness(FakeOrigin::new(payload(BIG))).await;
+    let ids = three_stopped(&h).await;
+    let target = package_of(&h, &ids[0]).id;
+    h.app.move_items(&ids[1..], &target, None).await.unwrap();
+
+    let reversed = vec![ids[2].clone(), ids[1].clone(), ids[0].clone()];
+    h.app.reorder_items(&reversed, &target).await.unwrap();
+
+    assert_eq!(names(&package_of(&h, &ids[0])), ["c.bin", "b.bin", "a.bin"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reorder_packages_sets_the_order() {
+    let h = harness(FakeOrigin::new(payload(BIG))).await;
+    let ids = three_stopped(&h).await;
+    let order: Vec<String> = ids.iter().rev().map(|id| package_of(&h, id).id).collect();
+
+    h.app.reorder_packages(&order).await.unwrap();
+
+    let now: Vec<String> = packages(&h).into_iter().map(|p| p.id).collect();
+    assert_eq!(now, order);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn remove_package_removes_all_its_items() {
+    let h = harness(FakeOrigin::new(payload(BIG))).await;
+    let ids = three_stopped(&h).await;
+    let target = package_of(&h, &ids[0]).id;
+    h.app.move_items(&ids[1..], &target, None).await.unwrap();
+
+    h.app.remove_package(&target, false).await.unwrap();
+
+    assert!(items(&h).iter().all(|i| !ids.contains(&i.id)));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn organize_actions_reject_bad_ids() {
+    let h = harness(FakeOrigin::new(payload(BIG))).await;
+    let ids = three_stopped(&h).await;
+    assert!(h.app.remove_package("nope", false).await.is_err());
+    assert!(h.app.move_items(&ids[..1], "nope", None).await.is_err());
+    assert!(h.app.reorder_items(&ids, "nope").await.is_err());
+    assert!(h.app.reorder_packages(&["nope".to_owned()]).await.is_err());
+}

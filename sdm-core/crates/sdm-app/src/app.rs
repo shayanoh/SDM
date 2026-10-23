@@ -477,6 +477,80 @@ impl App {
         self.publish_if_any(&ids).await
     }
 
+    pub async fn remove_package(&self, id: &str, delete_files: bool) -> Result<(), AppError> {
+        let id = parse_id(id)?;
+        self.engine.remove_package(id, delete_files).await;
+        {
+            // A details panel may be open for any of the package's items; the
+            // next snapshot no longer has them, so stop asking for them now.
+            let live: HashSet<Uuid> = self
+                .engine
+                .snapshot()
+                .await
+                .packages
+                .iter()
+                .flat_map(|package| package.items.iter().map(|item| item.id))
+                .collect();
+            let mut state = lock(&self.state);
+            for open in state.detail_items.values_mut() {
+                open.retain(|item| live.contains(item));
+            }
+        }
+        self.publish(false).await
+    }
+
+    /// Moves items into `package_id`, as one contiguous run at `at_index`
+    /// (against the list before the move) or at the end. The engine refuses
+    /// the whole batch if any item is running or missing.
+    pub async fn move_items(
+        &self,
+        ids: &[String],
+        package_id: &str,
+        at_index: Option<u32>,
+    ) -> Result<(), AppError> {
+        let ids = parse_ids(ids)?;
+        let package = parse_id(package_id)?;
+        if ids.is_empty() {
+            return Ok(());
+        }
+        self.engine
+            .move_items_to_package(&ids, package, at_index.map(|index| index as usize))
+            .await;
+        self.publish(false).await
+    }
+
+    pub async fn move_items_to_new_package(
+        &self,
+        ids: &[String],
+        name: &str,
+    ) -> Result<(), AppError> {
+        let ids = parse_ids(ids)?;
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(AppError::invalid("name", "the package name is empty"));
+        }
+        if ids.is_empty() {
+            return Ok(());
+        }
+        self.engine.move_items_to_new_package(&ids, name).await;
+        self.publish(false).await
+    }
+
+    /// Orders `ids` inside `package_id`; items not named keep their relative
+    /// order after the named ones.
+    pub async fn reorder_items(&self, ids: &[String], package_id: &str) -> Result<(), AppError> {
+        let ids = parse_ids(ids)?;
+        let package = parse_id(package_id)?;
+        self.engine.reorder_items(&ids, package).await;
+        self.publish(false).await
+    }
+
+    pub async fn reorder_packages(&self, ids: &[String]) -> Result<(), AppError> {
+        let ids = parse_ids(ids)?;
+        self.engine.reorder_packages(&ids).await;
+        self.publish(false).await
+    }
+
     /// Publishes once after a batch; an empty batch changed nothing.
     async fn publish_if_any(&self, ids: &[Uuid]) -> Result<(), AppError> {
         if ids.is_empty() {
