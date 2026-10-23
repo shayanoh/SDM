@@ -17,16 +17,23 @@ pub const FALLBACK_NAME: &str = "download";
 /// ordinary name (spaces, Unicode, dots inside the name, a leading dot, long
 /// names) comes back unchanged.
 pub fn single_path_component(name: &str) -> Option<String> {
-    let trimmed = name.trim_end_matches('/');
-    let last = trimmed.rsplit('/').next().unwrap_or("");
-    let cleaned: String = if last.contains('\0') {
-        last.chars().filter(|c| *c != '\0').collect()
-    } else {
-        last.to_owned()
-    };
-    match cleaned.as_str() {
-        "" | "." | ".." => None,
-        _ => Some(cleaned),
+    #[cfg(windows)]
+    {
+        crate::filename_rules::windows_safe_name(name)
+    }
+    #[cfg(not(windows))]
+    {
+        let trimmed = name.trim_end_matches('/');
+        let last = trimmed.rsplit('/').next().unwrap_or("");
+        let cleaned: String = if last.contains('\0') {
+            last.chars().filter(|c| *c != '\0').collect()
+        } else {
+            last.to_owned()
+        };
+        match cleaned.as_str() {
+            "" | "." | ".." => None,
+            _ => Some(cleaned),
+        }
     }
 }
 
