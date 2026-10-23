@@ -109,6 +109,9 @@ export class DownloadStore {
   order = $state.raw<PackageOrder[]>([]);
   stats = $state.raw<EngineStats | null>(null);
 
+  /** Called after every structure change, so owners can drop what no longer exists. */
+  onStructure: (() => void) | undefined;
+
   #expected: number | null = null;
   #resyncRequested = false;
   #resync: () => void;
@@ -168,5 +171,11 @@ export class DownloadStore {
     for (const id of [...this.packages.keys()])
       if (!livePackages.has(id)) this.packages.delete(id);
     this.order = order;
+    this.onStructure?.();
+  }
+
+  /** Every package id and item id currently in the list. */
+  liveKeys(): Set<string> {
+    return new Set([...this.packages.keys(), ...this.items.keys()]);
   }
 }
