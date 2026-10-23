@@ -33,3 +33,26 @@ test("04 item context menu and 05 package menu", async ({ page }) => {
   await page.waitForTimeout(300);
   await page.screenshot(shot("05-context-menu-package"));
 });
+
+test("02 03 06 details panel", async ({ page }) => {
+  await page.goto("/?theme=deep-purple");
+  await page.waitForTimeout(2500);
+  const items = page.locator('[data-row-id][data-kind="item"]');
+  await items.first().click();
+  await page.waitForTimeout(600);
+  await page.screenshot(shot("02-item-selected-details"));
+  // Drag the handle up to the 380 px the reference 03 shows.
+  const handle = page.getByRole("separator", {
+    name: "Resize the details panel",
+  });
+  const box = (await handle.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + 3);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2, box.y - 230, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(400);
+  await page.screenshot(shot("03-details-panel-tall"));
+  await items.nth(2).click({ modifiers: ["Shift"] });
+  await page.waitForTimeout(600);
+  await page.screenshot(shot("06-multi-select-details"));
+});

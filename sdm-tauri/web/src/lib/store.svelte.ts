@@ -194,6 +194,12 @@ export class DownloadStore {
     return averageRecentSpeed(nums(stats.history), num(stats.bytesPerSecond));
   }
 
+  /** The package holding `itemId`, if any. */
+  packageOfItem(itemId: string): PackageModel | undefined {
+    const order = this.order.find((pkg) => pkg.itemIds.includes(itemId));
+    return order ? this.packages.get(order.id) : undefined;
+  }
+
   /** Every package id and item id currently in the list. */
   liveKeys(): Set<string> {
     return new Set([...this.packages.keys(), ...this.items.keys()]);

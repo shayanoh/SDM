@@ -1,7 +1,9 @@
 <script lang="ts">
   import { useStore, useUi } from "../lib/context";
-  import { completedView } from "../lib/views";
+  import { completedView, selectedItemIds } from "../lib/views";
   import Banner from "./Banner.svelte";
+  import DetailsPanel from "./DetailsPanel.svelte";
+  import PanelHandle from "./PanelHandle.svelte";
   import ContextMenu from "./ContextMenu.svelte";
   import BottomBar from "./BottomBar.svelte";
   import PackageList from "./PackageList.svelte";
@@ -20,6 +22,8 @@
   const downloads = $derived({ packages: store.order });
   const completed = $derived(completedView(store.order, store.items));
   const onDownloads = $derived(ui.tab === "downloads");
+  const view = $derived(onDownloads ? downloads : completed);
+  const shownIds = $derived(selectedItemIds(ui.selected, view));
 
   function dragDivider(event: PointerEvent) {
     const handle = event.currentTarget as HTMLElement;
@@ -64,6 +68,12 @@
         allowsReordering={onDownloads}
         showsLiveAggregates={onDownloads}
       />
+      {#if ui.panelVisible}
+        <div class="panel" style:height="{ui.panelHeight}px">
+          <DetailsPanel itemIds={shownIds} />
+          <PanelHandle />
+        </div>
+      {/if}
       <BottomBar
         view={onDownloads ? downloads : completed}
         showsPauseResume={onDownloads}
@@ -95,6 +105,11 @@
     content: "";
     position: absolute;
     inset: 0 -3px;
+  }
+  .panel {
+    position: relative;
+    flex: none;
+    border-top: 1px solid var(--border);
   }
   .detail {
     display: flex;
