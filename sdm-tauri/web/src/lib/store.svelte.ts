@@ -1,12 +1,14 @@
 import { SvelteMap } from "svelte/reactivity";
 import type {
   EngineStats,
+  GrabberView,
   ItemFigures,
   ItemStateDto,
   Patch,
   PackageFigures,
   StructureItem,
 } from "../bindings";
+import { EMPTY_VIEW } from "./grabberRows";
 import { averageRecentSpeed } from "./rowText";
 
 /** The wire turns a non-finite `f64` into `null`; the UI reads that as zero. */
@@ -120,6 +122,8 @@ export class DownloadStore {
   packages = new SvelteMap<string, PackageModel>();
   order = $state.raw<PackageOrder[]>([]);
   stats = $state.raw<EngineStats | null>(null);
+  /** The link grabber, replaced whole by every patch that carries it. */
+  grabber = $state.raw<GrabberView>(EMPTY_VIEW);
 
   /** Called after every structure change, so owners can drop what no longer exists. */
   onStructure: (() => void) | undefined;
@@ -152,6 +156,7 @@ export class DownloadStore {
     for (const f of patch.items) this.items.get(f.id)?.applyFigures(f);
     for (const f of patch.packages) this.packages.get(f.id)?.applyFigures(f);
     if (patch.stats) this.stats = patch.stats;
+    if (patch.grabber) this.grabber = patch.grabber;
     for (const h of patch.histories) {
       const model = this.items.get(h.id);
       if (model) model.detailHistory = nums(h.speedHistory);

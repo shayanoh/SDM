@@ -13,12 +13,16 @@ import { wireSelectionPruning } from "./lib/wiring";
 // Playwright) an in-memory mock does.
 const bridge: Bridge =
   "__TAURI_INTERNALS__" in window ? new TauriBridge() : mockFromQuery();
-/** `?vibrancy=on` fakes a window effect; `?simulate=500:50` loads that many items, that many at once. */
+/** `?grabber=demo` pre-loads the link grabber (`&ffmpeg=off` for a machine without it); `?vibrancy=on` fakes a window effect; `?simulate=500:50` loads that many items, that many at once. */
 function mockFromQuery(): Bridge {
   const query = new URLSearchParams(location.search);
   const [items, active] = (query.get("simulate") ?? "").split(":").map(Number);
   return new MockBridge({
     vibrancy: query.get("vibrancy") === "on",
+    grabber: {
+      ...(query.get("grabber") ? { text: query.get("grabber")! } : {}),
+      ffmpeg: query.get("ffmpeg") !== "off",
+    },
     ...(items > 0 && active > 0
       ? { seed: loadSeed(items), maxRunning: active }
       : {}),

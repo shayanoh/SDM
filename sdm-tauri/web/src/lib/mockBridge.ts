@@ -9,8 +9,11 @@ import type {
   Patch,
   SettingsDto,
   Structure,
+  GrabberView,
+  HandoffTarget,
 } from "../bindings";
 import { BridgeError, type Bridge } from "./bridge";
+import { DEMO_TEXT, MockGrabber } from "./mockGrabber";
 
 const TICK_MS = 200;
 /** Samples an item's row sparkline gets (matches the engine's trailing window). */
@@ -46,6 +49,8 @@ export interface MockOptions {
   maxRunning?: number;
   /** Pretend the window has a Mica/Acrylic backdrop (`?vibrancy=on` in the browser). */
   vibrancy?: boolean;
+  /** Link-grabber options: pre-load links, and whether ffmpeg counts as installed. */
+  grabber?: { text?: string; ffmpeg?: boolean };
 }
 
 /** The five packages the SwiftUI reference screenshots were taken with. */
@@ -420,10 +425,20 @@ export class MockBridge implements Bridge {
   #detail = new Map<string, Set<string>>();
   #vibrancy: boolean;
   #maxRunning: number;
+  #grabber: MockGrabber;
+  #lastGrabber = "";
 
   constructor(options: MockOptions = {}) {
     this.#vibrancy = options.vibrancy ?? false;
     this.#maxRunning = options.maxRunning ?? MAX_RUNNING;
+    this.#grabber = new MockGrabber(
+      (name, _note, items, start) => this.#addPackage(name, items, start),
+      options.grabber?.ffmpeg ?? true,
+    );
+    if (options.grabber?.text !== undefined)
+      this.#grabber.ingestText(
+        options.grabber.text === "demo" ? DEMO_TEXT : options.grabber.text,
+      );
     for (const seed of options.seed ?? REFERENCE_SEED) {
       this.#packages.push({
         id: newId(),
@@ -456,6 +471,34 @@ export class MockBridge implements Bridge {
         : // Whether it runs is the scheduler's call (three at a time).
           { kind: seed.state === "running" ? "queued" : seed.state };
     return item;
+  }
+
+  /** The grabber hands a package over: its items join the list as queued or stopped. */
+  #addPackage(
+    name: string,
+    items: { url: string; filename: string; size: number | null }[],
+    start: boolean,
+  ) {
+    this.#packages.push({
+      id: newId(),
+      name,
+      items: items.map((handed) => {
+        const item = this.#fromSeed({
+          name: handed.filename,
+          size: handed.size ?? 200 * MB,
+          state: start ? "queued" : "stopped",
+        });
+        item.url = handed.url;
+        return item;
+      }),
+    });
+    this.#schedule();
+  }
+
+  /** Publishes the grabber (or any other change) and refreshes the knowledge of known downloads. */
+  #afterGrabber() {
+    this.#grabber.setKnownUrls(this.#allItems().map((item) => item.url));
+    this.#emit(false, true);
   }
 
   // MARK: Bridge
@@ -793,6 +836,7 @@ export class MockBridge implements Bridge {
     this.#globalHistory = [...this.#globalHistory, globalSpeed].slice(
       -FULL_HISTORY,
     );
+    this.#grabber.tick();
     if (structural) this.#schedule();
     this.#emit(false, structural);
   }
@@ -890,6 +934,73 @@ export class MockBridge implements Bridge {
     };
   }
 
+  // MARK: Link grabber
+
+  async grabberIngestText(text: string) {
+    this.#grabber.ingestText(text);
+    this.#afterGrabber();
+  }
+  async grabberRemoveLinks(ids: string[]) {
+    this.#grabber.removeLinks(ids);
+    this.#afterGrabber();
+  }
+  async grabberRemovePackage(id: string) {
+    this.#grabber.removePackage(id);
+    this.#afterGrabber();
+  }
+  async grabberClear() {
+    this.#grabber.clear();
+    this.#afterGrabber();
+  }
+  async grabberMoveLink(id: string, packageId: string) {
+    this.#grabber.moveLink(id, packageId);
+    this.#afterGrabber();
+  }
+  async grabberRenamePackage(id: string, name: string) {
+    this.#grabber.renamePackage(id, name);
+    this.#afterGrabber();
+  }
+  async grabberMergePackages(source: string, destination: string) {
+    this.#grabber.mergePackages(source, destination);
+    this.#afterGrabber();
+  }
+  async grabberSplitPackage(id: string) {
+    this.#grabber.splitPackage(id);
+    this.#afterGrabber();
+  }
+  async grabberRecheck(ids: string[]) {
+    this.#grabber.recheck(ids);
+    this.#afterGrabber();
+  }
+  async grabberRecheckFailed() {
+    this.#grabber.recheckFailed();
+    this.#afterGrabber();
+  }
+  async grabberCancelChecks() {
+    this.#grabber.cancelChecks();
+    this.#afterGrabber();
+  }
+  async grabberSetFormat(id: string, optionId: string) {
+    this.#grabber.setFormat(id, optionId);
+    this.#afterGrabber();
+  }
+  async grabberCopyUrl(id: string) {
+    return this.#grabber.copyUrl(id);
+  }
+  async grabberAddToDownloads(target: HandoffTarget, start: boolean) {
+    this.#grabber.addToDownloads(target, start);
+    this.#afterGrabber();
+  }
+
+  #grabberIfChanged(full: boolean): GrabberView | null {
+    this.#grabber.setKnownUrls(this.#allItems().map((item) => item.url));
+    const view = this.#grabber.view();
+    const text = JSON.stringify(view);
+    if (!full && text === this.#lastGrabber) return null;
+    this.#lastGrabber = text;
+    return view;
+  }
+
   #emit(full: boolean, structural = false) {
     if (!this.#listener) return;
     this.#seq = (this.#seq + 1) >>> 0;
@@ -905,6 +1016,7 @@ export class MockBridge implements Bridge {
       histories: all
         .filter((item) => open.has(item.id))
         .map((item) => ({ id: item.id, speedHistory: item.history })),
+      grabber: this.#grabberIfChanged(full),
     });
   }
 }

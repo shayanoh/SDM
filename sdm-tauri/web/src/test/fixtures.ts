@@ -70,6 +70,7 @@ export const patch = (seq: number, over: Partial<Patch> = {}): Patch => ({
   packages: [],
   stats: null,
   histories: [],
+  grabber: null,
   ...over,
 });
 

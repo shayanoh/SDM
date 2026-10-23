@@ -1,3 +1,4 @@
+import { EMPTY_VIEW } from "./grabberRows";
 import { describe, expect, it, vi } from "vitest";
 import { DownloadStore } from "./store.svelte";
 import type { Patch } from "../bindings";
@@ -50,6 +51,7 @@ const patch = (seq: number, over: Partial<Patch> = {}): Patch => ({
   packages: [],
   stats: null,
   histories: [],
+  grabber: null,
   ...over,
 });
 const fullPatch = (seq: number, ids: string[]): Patch =>
@@ -204,5 +206,25 @@ describe("DownloadStore", () => {
     const pkg = store.packages.get("p1")!;
     expect(pkg.etaSeconds).toBe(0);
     expect(pkg.totalBytes).toBe(0);
+  });
+});
+
+describe("the link grabber view", () => {
+  const view = { ...EMPTY_VIEW, totalCount: 3 };
+
+  it("starts empty and is replaced whole by a patch that carries it", () => {
+    const store = new DownloadStore(() => {});
+    expect(store.grabber).toEqual(EMPTY_VIEW);
+    store.apply(patch(1, { full: true, grabber: view }));
+    expect(store.grabber.totalCount).toBe(3);
+  });
+
+  it("keeps the last view when a patch carries none", () => {
+    const store = new DownloadStore(() => {});
+    store.apply(patch(1, { full: true, grabber: view }));
+    store.apply(patch(2));
+    expect(store.grabber.totalCount).toBe(3);
+    store.apply(patch(3, { grabber: { ...view, totalCount: 5 } }));
+    expect(store.grabber.totalCount).toBe(5);
   });
 });
