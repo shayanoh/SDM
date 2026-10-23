@@ -26,8 +26,8 @@ pub use cookie_source::CookieSource;
 pub use format_selector::FormatSelector;
 pub use managed_binaries::{BinariesChangedFuture, ManagedBinaries, ManagedBinariesError};
 pub use managed_binaries_types::{
-    BinariesManifest, CheckOutcome, CheckReason, ManagedBinariesStatus, VendorAsset, YtDlpChannel,
-    YtDlpVersion, yt_dlp_asset_name,
+    BinariesManifest, CheckOutcome, CheckReason, ManagedBinariesStatus, ToolsActivity, VendorAsset,
+    YtDlpChannel, YtDlpVersion, yt_dlp_asset_name,
 };
 pub use platform_tools::{ArchiveKind, PlatformTool, ToolMember, platform_tools};
 pub use process_runner::{ProcessOutput, ProcessRunError, ProcessRunner};

@@ -19,10 +19,12 @@ use crate::binary_fetching::{BinaryFetchError, BinaryFetching};
 use crate::binary_locator::is_executable_file;
 use crate::lzfse;
 use crate::managed_binaries_types::{
-    BinariesManifest, CheckOutcome, CheckReason, ManagedBinariesStatus, VendorAsset, YtDlpChannel,
-    YtDlpVersion, yt_dlp_asset_name,
+    BinariesManifest, CheckOutcome, CheckReason, ManagedBinariesStatus, ToolsActivity, VendorAsset,
+    YtDlpChannel, YtDlpVersion, yt_dlp_asset_name,
 };
+use crate::platform_tools::{PlatformTool, platform_tools};
 use crate::process_runner::ProcessRunner;
+use crate::tool_install::install_tool;
 
 /// The future `on_binaries_changed` returns (Swift's `async` closure).
 pub type BinariesChangedFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
@@ -56,6 +58,7 @@ struct Inner {
     channel: ChannelSource,
     on_binaries_changed: OnBinariesChanged,
     notify: Notify,
+    platform_tools: Vec<PlatformTool>,
     state: Mutex<State>,
 }
 
@@ -66,6 +69,7 @@ struct State {
     latest_known: Option<String>,
     /// The running check, if any; waiters coalesce onto its result.
     in_flight: Option<watch::Receiver<Option<CheckOutcome>>>,
+    tools_activity: ToolsActivity,
 }
 
 /// Twin of Swift `ManagedBinariesError`. `Display` is the case name because
@@ -117,6 +121,7 @@ impl ManagedBinaries {
                 channel: Arc::new(channel),
                 on_binaries_changed: Arc::new(|| Box::pin(async {})),
                 notify: Arc::new(|_| {}),
+                platform_tools: platform_tools(),
                 state: Mutex::new(State::default()),
             }),
         }
@@ -145,6 +150,19 @@ impl ManagedBinaries {
         apply(inner);
     }
 
+    /// Replaces the downloads the platform-tool step keeps installed (the
+    /// default is the pinned table for this OS). For tests.
+    /// Builder-style: call before the first use.
+    pub fn with_platform_tools(mut self, tools: Vec<PlatformTool>) -> Self {
+        self.configure(|inner| inner.platform_tools = tools);
+        self
+    }
+
+    /// What the platform-tool step is doing right now.
+    pub fn tools_activity(&self) -> ToolsActivity {
+        self.inner.state.lock().unwrap().tools_activity.clone()
+    }
+
     // MARK: - Bundled inflation
 
     /// Decode any bundled blob whose version differs from what the manifest
@@ -169,7 +187,12 @@ impl ManagedBinaries {
     /// elapsed and none is running. Called ~1 Hz by the app.
     pub async fn tick(&self) {
         let inner = &self.inner;
-        let present = is_executable_file(&inner.yt_dlp_path());
+        // A failed tool download retries on the short cadence too.
+        let tools_failed = matches!(
+            inner.state.lock().unwrap().tools_activity,
+            ToolsActivity::Failed(_)
+        );
+        let present = is_executable_file(&inner.yt_dlp_path()) && !tools_failed;
         let interval = if present {
             Self::PRESENT_INTERVAL
         } else {
@@ -290,7 +313,72 @@ impl Inner {
         }
     }
 
+    /// The yt-dlp check, then the platform tools (a yt-dlp failure must not
+    /// skip them, and a tool failure must not hide yt-dlp's outcome).
     async fn perform_check(&self, reason: CheckReason) -> CheckOutcome {
+        let outcome = self.perform_yt_dlp_check(reason).await;
+        self.ensure_platform_tools().await;
+        outcome
+    }
+
+    /// Downloads, verifies and installs each pinned tool that is missing or
+    /// at another version. A failure is recorded and retried by the next check.
+    async fn ensure_platform_tools(&self) {
+        let mut changed = false;
+        let mut failure: Option<String> = None;
+        for tool in &self.platform_tools {
+            let manifest = self.load_manifest();
+            let present = tool
+                .members
+                .iter()
+                .all(|m| is_executable_file(&self.bin_directory.join(&m.file_name)));
+            if present && manifest.version_for(&tool.name) == Some(tool.version.as_str()) {
+                continue;
+            }
+            self.state.lock().unwrap().tools_activity = ToolsActivity::Fetching(tool.name.clone());
+            match self.fetch_and_install(tool).await {
+                Ok(()) => {
+                    let mut manifest = self.load_manifest();
+                    match tool.name.as_str() {
+                        "ffmpeg" => manifest.ffmpeg_version = Some(tool.version.clone()),
+                        "qjs" => manifest.qjs_version = Some(tool.version.clone()),
+                        _ => {}
+                    }
+                    manifest.last_error = None;
+                    let _ = self.save_manifest(&manifest);
+                    changed = true;
+                }
+                Err(message) => {
+                    let message = format!("fetch {}: {message}", tool.name);
+                    let mut manifest = self.load_manifest();
+                    manifest.last_error = Some(message.clone());
+                    let _ = self.save_manifest(&manifest);
+                    failure = Some(message);
+                }
+            }
+        }
+        self.state.lock().unwrap().tools_activity = match failure {
+            Some(message) => ToolsActivity::Failed(message),
+            None => ToolsActivity::Idle,
+        };
+        if changed {
+            (self.on_binaries_changed)().await;
+        }
+    }
+
+    async fn fetch_and_install(&self, tool: &PlatformTool) -> Result<(), String> {
+        let url = url::Url::parse(&tool.url).map_err(|e| e.to_string())?;
+        let bytes = self.fetcher.data(&url).await.map_err(|e| e.to_string())?;
+        let tool = tool.clone();
+        let bin = self.bin_directory.clone();
+        // Hashing and unpacking a 190 MB archive must not block an async worker.
+        tokio::task::spawn_blocking(move || install_tool(&tool, &bytes, &bin))
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())
+    }
+
+    async fn perform_yt_dlp_check(&self, reason: CheckReason) -> CheckOutcome {
         let _ = reason; // Swift only logs it.
         let channel = (self.channel)();
         let mut manifest = self.load_manifest();

@@ -235,6 +235,18 @@ pub struct VendorAsset {
     pub version: String,
 }
 
+/// What the platform-tool step (ffmpeg, ffprobe, qjs on Windows and Linux)
+/// is doing, for a status line.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum ToolsActivity {
+    #[default]
+    Idle,
+    /// Downloading the named tool (`"ffmpeg"` or `"qjs"`).
+    Fetching(String),
+    /// The last attempt failed; retried by the next check.
+    Failed(String),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CheckReason {
     Launch,
