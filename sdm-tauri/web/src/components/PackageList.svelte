@@ -45,6 +45,23 @@
     new Map(view.packages.map((pkg) => [pkg.id, pkg.itemIds])),
   );
 
+  let scroller: HTMLDivElement | undefined = $state();
+
+  // Scrolls a row the keyboard moved to into view, using the row offsets (it may not be rendered).
+  $effect(() => {
+    const key = ui.reveal;
+    if (key === null || !scroller) return;
+    const at = rows.findIndex((row) => row.id === key);
+    if (at >= 0) {
+      const top = offsets[at];
+      const bottom = offsets[at + 1];
+      if (top < scroller.scrollTop) scroller.scrollTop = top;
+      else if (bottom > scroller.scrollTop + scroller.clientHeight)
+        scroller.scrollTop = bottom - scroller.clientHeight;
+    }
+    ui.reveal = null;
+  });
+
   // Shift-click and the keyboard walk the rows in display order.
   $effect(() => {
     ui.selection.setOrder(rows.map((row) => row.id));
@@ -57,6 +74,7 @@
   aria-multiselectable="true"
   aria-label={tab === "downloads" ? "Downloads" : "Completed"}
   data-reorderable={allowsReordering}
+  bind:this={scroller}
   bind:clientHeight={viewport}
   onscroll={(event) => (scrollTop = event.currentTarget.scrollTop)}
 >

@@ -7,6 +7,8 @@ export class SelectionModel {
   #order: string[] = [];
   #selected = new Set<string>();
   #anchor: string | null = null;
+  /** The row the keyboard moves from: the last one clicked or moved to. */
+  #cursor: string | null = null;
   #onChange: ((selected: ReadonlySet<string>) => void) | undefined;
 
   constructor(onChange?: (selected: ReadonlySet<string>) => void) {
@@ -25,6 +27,7 @@ export class SelectionModel {
   click(key: string) {
     this.#replace(new Set([key]));
     this.#anchor = key;
+    this.#cursor = key;
   }
 
   toggle(key: string) {
@@ -32,6 +35,7 @@ export class SelectionModel {
     if (!next.delete(key)) next.add(key);
     this.#replace(next);
     this.#anchor = key;
+    this.#cursor = key;
   }
 
   /** Selects the rows from the anchor to `key`, both included. */
@@ -44,6 +48,7 @@ export class SelectionModel {
     }
     const [low, high] = from <= to ? [from, to] : [to, from];
     this.#replace(new Set(this.#order.slice(low, high + 1)));
+    this.#cursor = key;
   }
 
   selectAll(keys: string[]) {
@@ -53,6 +58,7 @@ export class SelectionModel {
   clear() {
     this.#replace(new Set());
     this.#anchor = null;
+    this.#cursor = null;
   }
 
   /** Forgets keys that are no longer rows. */
@@ -60,6 +66,32 @@ export class SelectionModel {
     const kept = new Set([...this.#selected].filter((key) => live.has(key)));
     this.#replace(kept);
     if (this.#anchor !== null && !live.has(this.#anchor)) this.#anchor = null;
+    if (this.#cursor !== null && !live.has(this.#cursor)) this.#cursor = null;
+  }
+
+  /**
+   * Arrow-key movement: one row up or down from the cursor, stopping at the
+   * ends. With `extend` the selection grows from the anchor (shift). With
+   * nothing to move from it selects the first row (down) or the last (up).
+   * Returns the row moved to, or `null` when there are no rows.
+   */
+  move(delta: -1 | 1, extend: boolean): string | null {
+    if (this.#order.length === 0) return null;
+    const from = this.#cursor === null ? -1 : this.#order.indexOf(this.#cursor);
+    const target =
+      from < 0
+        ? delta > 0
+          ? 0
+          : this.#order.length - 1
+        : Math.min(this.#order.length - 1, Math.max(0, from + delta));
+    const key = this.#order[target];
+    if (extend && from >= 0) {
+      if (this.#anchor === null) this.#anchor = this.#order[from];
+      this.range(key);
+    } else {
+      this.click(key);
+    }
+    return key;
   }
 
   /**

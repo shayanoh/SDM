@@ -33,6 +33,8 @@ export class UiState {
   /** What a drag in progress carries, and the row it is over. */
   dragPayload = $state.raw<DragPayload | null>(null);
   dragTargetId = $state<string | null>(null);
+  /** A row the list should scroll into view (keyboard movement); the list clears it. */
+  reveal = $state<string | null>(null);
   collapsed = $state.raw<Record<ListTab, ReadonlySet<string>>>({
     downloads: new Set(),
     completed: new Set(),

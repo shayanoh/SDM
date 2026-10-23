@@ -1,6 +1,9 @@
 <script lang="ts">
-  import { useStore, useUi } from "../lib/context";
-  import { completedView, selectedItemIds } from "../lib/views";
+  import { useBridge, useStore, useUi } from "../lib/context";
+  import { runMenu } from "../lib/actions";
+  import { detectPlatform } from "../lib/platform";
+  import { handleKey } from "../lib/shortcuts";
+  import { completedView, itemOrder, selectedItemIds } from "../lib/views";
   import Banner from "./Banner.svelte";
   import DetailsPanel from "./DetailsPanel.svelte";
   import PanelHandle from "./PanelHandle.svelte";
@@ -15,8 +18,10 @@
   const MIN_SIDEBAR = 200;
   const MAX_SIDEBAR = 360;
 
+  const bridge = useBridge();
   const store = useStore();
   const ui = useUi();
+  const platform = detectPlatform();
 
   let sidebarWidth = $state(220);
 
@@ -25,6 +30,41 @@
   const onDownloads = $derived(ui.tab === "downloads");
   const view = $derived(onDownloads ? downloads : completed);
   const shownIds = $derived(selectedItemIds(ui.selected, view));
+
+  function editable(element: Element | null): boolean {
+    if (!(element instanceof HTMLElement)) return false;
+    return (
+      element.isContentEditable ||
+      ["INPUT", "TEXTAREA", "SELECT"].includes(element.tagName)
+    );
+  }
+
+  function onKeyDown(event: KeyboardEvent) {
+    // The shortcuts belong to the two list tabs.
+    if (ui.tab === "linkgrabber") return;
+    handleKey(event, {
+      platform,
+      modalOpen: ui.modal !== null,
+      menuOpen: ui.menu !== null,
+      focusInEditable:
+        editable(event.target as Element | null) ||
+        editable(document.activeElement),
+      run: (id) =>
+        void runMenu(id, {
+          ids: shownIds,
+          items: store.items,
+          bridge,
+          ui,
+          clipboard: navigator.clipboard,
+        }),
+      selectAll: () => ui.selection.selectAll(itemOrder(view)),
+      moveSelection: (delta, extend) => {
+        const moved = ui.selection.move(delta, extend);
+        if (moved !== null) ui.reveal = moved;
+      },
+      closeMenu: () => (ui.menu = null),
+    });
+  }
 
   function dragDivider(event: PointerEvent) {
     const handle = event.currentTarget as HTMLElement;
@@ -47,6 +87,8 @@
     handle.addEventListener("pointercancel", stop);
   }
 </script>
+
+<svelte:window onkeydown={onKeyDown} />
 
 <div class="window" style:--sidebar-width="{sidebarWidth}px">
   <aside class="side"><Sidebar /></aside>

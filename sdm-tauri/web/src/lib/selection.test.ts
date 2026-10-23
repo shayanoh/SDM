@@ -89,3 +89,46 @@ describe("SelectionModel", () => {
     expect(keys(s)).toEqual([]);
   });
 });
+
+describe("SelectionModel keyboard movement", () => {
+  it("starts at the first row going down and the last row going up", () => {
+    const down = model();
+    down.move(1, false);
+    expect(keys(down)).toEqual(["p1"]);
+    const up = model();
+    up.move(-1, false);
+    expect(keys(up)).toEqual(["d"]);
+  });
+
+  it("moves the single selection one row, stopping at the ends", () => {
+    const s = model();
+    s.click("a");
+    s.move(1, false);
+    expect(keys(s)).toEqual(["b"]);
+    s.move(-1, false);
+    s.move(-1, false);
+    s.move(-1, false);
+    expect(keys(s)).toEqual(["p1"]);
+    s.click("d");
+    s.move(1, false);
+    expect(keys(s)).toEqual(["d"]);
+  });
+
+  it("extends from the anchor with shift", () => {
+    const s = model();
+    s.click("b");
+    s.move(1, true);
+    s.move(1, true);
+    expect(keys(s)).toEqual(["b", "c", "p2"]);
+    s.move(-1, true);
+    expect(keys(s)).toEqual(["b", "p2"]);
+  });
+
+  it("reports the row it moved to", () => {
+    const s = model();
+    s.click("a");
+    expect(s.move(1, false)).toBe("b");
+    const empty = new SelectionModel();
+    expect(empty.move(1, false)).toBeNull();
+  });
+});
