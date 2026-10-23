@@ -7,6 +7,7 @@ mod format_selector;
 pub mod lzfse;
 mod managed_binaries;
 mod managed_binaries_types;
+mod platform_tools;
 mod process_runner;
 mod site_registry;
 mod system_process_runner;
@@ -27,6 +28,7 @@ pub use managed_binaries_types::{
     BinariesManifest, CheckOutcome, CheckReason, ManagedBinariesStatus, VendorAsset, YtDlpChannel,
     YtDlpVersion, yt_dlp_asset_name,
 };
+pub use platform_tools::{ArchiveKind, PlatformTool, ToolMember, platform_tools};
 pub use process_runner::{ProcessOutput, ProcessRunError, ProcessRunner};
 pub use site_registry::{HostMatch, SitePattern, SiteRegistry};
 pub use system_process_runner::SystemProcessRunner;
