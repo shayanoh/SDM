@@ -62,7 +62,7 @@
 >
   <div class="inner" style:height="{offsets[offsets.length - 1] ?? 0}px">
     {#each visible as { row, index } (row.kind + row.id)}
-      <RowSlot {row} top={offsets[index]}>
+      <RowSlot {row} top={offsets[index]} {view} reorderable={allowsReordering}>
         {#if row.kind === "package"}
           {@const pkg = store.packages.get(row.id)}
           {#if pkg}

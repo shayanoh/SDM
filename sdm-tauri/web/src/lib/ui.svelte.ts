@@ -1,4 +1,5 @@
 import type { DeletionInfo, DeletionTarget } from "../bindings";
+import type { DragPayload } from "./dnd";
 import { SelectionModel } from "./selection";
 
 export type Tab = "downloads" | "completed" | "linkgrabber";
@@ -29,6 +30,9 @@ export class UiState {
   panelHeight = $state(150);
   modal = $state.raw<ModalState | null>(null);
   menu = $state.raw<MenuState | null>(null);
+  /** What a drag in progress carries, and the row it is over. */
+  dragPayload = $state.raw<DragPayload | null>(null);
+  dragTargetId = $state<string | null>(null);
   collapsed = $state.raw<Record<ListTab, ReadonlySet<string>>>({
     downloads: new Set(),
     completed: new Set(),
