@@ -5,6 +5,7 @@
 pub mod app;
 pub mod deletion;
 pub mod error;
+pub mod grabber;
 pub mod host;
 pub mod notify;
 pub mod protocol;

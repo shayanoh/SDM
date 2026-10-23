@@ -131,6 +131,7 @@ pub fn simulated_dependencies(_host: &dyn Host, _items: usize, _active: usize) -
         wholesale_downloader: None,
         retry_policy: RetryPolicy::new(),
         binaries: None,
+        grabber: None,
     }
 }
 

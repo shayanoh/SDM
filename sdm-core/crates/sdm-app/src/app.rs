@@ -12,11 +12,12 @@ use sdm_engine::{
     DownloadEngine, EngineSettings, EngineSnapshot, HttpTransport, Muxer, RetryPolicy, StateStore,
     Trash,
 };
-use sdm_resolve::ManagedBinaries;
+use sdm_resolve::{ManagedBinaries, ToolsActivity};
 use uuid::Uuid;
 
 use crate::differ::{Delta, Differ};
 use crate::error::AppError;
+use crate::grabber::GrabberController;
 use crate::host::{Host, PatchSink};
 use crate::notify::notifications_between;
 use crate::protocol::*;
@@ -35,6 +36,8 @@ pub struct Dependencies {
     pub wholesale_downloader: Option<Arc<dyn WholesaleDownloader>>,
     pub retry_policy: RetryPolicy,
     pub binaries: Option<ManagedBinaries>,
+    /// The link grabber; `None` leaves every `grabber_*` action an error.
+    pub grabber: Option<Arc<GrabberController>>,
 }
 
 /// How many downloads, segments and connections the engine may use at once.
@@ -80,6 +83,7 @@ pub struct App {
     host: Arc<dyn Host>,
     settings: Mutex<SettingsStore>,
     binaries: Option<ManagedBinaries>,
+    grabber: Option<Arc<GrabberController>>,
     limits: Limits,
     state: Mutex<PublishState>,
 }
@@ -169,6 +173,7 @@ impl App {
             host,
             settings: Mutex::new(settings),
             binaries: dependencies.binaries,
+            grabber: dependencies.grabber,
             limits,
             state: Mutex::new(PublishState {
                 seq: 0,
@@ -208,13 +213,18 @@ impl App {
     /// `AppTiming::TICKS_PER_SECOND` times a second; tests call it directly.
     pub async fn tick(&self) -> Result<(), AppError> {
         self.engine.tick().await;
-        let run_binaries_tick = {
+        let (run_binaries_tick, run_prune) = {
             let mut state = lock(&self.state);
             state.ticks += 1;
-            state
-                .ticks
-                .is_multiple_of(AppTiming::TICKS_PER_SECOND as u64)
+            let per_second = AppTiming::TICKS_PER_SECOND as u64;
+            (
+                state.ticks.is_multiple_of(per_second),
+                state.ticks.is_multiple_of(per_second * 60),
+            )
         };
+        if run_prune && let Some(grabber) = &self.grabber {
+            grabber.prune();
+        }
         if run_binaries_tick && let Some(binaries) = &self.binaries {
             binaries.tick().await;
         }
@@ -294,6 +304,8 @@ impl App {
             self.engine.speed_histories(&histories_wanted).await
         };
 
+        let tools = self.tools_notice();
+        let mut known_urls = None;
         let mut due = Vec::new();
         {
             let mut state = lock(&self.state);
@@ -311,6 +323,16 @@ impl App {
                         due = notifications_between(previous, &snapshot);
                     }
                     state.last_generation = Some(snapshot.generation);
+                    if self.grabber.is_some() {
+                        known_urls = Some(
+                            snapshot
+                                .packages
+                                .iter()
+                                .flat_map(|package| package.items.iter())
+                                .map(|item| item.url.clone())
+                                .collect::<HashSet<_>>(),
+                        );
+                    }
                     if emit_allowed {
                         if wants_full {
                             delta = Some(state.differ.full(&snapshot));
@@ -326,6 +348,14 @@ impl App {
                 }
             }
 
+            let grabber_view = match &self.grabber {
+                Some(grabber) if emit_allowed => grabber.changed_view(tools, wants_full),
+                Some(grabber) => {
+                    grabber.invalidate();
+                    None
+                }
+                None => None,
+            };
             if emit_allowed {
                 let history_items: Vec<ItemHistory> = histories
                     .into_iter()
@@ -334,7 +364,7 @@ impl App {
                         speed_history,
                     })
                     .collect();
-                if delta.is_some() || !history_items.is_empty() {
+                if delta.is_some() || !history_items.is_empty() || grabber_view.is_some() {
                     let delta = delta.unwrap_or(Delta {
                         structure: None,
                         items: Vec::new(),
@@ -350,7 +380,7 @@ impl App {
                         packages: delta.packages,
                         stats: delta.stats,
                         histories: history_items,
-                        grabber: None,
+                        grabber: grabber_view,
                     };
                     let sent = match &state.sink {
                         Some(sink) => sink.send(patch).is_ok(),
@@ -369,6 +399,9 @@ impl App {
                     }
                 }
             }
+        }
+        if let (Some(grabber), Some(urls)) = (&self.grabber, known_urls) {
+            grabber.set_known_download_urls(urls);
         }
         for notification in due {
             if let Err(error) = self.host.notify(notification) {
@@ -780,6 +813,126 @@ impl App {
     /// Stops everything and writes durable state. Call when the app quits.
     pub async fn shutdown(&self) {
         self.engine.shutdown().await;
+    }
+
+    // MARK: Link grabber
+
+    fn grabber(&self) -> Result<&Arc<GrabberController>, AppError> {
+        self.grabber
+            .as_ref()
+            .ok_or_else(|| AppError::failed("the link grabber is not available"))
+    }
+
+    /// The line under the grabber header about downloading `ffmpeg`/`qjs`.
+    fn tools_notice(&self) -> Option<ToolsNotice> {
+        match self.binaries.as_ref()?.tools_activity() {
+            ToolsActivity::Idle => None,
+            ToolsActivity::Fetching(name) => Some(ToolsNotice {
+                text: format!("Fetching {name}…"),
+                is_error: false,
+            }),
+            ToolsActivity::Failed(message) => Some(ToolsNotice {
+                text: format!("Could not {message}"),
+                is_error: true,
+            }),
+        }
+    }
+
+    /// Extracts the links in `text`, probes them, and publishes as they land.
+    pub async fn grabber_ingest_text(&self, text: &str) -> Result<(), AppError> {
+        let grabber = self.grabber()?;
+        if let Some(binaries) = self.binaries.clone() {
+            // A new batch is a reason to look for missing tools now, not at
+            // the next timer; never waited for.
+            tokio::spawn(async move {
+                binaries
+                    .check_now(sdm_resolve::CheckReason::ResolveNeeded)
+                    .await;
+            });
+        }
+        grabber.session.ingest_text(text).await;
+        self.publish(false).await
+    }
+
+    pub async fn grabber_remove_links(&self, ids: &[String]) -> Result<(), AppError> {
+        let grabber = self.grabber()?;
+        let ids = parse_ids(ids)?;
+        for id in &ids {
+            grabber.session.remove_link(*id);
+        }
+        self.publish(false).await
+    }
+
+    pub async fn grabber_remove_package(&self, id: &str) -> Result<(), AppError> {
+        let grabber = self.grabber()?;
+        grabber.session.remove_package(parse_id(id)?);
+        self.publish(false).await
+    }
+
+    pub async fn grabber_clear(&self) -> Result<(), AppError> {
+        let grabber = self.grabber()?;
+        grabber.session.clear();
+        grabber.set_held_back(None);
+        self.publish(false).await
+    }
+
+    pub async fn grabber_move_link(&self, id: &str, package_id: &str) -> Result<(), AppError> {
+        let grabber = self.grabber()?;
+        grabber
+            .session
+            .move_link(parse_id(id)?, parse_id(package_id)?);
+        self.publish(false).await
+    }
+
+    pub async fn grabber_rename_package(&self, id: &str, name: &str) -> Result<(), AppError> {
+        let grabber = self.grabber()?;
+        let id = parse_id(id)?;
+        if name.trim().is_empty() {
+            return Err(AppError::invalid("name", "the name is empty"));
+        }
+        grabber.session.rename_package(id, name.trim());
+        self.publish(false).await
+    }
+
+    pub async fn grabber_merge_packages(
+        &self,
+        source: &str,
+        destination: &str,
+    ) -> Result<(), AppError> {
+        let grabber = self.grabber()?;
+        grabber
+            .session
+            .merge_packages(parse_id(source)?, parse_id(destination)?);
+        self.publish(false).await
+    }
+
+    pub async fn grabber_split_package(&self, id: &str) -> Result<(), AppError> {
+        let grabber = self.grabber()?;
+        grabber.session.split_package(parse_id(id)?);
+        self.publish(false).await
+    }
+
+    /// Re-probes exactly these rows, whatever their verdict.
+    pub async fn grabber_recheck(&self, ids: &[String]) -> Result<(), AppError> {
+        let grabber = self.grabber()?;
+        let ids: HashSet<Uuid> = parse_ids(ids)?.into_iter().collect();
+        if ids.is_empty() {
+            return Ok(());
+        }
+        grabber.session.recheck(&ids).await;
+        self.publish(false).await
+    }
+
+    pub async fn grabber_recheck_failed(&self) -> Result<(), AppError> {
+        let grabber = self.grabber()?;
+        grabber.session.recheck_failed().await;
+        self.publish(false).await
+    }
+
+    pub async fn grabber_cancel_checks(&self) -> Result<(), AppError> {
+        let grabber = self.grabber()?;
+        grabber.session.cancel_checks();
+        self.publish(false).await
     }
 
     /// The managed-binaries provisioning step for launch: inflate bundled

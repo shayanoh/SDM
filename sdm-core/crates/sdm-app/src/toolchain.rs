@@ -4,6 +4,8 @@
 
 use std::sync::Arc;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use sdm_core::{LinkResolver, WholesaleDownloader};
 use sdm_engine::{FfmpegMuxer, JsonStateStore, Muxer, ReqwestTransport, RetryPolicy, SystemTrash};
 use sdm_resolve::{
@@ -13,6 +15,7 @@ use sdm_resolve::{
 
 use crate::app::{App, Dependencies};
 use crate::error::AppError;
+use crate::grabber::GrabberController;
 use crate::host::Host;
 
 const DEFAULT_MAX_PLAYLIST_VIDEOS: usize = 50;
@@ -44,8 +47,18 @@ pub fn production_dependencies(host: &dyn Host) -> Dependencies {
         Arc::new(FfmpegMuxer::new(Arc::clone(&runner), Arc::clone(&locator)));
 
     // No bundled blobs here: on macOS the SwiftUI app's bundle holds them and
-    // shares this `bin/` directory; Windows and Linux download (Task 16).
+    // shares this `bin/` directory; Windows and Linux download the pinned tools.
     let invalidate = Arc::clone(&locator);
+    // Whether `ffmpeg` is on disk, which the grabber needs to offer muxed
+    // formats; refreshed whenever the managed binaries change.
+    let ffmpeg_name = if cfg!(windows) {
+        "ffmpeg.exe"
+    } else {
+        "ffmpeg"
+    };
+    let ffmpeg_path = bin_directory.join(ffmpeg_name);
+    let ffmpeg_available = Arc::new(AtomicBool::new(is_executable_file(&ffmpeg_path)));
+    let flag = Arc::clone(&ffmpeg_available);
     let binaries = ManagedBinaries::new(
         bin_directory,
         Arc::new(ReqwestBinaryFetcher::new()),
@@ -55,8 +68,15 @@ pub fn production_dependencies(host: &dyn Host) -> Dependencies {
     )
     .with_on_binaries_changed(move || {
         let locator = Arc::clone(&invalidate);
-        Box::pin(async move { locator.invalidate() })
+        let flag = Arc::clone(&flag);
+        let ffmpeg_path = ffmpeg_path.clone();
+        Box::pin(async move {
+            locator.invalidate();
+            flag.store(is_executable_file(&ffmpeg_path), Ordering::SeqCst);
+        })
     });
+
+    let grabber = GrabberController::production(Some(Arc::clone(&resolver)), ffmpeg_available);
 
     Dependencies {
         transport: Arc::new(ReqwestTransport::new()),
@@ -67,6 +87,7 @@ pub fn production_dependencies(host: &dyn Host) -> Dependencies {
         wholesale_downloader: Some(wholesale),
         retry_policy: RetryPolicy::new(),
         binaries: Some(binaries),
+        grabber: Some(grabber),
     }
 }
 
@@ -74,5 +95,24 @@ impl App {
     pub fn production(host: Arc<dyn Host>) -> Result<Arc<App>, AppError> {
         let dependencies = production_dependencies(host.as_ref());
         App::new(host, dependencies)
+    }
+}
+
+/// A file the current user may run (the check `ffmpeg` availability needs).
+fn is_executable_file(path: &std::path::Path) -> bool {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
     }
 }
