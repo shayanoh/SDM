@@ -7,6 +7,7 @@ mod engine_snapshot;
 mod fake_origin;
 mod http_transport;
 mod muxer;
+mod platform_io;
 mod reqwest_transport;
 mod resume_sidecar;
 mod retry_policy;

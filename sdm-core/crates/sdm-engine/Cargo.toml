@@ -8,7 +8,6 @@ publish.workspace = true
 async-trait = "0.1.92"
 bytes = "1.12.1"
 futures = "0.3.34"
-libc = "0.2.190"
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "http2", "system-proxy", "stream", "cookies"] }
 sdm-core = { version = "0.1.0", path = "../sdm-core" }
 sdm-resolve = { version = "0.1.0", path = "../sdm-resolve" }
@@ -38,3 +37,6 @@ tokio = { version = "1.53.2", features = ["io-util", "net", "rt-multi-thread", "
 [features]
 # Routes `engine_log!` to `tracing::debug!`. Mirrors Swift's `SDM_ENGINE_LOGGING`.
 engine-logging = []
+
+[target."cfg(unix)".dependencies]
+libc = "0.2.191"
