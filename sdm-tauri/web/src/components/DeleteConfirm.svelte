@@ -48,7 +48,7 @@
         <p class="sub">No files will be moved to the {bin}</p>
       {:else}
         <p class="sub">
-          {count} file{count === 1 ? "" : "s"} · {formatBytes(info.totalBytes)} will
+          {count} file{count === 1 ? "" : "s"} · {formatBytes(info.totalBytes ?? 0)} will
           be moved to the {bin}.
         </p>
       {/if}
