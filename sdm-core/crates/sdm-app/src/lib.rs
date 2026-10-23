@@ -3,6 +3,7 @@
 //! when a notification is due. No clock and no UI framework in here.
 
 pub mod app;
+pub mod deletion;
 pub mod error;
 pub mod host;
 pub mod notify;

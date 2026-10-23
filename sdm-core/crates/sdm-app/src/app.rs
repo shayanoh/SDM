@@ -551,6 +551,64 @@ impl App {
         self.publish(false).await
     }
 
+    /// The files a deletion would trash, from the current snapshot and disk.
+    pub async fn describe_deletion(
+        &self,
+        target: &DeletionTarget,
+    ) -> Result<DeletionInfo, AppError> {
+        enum Wanted {
+            Items(HashSet<Uuid>),
+            Package(Uuid),
+        }
+        let wanted = match target {
+            DeletionTarget::Items { ids } => Wanted::Items(parse_ids(ids)?.into_iter().collect()),
+            DeletionTarget::Package { id } => Wanted::Package(parse_id(id)?),
+        };
+        let snapshot = self.engine.snapshot().await;
+        let download_folder = lock(&self.settings).download_folder();
+
+        let mut total = 0.0;
+        let mut names: Vec<String> = Vec::new();
+        let mut found_package = false;
+        for package in &snapshot.packages {
+            let chosen: Vec<(String, Vec<String>)> = package
+                .items
+                .iter()
+                .filter(|item| match &wanted {
+                    Wanted::Items(ids) => ids.contains(&item.id),
+                    Wanted::Package(id) => *id == package.id,
+                })
+                .map(|item| (item.filename.clone(), item.part_filenames.clone()))
+                .collect();
+            found_package |= matches!(&wanted, Wanted::Package(id) if *id == package.id);
+            if chosen.is_empty() {
+                continue;
+            }
+            let (bytes, found) =
+                crate::deletion::describe(&download_folder.join(&package.name), &chosen);
+            total += bytes;
+            names.extend(found);
+        }
+        names.sort();
+        if matches!(wanted, Wanted::Package(_)) && !found_package {
+            return Ok(DeletionInfo {
+                title: "Delete Package From Disk?".to_owned(),
+                total_bytes: 0.0,
+                names: Vec::new(),
+            });
+        }
+        let title = if names.is_empty() {
+            "Remove From List?"
+        } else {
+            "Remove From List And Delete Files?"
+        };
+        Ok(DeletionInfo {
+            title: title.to_owned(),
+            total_bytes: total,
+            names,
+        })
+    }
+
     /// Publishes once after a batch; an empty batch changed nothing.
     async fn publish_if_any(&self, ids: &[Uuid]) -> Result<(), AppError> {
         if ids.is_empty() {

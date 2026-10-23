@@ -148,3 +148,20 @@ pub struct BinariesStatusDto {
     pub qjs_version: Option<String>,
     pub last_error: Option<String>,
 }
+
+/// What a "Remove and Delete" confirmation is about.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum DeletionTarget {
+    Items { ids: Vec<String> },
+    Package { id: String },
+}
+
+/// The files a deletion would trash, for the confirmation sheet.
+#[derive(Debug, Clone, PartialEq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct DeletionInfo {
+    pub title: String,
+    pub total_bytes: f64,
+    pub names: Vec<String>,
+}
