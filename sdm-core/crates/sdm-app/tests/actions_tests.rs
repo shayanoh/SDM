@@ -350,3 +350,98 @@ async fn organize_actions_reject_bad_ids() {
     assert!(h.app.reorder_items(&ids, "nope").await.is_err());
     assert!(h.app.reorder_packages(&["nope".to_owned()]).await.is_err());
 }
+
+/// A completed 3000-byte download named `name`; returns its item id.
+async fn completed(h: &Harness, name: &str) -> String {
+    let ids = add(h, &[name]).await;
+    assert!(tick_until_state(h, &ids[0], ItemStateDto::Completed).await);
+    ids[0].clone()
+}
+
+fn file_of(h: &Harness, name: &str) -> std::path::PathBuf {
+    h.downloads.path().join(name).join(name)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn open_item_opens_a_completed_file() {
+    let h = harness(FakeOrigin::new(payload(3000))).await;
+    let id = completed(&h, "open.bin").await;
+
+    h.app.open_item(&id).await.unwrap();
+
+    assert_eq!(h.host.opened_paths(), [file_of(&h, "open.bin")]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn open_item_is_a_no_op_for_an_unfinished_item() {
+    let h = harness(FakeOrigin::new(payload(BIG))).await;
+    let ids = add(&h, &["slow.bin"]).await;
+
+    h.app.open_item(&ids[0]).await.unwrap();
+
+    assert!(h.host.opened_paths().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn open_item_is_a_no_op_when_the_file_is_missing() {
+    let h = harness(FakeOrigin::new(payload(3000))).await;
+    let id = completed(&h, "lost.bin").await;
+    std::fs::remove_file(file_of(&h, "lost.bin")).unwrap();
+    assert!(
+        tick_until(&h.app, 600, || items(&h)
+            .iter()
+            .any(|i| i.id == id && i.file_missing))
+        .await,
+        "the engine never noticed the missing file"
+    );
+
+    h.app.open_item(&id).await.unwrap();
+
+    assert!(h.host.opened_paths().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reveal_item_reveals_an_existing_file() {
+    let h = harness(FakeOrigin::new(payload(3000))).await;
+    let id = completed(&h, "show.bin").await;
+
+    h.app.reveal_item(&id).await.unwrap();
+
+    assert_eq!(h.host.revealed_paths(), [file_of(&h, "show.bin")]);
+    assert!(h.host.opened_paths().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reveal_item_opens_the_folder_when_there_is_no_finished_file() {
+    let h = harness(FakeOrigin::new(payload(BIG))).await;
+    let ids = add(&h, &["part.bin"]).await;
+
+    h.app.reveal_item(&ids[0]).await.unwrap();
+
+    assert_eq!(h.host.opened_paths(), [h.downloads.path().join("part.bin")]);
+    assert!(h.host.revealed_paths().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reveal_package_opens_the_package_folder() {
+    let h = harness(FakeOrigin::new(payload(BIG))).await;
+    let ids = add(&h, &["pk.bin"]).await;
+    let package = package_of(&h, &ids[0]).id;
+
+    h.app.reveal_package(&package).await.unwrap();
+
+    assert_eq!(h.host.opened_paths(), [h.downloads.path().join("pk.bin")]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn open_and_reveal_reject_bad_ids_and_ignore_unknown_ones() {
+    let h = harness(FakeOrigin::new(payload(10))).await;
+    assert!(h.app.open_item("nope").await.is_err());
+    assert!(h.app.reveal_item("nope").await.is_err());
+    assert!(h.app.reveal_package("nope").await.is_err());
+    let unknown = "00000000-0000-0000-0000-000000000000";
+    h.app.open_item(unknown).await.unwrap();
+    h.app.reveal_item(unknown).await.unwrap();
+    h.app.reveal_package(unknown).await.unwrap();
+    assert!(h.host.opened_paths().is_empty() && h.host.revealed_paths().is_empty());
+}

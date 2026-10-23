@@ -609,6 +609,67 @@ impl App {
         })
     }
 
+    /// Opens a finished item's file with the OS default application. Nothing
+    /// happens for an unfinished item or one whose file has gone missing.
+    pub async fn open_item(&self, id: &str) -> Result<(), AppError> {
+        let id = parse_id(id)?;
+        let Some((folder, item)) = self.locate_item(id).await else {
+            return Ok(());
+        };
+        if item.state != sdm_core::ItemState::Completed || item.file_missing {
+            return Ok(());
+        }
+        self.host
+            .open_path(&folder.join(&item.filename))
+            .map_err(|error| AppError::failed(error.0))
+    }
+
+    /// Shows an item in the file manager: its finished file selected when it
+    /// exists, otherwise its package folder opened.
+    pub async fn reveal_item(&self, id: &str) -> Result<(), AppError> {
+        let id = parse_id(id)?;
+        let Some((folder, item)) = self.locate_item(id).await else {
+            return Ok(());
+        };
+        let file = folder.join(&item.filename);
+        let finished = item.state == sdm_core::ItemState::Completed && !item.file_missing;
+        let shown = if finished && file.exists() {
+            self.host.reveal_in_file_manager(&file)
+        } else {
+            self.host.open_path(&folder)
+        };
+        shown.map_err(|error| AppError::failed(error.0))
+    }
+
+    /// Opens a package's folder in the file manager.
+    pub async fn reveal_package(&self, id: &str) -> Result<(), AppError> {
+        let id = parse_id(id)?;
+        let download_folder = lock(&self.settings).download_folder();
+        let snapshot = self.engine.snapshot().await;
+        let Some(package) = snapshot.packages.iter().find(|package| package.id == id) else {
+            return Ok(());
+        };
+        self.host
+            .open_path(&download_folder.join(&package.name))
+            .map_err(|error| AppError::failed(error.0))
+    }
+
+    /// An item's package folder and its snapshot, if it exists.
+    async fn locate_item(
+        &self,
+        id: Uuid,
+    ) -> Option<(std::path::PathBuf, sdm_engine::ItemSnapshot)> {
+        let download_folder = lock(&self.settings).download_folder();
+        let snapshot = self.engine.snapshot().await;
+        snapshot.packages.iter().find_map(|package| {
+            package
+                .items
+                .iter()
+                .find(|item| item.id == id)
+                .map(|item| (download_folder.join(&package.name), item.clone()))
+        })
+    }
+
     /// Publishes once after a batch; an empty batch changed nothing.
     async fn publish_if_any(&self, ids: &[Uuid]) -> Result<(), AppError> {
         if ids.is_empty() {

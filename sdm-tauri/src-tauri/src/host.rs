@@ -41,6 +41,14 @@ impl Host for TauriHost {
         tauri_plugin_opener::reveal_item_in_dir(path).map_err(|e| HostError(e.to_string()))
     }
 
+    fn open_path(&self, path: &Path) -> Result<(), HostError> {
+        use tauri_plugin_opener::OpenerExt;
+        self.app
+            .opener()
+            .open_path(path.to_string_lossy(), None::<&str>)
+            .map_err(|e| HostError(e.to_string()))
+    }
+
     fn notify(&self, notification: Notification) -> Result<(), HostError> {
         // Spec 5 turns this into an OS notification.
         let _ = &self.app;

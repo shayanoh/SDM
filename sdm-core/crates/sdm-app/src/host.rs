@@ -15,7 +15,10 @@ pub trait Host: Send + Sync {
     /// Holds `state.json`, resume sidecars, `settings.json` and `bin/`.
     fn data_dir(&self) -> PathBuf;
     fn default_download_dir(&self) -> PathBuf;
+    /// Shows `path` selected in the file manager.
     fn reveal_in_file_manager(&self, path: &Path) -> Result<(), HostError>;
+    /// Opens `path` with the OS default application (a folder opens in the file manager).
+    fn open_path(&self, path: &Path) -> Result<(), HostError>;
     fn notify(&self, notification: Notification) -> Result<(), HostError>;
 }
 
@@ -33,6 +36,8 @@ pub struct FakeHost {
     data_dir: PathBuf,
     download_dir: PathBuf,
     notifications: Mutex<Vec<Notification>>,
+    opened: Mutex<Vec<PathBuf>>,
+    revealed: Mutex<Vec<PathBuf>>,
 }
 
 impl FakeHost {
@@ -41,7 +46,25 @@ impl FakeHost {
             data_dir,
             download_dir,
             notifications: Mutex::new(Vec::new()),
+            opened: Mutex::new(Vec::new()),
+            revealed: Mutex::new(Vec::new()),
         }
+    }
+
+    /// Every path passed to `open_path`, in order.
+    pub fn opened_paths(&self) -> Vec<PathBuf> {
+        self.opened
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Every path passed to `reveal_in_file_manager`, in order.
+    pub fn revealed_paths(&self) -> Vec<PathBuf> {
+        self.revealed
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     pub fn notifications(&self) -> Vec<Notification> {
@@ -59,7 +82,18 @@ impl Host for FakeHost {
     fn default_download_dir(&self) -> PathBuf {
         self.download_dir.clone()
     }
-    fn reveal_in_file_manager(&self, _path: &Path) -> Result<(), HostError> {
+    fn reveal_in_file_manager(&self, path: &Path) -> Result<(), HostError> {
+        self.revealed
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(path.to_path_buf());
+        Ok(())
+    }
+    fn open_path(&self, path: &Path) -> Result<(), HostError> {
+        self.opened
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(path.to_path_buf());
         Ok(())
     }
     fn notify(&self, notification: Notification) -> Result<(), HostError> {

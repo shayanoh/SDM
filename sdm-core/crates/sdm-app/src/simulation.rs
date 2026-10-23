@@ -109,6 +109,9 @@ impl Host for SimulationHost {
     fn reveal_in_file_manager(&self, _path: &Path) -> Result<(), HostError> {
         Ok(())
     }
+    fn open_path(&self, _path: &Path) -> Result<(), HostError> {
+        Ok(())
+    }
     fn notify(&self, _notification: Notification) -> Result<(), HostError> {
         Ok(())
     }
