@@ -43,6 +43,20 @@ fn specta_builder() -> Builder<tauri::Wry> {
         binaries_status,
         theme_css,
         vibrancy_active,
+        grabber_ingest_text,
+        grabber_remove_links,
+        grabber_remove_package,
+        grabber_clear,
+        grabber_move_link,
+        grabber_rename_package,
+        grabber_merge_packages,
+        grabber_split_package,
+        grabber_recheck,
+        grabber_recheck_failed,
+        grabber_cancel_checks,
+        grabber_set_format,
+        grabber_copy_url,
+        grabber_add_to_downloads,
     ])
 }
 

@@ -1,5 +1,5 @@
 import { Channel } from "@tauri-apps/api/core";
-import { commands, type Patch } from "../bindings";
+import { commands, type HandoffTarget, type Patch } from "../bindings";
 import { BridgeError, type Bridge } from "./bridge";
 
 type Result<T, E> = { status: "ok"; data: T } | { status: "error"; error: E };
@@ -101,5 +101,48 @@ export class TauriBridge implements Bridge {
   }
   themeCss(themeId?: string) {
     return unwrap(commands.themeCss(themeId ?? null));
+  }
+
+  grabberIngestText(text: string) {
+    return unwrapVoid(commands.grabberIngestText(text));
+  }
+  grabberRemoveLinks(ids: string[]) {
+    return unwrapVoid(commands.grabberRemoveLinks(ids));
+  }
+  grabberRemovePackage(id: string) {
+    return unwrapVoid(commands.grabberRemovePackage(id));
+  }
+  grabberClear() {
+    return unwrapVoid(commands.grabberClear());
+  }
+  grabberMoveLink(id: string, packageId: string) {
+    return unwrapVoid(commands.grabberMoveLink(id, packageId));
+  }
+  grabberRenamePackage(id: string, name: string) {
+    return unwrapVoid(commands.grabberRenamePackage(id, name));
+  }
+  grabberMergePackages(source: string, destination: string) {
+    return unwrapVoid(commands.grabberMergePackages(source, destination));
+  }
+  grabberSplitPackage(id: string) {
+    return unwrapVoid(commands.grabberSplitPackage(id));
+  }
+  grabberRecheck(ids: string[]) {
+    return unwrapVoid(commands.grabberRecheck(ids));
+  }
+  grabberRecheckFailed() {
+    return unwrapVoid(commands.grabberRecheckFailed());
+  }
+  grabberCancelChecks() {
+    return unwrapVoid(commands.grabberCancelChecks());
+  }
+  grabberSetFormat(id: string, optionId: string) {
+    return unwrapVoid(commands.grabberSetFormat(id, optionId));
+  }
+  grabberCopyUrl(id: string) {
+    return unwrap(commands.grabberCopyUrl(id));
+  }
+  grabberAddToDownloads(target: HandoffTarget, start: boolean) {
+    return unwrapVoid(commands.grabberAddToDownloads(target, start));
   }
 }

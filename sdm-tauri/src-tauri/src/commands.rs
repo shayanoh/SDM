@@ -4,7 +4,9 @@
 use std::sync::Arc;
 
 use sdm_app::host::{PatchSink, SinkClosed};
-use sdm_app::protocol::{BinariesStatusDto, DeletionInfo, DeletionTarget, Patch, SettingsDto};
+use sdm_app::protocol::{
+    BinariesStatusDto, DeletionInfo, DeletionTarget, HandoffTarget, Patch, SettingsDto,
+};
 use sdm_app::{App, AppError};
 use tauri::State;
 use tauri::ipc::Channel;
@@ -250,4 +252,124 @@ pub async fn vibrancy_active(
     state: State<'_, crate::vibrancy::VibrancyState>,
 ) -> Result<bool, AppError> {
     Ok(state.0.is_some())
+}
+
+// MARK: Link grabber
+
+#[tauri::command]
+#[specta::specta]
+pub async fn grabber_ingest_text(app: Shared<'_>, text: String) -> Result<(), AppError> {
+    app.guarded(move |app| async move { app.grabber_ingest_text(&text).await })
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn grabber_remove_links(app: Shared<'_>, ids: Vec<String>) -> Result<(), AppError> {
+    app.guarded(move |app| async move { app.grabber_remove_links(&ids).await })
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn grabber_remove_package(app: Shared<'_>, id: String) -> Result<(), AppError> {
+    app.guarded(move |app| async move { app.grabber_remove_package(&id).await })
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn grabber_clear(app: Shared<'_>) -> Result<(), AppError> {
+    app.guarded(move |app| async move { app.grabber_clear().await })
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn grabber_move_link(
+    app: Shared<'_>,
+    id: String,
+    package_id: String,
+) -> Result<(), AppError> {
+    app.guarded(move |app| async move { app.grabber_move_link(&id, &package_id).await })
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn grabber_rename_package(
+    app: Shared<'_>,
+    id: String,
+    name: String,
+) -> Result<(), AppError> {
+    app.guarded(move |app| async move { app.grabber_rename_package(&id, &name).await })
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn grabber_merge_packages(
+    app: Shared<'_>,
+    source: String,
+    destination: String,
+) -> Result<(), AppError> {
+    app.guarded(move |app| async move { app.grabber_merge_packages(&source, &destination).await })
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn grabber_split_package(app: Shared<'_>, id: String) -> Result<(), AppError> {
+    app.guarded(move |app| async move { app.grabber_split_package(&id).await })
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn grabber_recheck(app: Shared<'_>, ids: Vec<String>) -> Result<(), AppError> {
+    app.guarded(move |app| async move { app.grabber_recheck(&ids).await })
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn grabber_recheck_failed(app: Shared<'_>) -> Result<(), AppError> {
+    app.guarded(move |app| async move { app.grabber_recheck_failed().await })
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn grabber_cancel_checks(app: Shared<'_>) -> Result<(), AppError> {
+    app.guarded(move |app| async move { app.grabber_cancel_checks().await })
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn grabber_set_format(
+    app: Shared<'_>,
+    id: String,
+    option_id: String,
+) -> Result<(), AppError> {
+    app.guarded(move |app| async move { app.grabber_set_format(&id, &option_id).await })
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn grabber_copy_url(app: Shared<'_>, id: String) -> Result<String, AppError> {
+    app.guarded(move |app| async move { app.grabber_copy_url(&id) })
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn grabber_add_to_downloads(
+    app: Shared<'_>,
+    target: HandoffTarget,
+    start: bool,
+) -> Result<(), AppError> {
+    app.guarded(move |app| async move { app.grabber_add_to_downloads(target, start).await })
+        .await
 }

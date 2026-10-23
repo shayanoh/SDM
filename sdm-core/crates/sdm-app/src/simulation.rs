@@ -20,6 +20,7 @@ use sdm_engine::{
 
 use crate::app::{App, Dependencies};
 use crate::error::AppError;
+use crate::grabber::GrabberController;
 use crate::host::{Host, HostError};
 use crate::notify::Notification;
 
@@ -78,6 +79,31 @@ impl HttpTransport for SlowOrigin {
     }
 }
 
+/// Answers every grabber probe as a reachable 5 MB file, after a short pause,
+/// so the grabber view can be exercised with no network.
+struct SimulatedProbe;
+
+#[async_trait]
+impl sdm_grabber::ProbeTransport for SimulatedProbe {
+    async fn send(
+        &self,
+        request: sdm_grabber::ProbeRequest,
+    ) -> Result<sdm_grabber::ProbeResponse, sdm_grabber::ProbeError> {
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        Ok(sdm_grabber::ProbeResponse {
+            status_code: 200,
+            final_url: request.url,
+            headers: [
+                ("content-type".to_owned(), "application/zip".to_owned()),
+                ("content-length".to_owned(), "5000000".to_owned()),
+            ]
+            .into_iter()
+            .collect(),
+            body: Vec::new(),
+        })
+    }
+}
+
 /// Never touches the user's Trash.
 struct NoTrash;
 
@@ -131,7 +157,12 @@ pub fn simulated_dependencies(_host: &dyn Host, _items: usize, _active: usize) -
         wholesale_downloader: None,
         retry_policy: RetryPolicy::new(),
         binaries: None,
-        grabber: None,
+        grabber: Some(GrabberController::new(
+            Arc::new(SimulatedProbe),
+            None,
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            None,
+        )),
     }
 }
 

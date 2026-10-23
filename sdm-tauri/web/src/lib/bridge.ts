@@ -5,6 +5,7 @@ import type {
   AppError,
   DeletionInfo,
   DeletionTarget,
+  HandoffTarget,
 } from "../bindings";
 
 /** Every call the UI makes into the backend. Two implementations exist. */
@@ -41,6 +42,22 @@ export interface Bridge {
   themeCss(themeId?: string): Promise<string>;
   /** Whether the window has a translucent backdrop (Mica or Acrylic). */
   vibrancyActive(): Promise<boolean>;
+
+  // Link grabber. The view arrives as `Patch.grabber`; these only act.
+  grabberIngestText(text: string): Promise<void>;
+  grabberRemoveLinks(ids: string[]): Promise<void>;
+  grabberRemovePackage(id: string): Promise<void>;
+  grabberClear(): Promise<void>;
+  grabberMoveLink(id: string, packageId: string): Promise<void>;
+  grabberRenamePackage(id: string, name: string): Promise<void>;
+  grabberMergePackages(source: string, destination: string): Promise<void>;
+  grabberSplitPackage(id: string): Promise<void>;
+  grabberRecheck(ids: string[]): Promise<void>;
+  grabberRecheckFailed(): Promise<void>;
+  grabberCancelChecks(): Promise<void>;
+  grabberSetFormat(id: string, optionId: string): Promise<void>;
+  grabberCopyUrl(id: string): Promise<string>;
+  grabberAddToDownloads(target: HandoffTarget, start: boolean): Promise<void>;
 }
 
 /** What a rejected bridge call throws. */

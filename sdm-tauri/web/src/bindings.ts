@@ -36,6 +36,20 @@ export const commands = {
 	 *  frontend lets its sidebar and toolbar show it.
 	 */
 	vibrancyActive: () => typedError<boolean, AppError>(__TAURI_INVOKE("vibrancy_active")),
+	grabberIngestText: (text: string) => typedError<null, AppError>(__TAURI_INVOKE("grabber_ingest_text", { text })),
+	grabberRemoveLinks: (ids: string[]) => typedError<null, AppError>(__TAURI_INVOKE("grabber_remove_links", { ids })),
+	grabberRemovePackage: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("grabber_remove_package", { id })),
+	grabberClear: () => typedError<null, AppError>(__TAURI_INVOKE("grabber_clear")),
+	grabberMoveLink: (id: string, packageId: string) => typedError<null, AppError>(__TAURI_INVOKE("grabber_move_link", { id, packageId })),
+	grabberRenamePackage: (id: string, name: string) => typedError<null, AppError>(__TAURI_INVOKE("grabber_rename_package", { id, name })),
+	grabberMergePackages: (source: string, destination: string) => typedError<null, AppError>(__TAURI_INVOKE("grabber_merge_packages", { source, destination })),
+	grabberSplitPackage: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("grabber_split_package", { id })),
+	grabberRecheck: (ids: string[]) => typedError<null, AppError>(__TAURI_INVOKE("grabber_recheck", { ids })),
+	grabberRecheckFailed: () => typedError<null, AppError>(__TAURI_INVOKE("grabber_recheck_failed")),
+	grabberCancelChecks: () => typedError<null, AppError>(__TAURI_INVOKE("grabber_cancel_checks")),
+	grabberSetFormat: (id: string, optionId: string) => typedError<null, AppError>(__TAURI_INVOKE("grabber_set_format", { id, optionId })),
+	grabberCopyUrl: (id: string) => typedError<string, AppError>(__TAURI_INVOKE("grabber_copy_url", { id })),
+	grabberAddToDownloads: (target: HandoffTarget, start: boolean) => typedError<null, AppError>(__TAURI_INVOKE("grabber_add_to_downloads", { target, start })),
 };
 
 /* Types */
@@ -74,6 +88,79 @@ export type EngineStats = {
 	waitingPackageCount: number,
 };
 
+export type FormatOptionDto = {
+	id: string,
+	label: string,
+	matchesPreferences: boolean,
+	isWholesale: boolean,
+	selected: boolean,
+};
+
+export type GrabberLinkRow = {
+	id: string,
+	filename: string,
+	finalUrl: string,
+	stage: LinkStageDto,
+	verdict: VerdictDto | null,
+	sizeBytes: number | null,
+	isDuplicate: boolean,
+	/**  Whether the trash button shows (a verdict exists). */
+	removable: boolean,
+};
+
+export type GrabberMediaRow = {
+	id: string,
+	title: string,
+	sourceUrl: string,
+	state: MediaStateDto,
+	/**  The full failure reason when `state` is `failed`. */
+	stateText: string | null,
+	/**  `Streaming · 1080p · avc1 · mp4`, once a format is chosen. */
+	summary: string | null,
+	options: FormatOptionDto[],
+	isDuplicate: boolean,
+	sizeBytes: number | null,
+};
+
+export type GrabberPackage = {
+	id: string,
+	name: string,
+	note: string | null,
+	/**  Links first, then media rows. */
+	rowIds: string[],
+};
+
+export type GrabberRow = {
+	kind: "link",
+} & GrabberLinkRow | {
+	kind: "media",
+} & GrabberMediaRow;
+
+export type GrabberSummaryDto = {
+	online: number,
+	faulty: number,
+	offline: number,
+	failed: number,
+	isChecking: boolean,
+	recheckable: number,
+};
+
+/**  Everything the link grabber shows. Sent whole whenever it changes. */
+export type GrabberView = {
+	checkedCount: number,
+	totalCount: number,
+	summary: GrabberSummaryDto,
+	/**  Links and media rows in session order. */
+	rows: GrabberRow[],
+	packages: GrabberPackage[],
+	/**  How many items the last hand-off held back (no format chosen yet). */
+	heldBack: number | null,
+	tools: ToolsNotice | null,
+};
+
+/**  What an "Add to downloads" acts on. */
+export type HandoffTarget = { kind: "rows"; ids: string[] } | { kind: "package"; id: string } | { kind: "all" };
+
 /**  The numbers that change while an item transfers. */
 export type ItemFigures = {
 	id: string,
@@ -99,6 +186,10 @@ export type ItemHistory = {
 
 export type ItemStateDto = { kind: "stopped" } | { kind: "queued" } | { kind: "running" } | { kind: "completed" } | { kind: "failed"; reason: string };
 
+export type LinkStageDto = "queued" | "probing" | "sniffing" | "done";
+
+export type MediaStateDto = "resolving" | "resolved" | "unselected" | "unsupported" | "needsYtDlp" | "needsFfmpeg" | "failed";
+
 export type PackageFigures = {
 	id: string,
 	completedBytes: number | null,
@@ -123,6 +214,8 @@ export type Patch = {
 	stats: EngineStats | null,
 	/**  Full speed history, only for items whose details panel is open. */
 	histories: ItemHistory[],
+	/**  The whole link-grabber view, present when it changed (and on a full patch). */
+	grabber: GrabberView | null,
 };
 
 export type RangeDto = {
@@ -164,6 +257,14 @@ export type StructurePackage = {
 	folder: string,
 	items: StructureItem[],
 };
+
+/**  A line under the grabber header about the downloaded tools. */
+export type ToolsNotice = {
+	text: string,
+	isError: boolean,
+};
+
+export type VerdictDto = { kind: "online" } | { kind: "offline" } | { kind: "checkFailed" } | { kind: "faulty"; reason: string };
 
 /* Tauri Specta runtime */
 async function typedError<T, E>(result: Promise<T>): Promise<{ status: "ok"; data: T } | { status: "error"; error: E }> {
