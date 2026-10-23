@@ -27,17 +27,53 @@ export class TauriBridge implements Bridge {
   addUrl(url: string, packageName?: string) {
     return unwrapVoid(commands.addUrl(url, packageName ?? null));
   }
-  startItem(id: string) {
-    return unwrapVoid(commands.startItem(id));
+  startItems(ids: string[]) {
+    return unwrapVoid(commands.startItems(ids));
   }
-  stopItem(id: string) {
-    return unwrapVoid(commands.stopItem(id));
+  stopItems(ids: string[]) {
+    return unwrapVoid(commands.stopItems(ids));
   }
-  retryItem(id: string) {
-    return unwrapVoid(commands.retryItem(id));
+  retryItems(ids: string[]) {
+    return unwrapVoid(commands.retryItems(ids));
   }
-  removeItem(id: string, deleteFile: boolean) {
-    return unwrapVoid(commands.removeItem(id, deleteFile));
+  retryMuxItems(ids: string[]) {
+    return unwrapVoid(commands.retryMuxItems(ids));
+  }
+  resetItems(ids: string[]) {
+    return unwrapVoid(commands.resetItems(ids));
+  }
+  setItemsEnabled(ids: string[], enabled: boolean) {
+    return unwrapVoid(commands.setItemsEnabled(ids, enabled));
+  }
+  removeItems(ids: string[], deleteFiles: boolean) {
+    return unwrapVoid(commands.removeItems(ids, deleteFiles));
+  }
+  removePackage(id: string, deleteFiles: boolean) {
+    return unwrapVoid(commands.removePackage(id, deleteFiles));
+  }
+  moveItems(ids: string[], packageId: string, atIndex?: number) {
+    return unwrapVoid(commands.moveItems(ids, packageId, atIndex ?? null));
+  }
+  moveItemsToNewPackage(ids: string[], name: string) {
+    return unwrapVoid(commands.moveItemsToNewPackage(ids, name));
+  }
+  reorderItems(ids: string[], packageId: string) {
+    return unwrapVoid(commands.reorderItems(ids, packageId));
+  }
+  reorderPackages(ids: string[]) {
+    return unwrapVoid(commands.reorderPackages(ids));
+  }
+  describeDeletion(target: import("../bindings").DeletionTarget) {
+    return unwrap(commands.describeDeletion(target));
+  }
+  openItem(id: string) {
+    return unwrapVoid(commands.openItem(id));
+  }
+  revealItem(id: string) {
+    return unwrapVoid(commands.revealItem(id));
+  }
+  revealPackage(id: string) {
+    return unwrapVoid(commands.revealPackage(id));
   }
   pauseAll() {
     return unwrapVoid(commands.pauseAll());

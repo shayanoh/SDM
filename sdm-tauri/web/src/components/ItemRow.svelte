@@ -54,7 +54,9 @@
           type="button"
           onclick={() =>
             run(() =>
-              active ? bridge.stopItem(item.id) : bridge.startItem(item.id),
+              active
+                ? bridge.stopItems([item.id])
+                : bridge.startItems([item.id]),
             )}
         >
           {active ? "Pause" : "Resume"}
@@ -63,14 +65,14 @@
       {#if kind === "failed"}
         <button
           type="button"
-          onclick={() => run(() => bridge.retryItem(item.id))}
+          onclick={() => run(() => bridge.retryItems([item.id]))}
         >
           Retry
         </button>
       {/if}
       <button
         type="button"
-        onclick={() => run(() => bridge.removeItem(item.id, false))}
+        onclick={() => run(() => bridge.removeItems([item.id], false))}
       >
         Remove
       </button>

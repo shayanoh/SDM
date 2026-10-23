@@ -6,10 +6,22 @@ import { invoke as __TAURI_INVOKE, Channel } from "@tauri-apps/api/core";
 export const commands = {
 	attach: (onPatch: Channel<Patch>) => typedError<null, AppError>(__TAURI_INVOKE("attach", { onPatch })),
 	addUrl: (url: string, packageName: string | null) => typedError<null, AppError>(__TAURI_INVOKE("add_url", { url, packageName })),
-	startItem: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("start_item", { id })),
-	stopItem: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("stop_item", { id })),
-	retryItem: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("retry_item", { id })),
-	removeItem: (id: string, deleteFile: boolean) => typedError<null, AppError>(__TAURI_INVOKE("remove_item", { id, deleteFile })),
+	startItems: (ids: string[]) => typedError<null, AppError>(__TAURI_INVOKE("start_items", { ids })),
+	stopItems: (ids: string[]) => typedError<null, AppError>(__TAURI_INVOKE("stop_items", { ids })),
+	retryItems: (ids: string[]) => typedError<null, AppError>(__TAURI_INVOKE("retry_items", { ids })),
+	retryMuxItems: (ids: string[]) => typedError<null, AppError>(__TAURI_INVOKE("retry_mux_items", { ids })),
+	resetItems: (ids: string[]) => typedError<null, AppError>(__TAURI_INVOKE("reset_items", { ids })),
+	setItemsEnabled: (ids: string[], enabled: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_items_enabled", { ids, enabled })),
+	removeItems: (ids: string[], deleteFiles: boolean) => typedError<null, AppError>(__TAURI_INVOKE("remove_items", { ids, deleteFiles })),
+	removePackage: (id: string, deleteFiles: boolean) => typedError<null, AppError>(__TAURI_INVOKE("remove_package", { id, deleteFiles })),
+	moveItems: (ids: string[], packageId: string, atIndex: number | null) => typedError<null, AppError>(__TAURI_INVOKE("move_items", { ids, packageId, atIndex })),
+	moveItemsToNewPackage: (ids: string[], name: string) => typedError<null, AppError>(__TAURI_INVOKE("move_items_to_new_package", { ids, name })),
+	reorderItems: (ids: string[], packageId: string) => typedError<null, AppError>(__TAURI_INVOKE("reorder_items", { ids, packageId })),
+	reorderPackages: (ids: string[]) => typedError<null, AppError>(__TAURI_INVOKE("reorder_packages", { ids })),
+	describeDeletion: (target: DeletionTarget) => typedError<DeletionInfo, AppError>(__TAURI_INVOKE("describe_deletion", { target })),
+	openItem: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("open_item", { id })),
+	revealItem: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("reveal_item", { id })),
+	revealPackage: (id: string) => typedError<null, AppError>(__TAURI_INVOKE("reveal_package", { id })),
 	pauseAll: () => typedError<null, AppError>(__TAURI_INVOKE("pause_all")),
 	resumeAll: () => typedError<null, AppError>(__TAURI_INVOKE("resume_all")),
 	setListVisible: (visible: boolean) => typedError<null, AppError>(__TAURI_INVOKE("set_list_visible", { visible })),
@@ -34,6 +46,16 @@ export type BinariesStatusDto = {
 	qjsVersion: string | null,
 	lastError: string | null,
 };
+
+/**  The files a deletion would trash, for the confirmation sheet. */
+export type DeletionInfo = {
+	title: string,
+	totalBytes: number | null,
+	names: string[],
+};
+
+/**  What a "Remove and Delete" confirmation is about. */
+export type DeletionTarget = { kind: "items"; ids: string[] } | { kind: "package"; id: string };
 
 export type EngineStats = {
 	bytesPerSecond: number | null,

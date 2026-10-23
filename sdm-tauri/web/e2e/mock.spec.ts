@@ -2,7 +2,9 @@ import { expect, test } from "@playwright/test";
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByText("ubuntu.iso").first()).toBeVisible();
+  await expect(
+    page.getByText("ubuntu-24.04.2-desktop-amd64.iso").first(),
+  ).toBeVisible();
 });
 
 test("the header shows a download speed", async ({ page }) => {
@@ -39,6 +41,10 @@ test("a bad address shows a banner and a good one adds a row", async ({
 
   await input.fill("https://example.com/files/new.bin");
   await input.press("Enter");
+  // The list is windowed and the new package lands last.
+  await page
+    .locator(".scroller")
+    .evaluate((element) => (element.scrollTop = element.scrollHeight));
   await expect(page.getByText("new.bin").first()).toBeVisible();
   await expect(page.getByRole("alert")).toHaveCount(0);
 });

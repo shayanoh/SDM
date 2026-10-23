@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use sdm_app::host::{PatchSink, SinkClosed};
-use sdm_app::protocol::{BinariesStatusDto, Patch, SettingsDto};
+use sdm_app::protocol::{BinariesStatusDto, DeletionInfo, DeletionTarget, Patch, SettingsDto};
 use sdm_app::{App, AppError};
 use tauri::State;
 use tauri::ipc::Channel;
@@ -40,29 +40,141 @@ pub async fn add_url(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn start_item(app: Shared<'_>, id: String) -> Result<(), AppError> {
-    app.guarded(move |app| async move { app.start_item(&id).await })
+pub async fn start_items(app: Shared<'_>, ids: Vec<String>) -> Result<(), AppError> {
+    app.guarded(move |app| async move { app.start_items(&ids).await })
         .await
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn stop_item(app: Shared<'_>, id: String) -> Result<(), AppError> {
-    app.guarded(move |app| async move { app.stop_item(&id).await })
+pub async fn stop_items(app: Shared<'_>, ids: Vec<String>) -> Result<(), AppError> {
+    app.guarded(move |app| async move { app.stop_items(&ids).await })
         .await
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn retry_item(app: Shared<'_>, id: String) -> Result<(), AppError> {
-    app.guarded(move |app| async move { app.retry_item(&id).await })
+pub async fn retry_items(app: Shared<'_>, ids: Vec<String>) -> Result<(), AppError> {
+    app.guarded(move |app| async move { app.retry_items(&ids).await })
         .await
 }
 
 #[tauri::command]
 #[specta::specta]
-pub async fn remove_item(app: Shared<'_>, id: String, delete_file: bool) -> Result<(), AppError> {
-    app.guarded(move |app| async move { app.remove_item(&id, delete_file).await })
+pub async fn retry_mux_items(app: Shared<'_>, ids: Vec<String>) -> Result<(), AppError> {
+    app.guarded(move |app| async move { app.retry_mux_items(&ids).await })
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn reset_items(app: Shared<'_>, ids: Vec<String>) -> Result<(), AppError> {
+    app.guarded(move |app| async move { app.reset_items(&ids).await })
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn set_items_enabled(
+    app: Shared<'_>,
+    ids: Vec<String>,
+    enabled: bool,
+) -> Result<(), AppError> {
+    app.guarded(move |app| async move { app.set_items_enabled(&ids, enabled).await })
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn remove_items(
+    app: Shared<'_>,
+    ids: Vec<String>,
+    delete_files: bool,
+) -> Result<(), AppError> {
+    app.guarded(move |app| async move { app.remove_items(&ids, delete_files).await })
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn remove_package(
+    app: Shared<'_>,
+    id: String,
+    delete_files: bool,
+) -> Result<(), AppError> {
+    app.guarded(move |app| async move { app.remove_package(&id, delete_files).await })
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn move_items(
+    app: Shared<'_>,
+    ids: Vec<String>,
+    package_id: String,
+    at_index: Option<u32>,
+) -> Result<(), AppError> {
+    app.guarded(move |app| async move { app.move_items(&ids, &package_id, at_index).await })
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn move_items_to_new_package(
+    app: Shared<'_>,
+    ids: Vec<String>,
+    name: String,
+) -> Result<(), AppError> {
+    app.guarded(move |app| async move { app.move_items_to_new_package(&ids, &name).await })
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn reorder_items(
+    app: Shared<'_>,
+    ids: Vec<String>,
+    package_id: String,
+) -> Result<(), AppError> {
+    app.guarded(move |app| async move { app.reorder_items(&ids, &package_id).await })
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn reorder_packages(app: Shared<'_>, ids: Vec<String>) -> Result<(), AppError> {
+    app.guarded(move |app| async move { app.reorder_packages(&ids).await })
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn describe_deletion(
+    app: Shared<'_>,
+    target: DeletionTarget,
+) -> Result<DeletionInfo, AppError> {
+    app.guarded(move |app| async move { app.describe_deletion(&target).await })
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn open_item(app: Shared<'_>, id: String) -> Result<(), AppError> {
+    app.guarded(move |app| async move { app.open_item(&id).await })
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn reveal_item(app: Shared<'_>, id: String) -> Result<(), AppError> {
+    app.guarded(move |app| async move { app.reveal_item(&id).await })
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn reveal_package(app: Shared<'_>, id: String) -> Result<(), AppError> {
+    app.guarded(move |app| async move { app.reveal_package(&id).await })
         .await
 }
 
