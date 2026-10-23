@@ -2,10 +2,12 @@
   import { useStore, useUi } from "../lib/context";
   import { completedView } from "../lib/views";
   import Banner from "./Banner.svelte";
+  import ContextMenu from "./ContextMenu.svelte";
   import BottomBar from "./BottomBar.svelte";
   import PackageList from "./PackageList.svelte";
   import LinkgrabberPlaceholder from "./LinkgrabberPlaceholder.svelte";
   import Sidebar from "./Sidebar.svelte";
+  import Toolbar from "./Toolbar.svelte";
 
   const MIN_SIDEBAR = 200;
   const MAX_SIDEBAR = 360;
@@ -55,6 +57,7 @@
     {#if ui.tab === "linkgrabber"}
       <LinkgrabberPlaceholder />
     {:else}
+      <Toolbar view={onDownloads ? downloads : completed} />
       <PackageList
         view={onDownloads ? downloads : completed}
         tab={onDownloads ? "downloads" : "completed"}
@@ -69,6 +72,7 @@
     {/if}
   </section>
 </div>
+<ContextMenu view={onDownloads ? downloads : completed} />
 
 <style>
   .window {

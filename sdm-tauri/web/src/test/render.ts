@@ -14,11 +14,14 @@ export interface StubBridge extends Bridge {
   calls: Call[];
   /** Answers for methods that return something; everything else resolves to nothing. */
   answers: Record<string, unknown>;
+  /** Methods that reject with the given error instead of resolving. */
+  failures: Record<string, Error>;
 }
 
 /** A bridge that records every call and resolves it. */
 export function stubBridge(): StubBridge {
   const calls: Call[] = [];
+  const failures: Record<string, Error> = {};
   const answers: Record<string, unknown> = {
     describeDeletion: { title: "Remove From List?", totalBytes: 0, names: [] },
     getSettings: { downloadFolder: "/dl" },
@@ -35,9 +38,12 @@ export function stubBridge(): StubBridge {
     get(_target, property) {
       if (property === "calls") return calls;
       if (property === "answers") return answers;
+      if (property === "failures") return failures;
       if (property === "then") return undefined;
       return async (...args: unknown[]) => {
         calls.push([String(property), ...args]);
+        const failure = failures[String(property)];
+        if (failure) throw failure;
         return answers[String(property)];
       };
     },

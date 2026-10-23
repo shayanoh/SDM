@@ -28,7 +28,7 @@
   );
 </script>
 
-<div class="item" class:disabled={!item.isEnabled}>
+<div class="item" class:disabled={!item.isEnabled} data-state={item.state.kind}>
   <div class="icon">
     <StateIcon
       state={item.state}

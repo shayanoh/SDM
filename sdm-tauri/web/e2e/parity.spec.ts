@@ -15,3 +15,21 @@ test("01 downloads running", async ({ page }) => {
   await page.waitForTimeout(3500);
   await page.screenshot(shot("01-downloads-running"));
 });
+
+test("04 item context menu and 05 package menu", async ({ page }) => {
+  await page.goto("/?theme=deep-purple");
+  await page.waitForTimeout(2500);
+  await page
+    .locator('[data-row-id][data-kind="item"]')
+    .nth(1)
+    .click({ button: "right" });
+  await page.waitForTimeout(300);
+  await page.screenshot(shot("04-context-menu-item"));
+  await page.keyboard.press("Escape");
+  await page
+    .locator('[data-row-id][data-kind="package"]')
+    .first()
+    .click({ button: "right" });
+  await page.waitForTimeout(300);
+  await page.screenshot(shot("05-context-menu-package"));
+});
