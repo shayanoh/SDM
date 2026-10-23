@@ -12,11 +12,12 @@
   "app": {
     "windows": [
       {
-        "title": "SDM",
+        "title": "Shayan's Download Manager",
         "width": 1000,
         "height": 640,
-        "minWidth": 640,
-        "minHeight": 360,
+        "minWidth": 760,
+        "minHeight": 480,
+        "dragDropEnabled": false,
         "label": "main"
       }
     ],

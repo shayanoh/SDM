@@ -99,6 +99,8 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        // Remembers the main window's size, position and maximized state.
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .invoke_handler(builder.invoke_handler())
         .setup(move |tauri_app| {
             builder.mount_events(tauri_app);
@@ -154,5 +156,22 @@ mod tests {
     #[test]
     fn export_bindings() {
         super::export_bindings(&super::specta_builder());
+    }
+
+    /// The main window is configured like the SwiftUI one: its title, its
+    /// default and minimum sizes, and no webview file drop (which on Windows
+    /// would swallow the HTML5 drag and drop the list relies on).
+    #[test]
+    fn the_main_window_is_configured_like_the_swiftui_one() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("valid config");
+        let window = &config["app"]["windows"][0];
+        assert_eq!(window["label"], "main");
+        assert_eq!(window["title"], "Shayan's Download Manager");
+        assert_eq!(window["width"], 1000);
+        assert_eq!(window["height"], 640);
+        assert_eq!(window["minWidth"], 760);
+        assert_eq!(window["minHeight"], 480);
+        assert_eq!(window["dragDropEnabled"], false);
     }
 }
