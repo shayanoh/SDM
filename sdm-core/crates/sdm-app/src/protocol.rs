@@ -20,6 +20,8 @@ pub struct Patch {
     pub stats: Option<EngineStats>,
     /// Full speed history, only for items whose details panel is open.
     pub histories: Vec<ItemHistory>,
+    /// The whole link-grabber view, present when it changed (and on a full patch).
+    pub grabber: Option<GrabberView>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Type)]
@@ -164,4 +166,150 @@ pub struct DeletionInfo {
     pub title: String,
     pub total_bytes: f64,
     pub names: Vec<String>,
+}
+
+// MARK: Link grabber
+
+/// Everything the link grabber shows. Sent whole whenever it changes.
+#[derive(Debug, Clone, PartialEq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GrabberView {
+    pub checked_count: u32,
+    pub total_count: u32,
+    pub summary: GrabberSummaryDto,
+    /// Links and media rows in session order.
+    pub rows: Vec<GrabberRow>,
+    pub packages: Vec<GrabberPackage>,
+    /// How many items the last hand-off held back (no format chosen yet).
+    pub held_back: Option<u32>,
+    pub tools: Option<ToolsNotice>,
+}
+
+impl GrabberView {
+    pub fn empty() -> Self {
+        Self {
+            checked_count: 0,
+            total_count: 0,
+            summary: GrabberSummaryDto::default(),
+            rows: Vec::new(),
+            packages: Vec::new(),
+            held_back: None,
+            tools: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GrabberSummaryDto {
+    pub online: u32,
+    pub faulty: u32,
+    pub offline: u32,
+    pub failed: u32,
+    pub is_checking: bool,
+    pub recheckable: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GrabberPackage {
+    pub id: String,
+    pub name: String,
+    pub note: Option<String>,
+    /// Links first, then media rows.
+    pub row_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum GrabberRow {
+    Link(GrabberLinkRow),
+    Media(GrabberMediaRow),
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GrabberLinkRow {
+    pub id: String,
+    pub filename: String,
+    pub final_url: String,
+    pub stage: LinkStageDto,
+    pub verdict: Option<VerdictDto>,
+    pub size_bytes: Option<f64>,
+    pub is_duplicate: bool,
+    /// Whether the trash button shows (a verdict exists).
+    pub removable: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct GrabberMediaRow {
+    pub id: String,
+    pub title: String,
+    pub source_url: String,
+    pub state: MediaStateDto,
+    /// The full failure reason when `state` is `failed`.
+    pub state_text: Option<String>,
+    /// `Streaming · 1080p · avc1 · mp4`, once a format is chosen.
+    pub summary: Option<String>,
+    pub options: Vec<FormatOptionDto>,
+    pub is_duplicate: bool,
+    pub size_bytes: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum LinkStageDto {
+    Queued,
+    Probing,
+    Sniffing,
+    Done,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum VerdictDto {
+    Online,
+    Offline,
+    CheckFailed,
+    Faulty { reason: String },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum MediaStateDto {
+    Resolving,
+    Resolved,
+    Unselected,
+    Unsupported,
+    NeedsYtDlp,
+    NeedsFfmpeg,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct FormatOptionDto {
+    pub id: String,
+    pub label: String,
+    pub matches_preferences: bool,
+    pub is_wholesale: bool,
+    pub selected: bool,
+}
+
+/// A line under the grabber header about the downloaded tools.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolsNotice {
+    pub text: String,
+    pub is_error: bool,
+}
+
+/// What an "Add to downloads" acts on.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Type)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum HandoffTarget {
+    Rows { ids: Vec<String> },
+    Package { id: String },
+    All,
 }

@@ -14,6 +14,7 @@ pub mod theme;
 
 mod convert;
 mod differ;
+mod grabber_view;
 mod toolchain;
 mod url_input;
 

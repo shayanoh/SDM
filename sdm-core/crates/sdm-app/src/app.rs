@@ -350,6 +350,7 @@ impl App {
                         packages: delta.packages,
                         stats: delta.stats,
                         histories: history_items,
+                        grabber: None,
                     };
                     let sent = match &state.sink {
                         Some(sink) => sink.send(patch).is_ok(),

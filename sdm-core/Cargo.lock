@@ -3687,6 +3687,7 @@ dependencies = [
  "percent-encoding",
  "sdm-core",
  "sdm-engine",
+ "sdm-grabber",
  "sdm-resolve",
  "serde",
  "serde_json",
