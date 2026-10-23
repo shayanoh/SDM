@@ -36,3 +36,6 @@ tauri-build = "2.7.4"
 
 [dev-dependencies]
 serde_json = "1.0.154"
+
+[target."cfg(windows)".dependencies]
+window-vibrancy = "0.8.1"

@@ -63,3 +63,12 @@ input {
   user-select: text;
   cursor: text;
 }
+
+/* With a Mica or Acrylic backdrop behind the window (Windows), the page lets it
+   show through: the outer surfaces turn transparent and the sidebar and toolbar
+   (see their components) are translucent. The content keeps solid colors. */
+html[data-vibrancy="on"],
+html[data-vibrancy="on"] body,
+html[data-vibrancy="on"] #app {
+  background: transparent;
+}

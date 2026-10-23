@@ -84,4 +84,7 @@
     color: var(--text-secondary);
     opacity: 0.45;
   }
+  :global(html[data-vibrancy="on"]) .toolbar {
+    background: color-mix(in srgb, var(--surface-primary) 78%, transparent);
+  }
 </style>

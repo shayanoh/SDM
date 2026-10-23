@@ -42,6 +42,8 @@ export interface MockSeed {
 
 export interface MockOptions {
   seed?: MockSeed[];
+  /** Pretend the window has a Mica/Acrylic backdrop (`?vibrancy=on` in the browser). */
+  vibrancy?: boolean;
 }
 
 /** The five packages the SwiftUI reference screenshots were taken with. */
@@ -414,8 +416,10 @@ export class MockBridge implements Bridge {
   #settings: SettingsDto = { downloadFolder: "/Users/mock/Downloads/SDM" };
   #globalHistory: number[] = [];
   #detail = new Map<string, Set<string>>();
+  #vibrancy: boolean;
 
   constructor(options: MockOptions = {}) {
+    this.#vibrancy = options.vibrancy ?? false;
     for (const seed of options.seed ?? REFERENCE_SEED) {
       this.#packages.push({
         id: newId(),
@@ -685,6 +689,10 @@ export class MockBridge implements Bridge {
       qjsVersion: null,
       lastError: null,
     };
+  }
+
+  async vibrancyActive() {
+    return this.#vibrancy;
   }
 
   async themeCss(themeId?: string) {

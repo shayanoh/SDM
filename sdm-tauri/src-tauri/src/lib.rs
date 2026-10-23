@@ -1,5 +1,6 @@
 mod commands;
 mod host;
+mod vibrancy;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -41,6 +42,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
         update_settings,
         binaries_status,
         theme_css,
+        vibrancy_active,
     ])
 }
 
@@ -106,6 +108,10 @@ pub fn run() {
             builder.mount_events(tauri_app);
             let (app, simulation) = build_app(tauri_app.handle())?;
             tauri_app.manage(Arc::clone(&app));
+            let effect = tauri_app
+                .get_webview_window("main")
+                .and_then(|window| vibrancy::apply(&window));
+            tauri_app.manage(vibrancy::VibrancyState(effect));
 
             // Restore, then provision binaries in the background, then beat.
             let heartbeat_app = Arc::clone(&app);
@@ -173,5 +179,20 @@ mod tests {
         assert_eq!(window["minWidth"], 760);
         assert_eq!(window["minHeight"], 480);
         assert_eq!(window["dragDropEnabled"], false);
+    }
+
+    /// Windows adds a transparent window (for Mica and Acrylic) through its own
+    /// config file; Tauri replaces the whole `windows` array when merging, so
+    /// every other setting must match the base file or the two would drift.
+    #[test]
+    fn the_windows_window_differs_from_the_base_only_by_being_transparent() {
+        let base: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("valid config");
+        let windows: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.windows.conf.json")).expect("valid config");
+        let mut expected = base["app"]["windows"][0].clone();
+        expected["transparent"] = serde_json::Value::Bool(true);
+        assert_eq!(windows["app"]["windows"][0], expected);
+        assert_eq!(windows["app"]["windows"].as_array().map(Vec::len), Some(1));
     }
 }

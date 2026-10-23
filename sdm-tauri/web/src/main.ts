@@ -12,7 +12,11 @@ import { wireSelectionPruning } from "./lib/wiring";
 // Inside the Tauri window the real core answers; in a plain browser (dev,
 // Playwright) an in-memory mock does.
 const bridge: Bridge =
-  "__TAURI_INTERNALS__" in window ? new TauriBridge() : new MockBridge();
+  "__TAURI_INTERNALS__" in window
+    ? new TauriBridge()
+    : new MockBridge({
+        vibrancy: new URLSearchParams(location.search).get("vibrancy") === "on",
+      });
 const ui = new UiState();
 const store = new DownloadStore(() => {
   bridge.fullState().catch((error) => ui.report(String(error)));

@@ -329,3 +329,12 @@ describe("MockBridge deletion, open and details", () => {
     expect((error as BridgeError).error.kind).toBe("invalidArgument");
   });
 });
+
+describe("MockBridge vibrancy", () => {
+  it("has no window effect unless asked", async () => {
+    expect(await new MockBridge({ seed: [] }).vibrancyActive()).toBe(false);
+    expect(
+      await new MockBridge({ seed: [], vibrancy: true }).vibrancyActive(),
+    ).toBe(true);
+  });
+});

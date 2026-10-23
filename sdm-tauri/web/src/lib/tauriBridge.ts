@@ -96,6 +96,9 @@ export class TauriBridge implements Bridge {
   binariesStatus() {
     return unwrap(commands.binariesStatus());
   }
+  vibrancyActive() {
+    return unwrap(commands.vibrancyActive());
+  }
   themeCss(themeId?: string) {
     return unwrap(commands.themeCss(themeId ?? null));
   }

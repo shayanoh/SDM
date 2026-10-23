@@ -155,4 +155,7 @@
       animation: none;
     }
   }
+  :global(html[data-vibrancy="on"]) .sidebar {
+    background: color-mix(in srgb, var(--sidebar-background) 78%, transparent);
+  }
 </style>

@@ -241,3 +241,13 @@ pub async fn binaries_status(app: Shared<'_>) -> Result<BinariesStatusDto, AppEr
 pub async fn theme_css(app: Shared<'_>, theme_id: Option<String>) -> Result<String, AppError> {
     app.theme_css(theme_id.as_deref())
 }
+
+/// Whether the window has a translucent backdrop (Mica or Acrylic), so the
+/// frontend lets its sidebar and toolbar show it.
+#[tauri::command]
+#[specta::specta]
+pub async fn vibrancy_active(
+    state: State<'_, crate::vibrancy::VibrancyState>,
+) -> Result<bool, AppError> {
+    Ok(state.0.is_some())
+}

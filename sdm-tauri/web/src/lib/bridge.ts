@@ -39,6 +39,8 @@ export interface Bridge {
   updateSettings(settings: SettingsDto): Promise<void>;
   binariesStatus(): Promise<BinariesStatusDto>;
   themeCss(themeId?: string): Promise<string>;
+  /** Whether the window has a translucent backdrop (Mica or Acrylic). */
+  vibrancyActive(): Promise<boolean>;
 }
 
 /** What a rejected bridge call throws. */

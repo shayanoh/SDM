@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import Shell from "./components/Shell.svelte";
   import { errorMessage, useBridge, useStore, useUi } from "./lib/context";
+  import { syncVibrancy } from "./lib/vibrancy";
 
   const bridge = useBridge();
   const store = useStore();
@@ -30,6 +31,7 @@
       style.textContent = await bridge.themeCss(themeId);
       document.head.append(style);
       await bridge.attach(store.apply.bind(store));
+      await syncVibrancy(bridge);
     });
 
     return () => document.removeEventListener("visibilitychange", onVisibility);

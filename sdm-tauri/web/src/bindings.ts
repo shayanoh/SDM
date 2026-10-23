@@ -31,6 +31,11 @@ export const commands = {
 	updateSettings: (settings: SettingsDto) => typedError<null, AppError>(__TAURI_INVOKE("update_settings", { settings })),
 	binariesStatus: () => typedError<BinariesStatusDto, AppError>(__TAURI_INVOKE("binaries_status")),
 	themeCss: (themeId: string | null) => typedError<string, AppError>(__TAURI_INVOKE("theme_css", { themeId })),
+	/**
+	 *  Whether the window has a translucent backdrop (Mica or Acrylic), so the
+	 *  frontend lets its sidebar and toolbar show it.
+	 */
+	vibrancyActive: () => typedError<boolean, AppError>(__TAURI_INVOKE("vibrancy_active")),
 };
 
 /* Types */
