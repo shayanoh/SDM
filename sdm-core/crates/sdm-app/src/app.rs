@@ -37,10 +37,29 @@ pub struct Dependencies {
     pub binaries: Option<ManagedBinaries>,
 }
 
+/// How many downloads, segments and connections the engine may use at once.
+#[derive(Debug, Clone, Copy)]
+struct Limits {
+    concurrent: usize,
+    segments: usize,
+    connections: usize,
+}
+
 /// Engine defaults the SwiftUI app uses (`EngineSettingsStore`): 3 concurrent
 /// downloads, 8 segments, 32 connections, 8 per host, 10 MB minimum segment.
-fn engine_settings(folder: std::path::PathBuf) -> EngineSettings {
-    EngineSettings::new(3, 8, 32, folder)
+const DEFAULT_LIMITS: Limits = Limits {
+    concurrent: 3,
+    segments: 8,
+    connections: 32,
+};
+
+fn engine_settings(limits: Limits, folder: std::path::PathBuf) -> EngineSettings {
+    EngineSettings::new(
+        limits.concurrent,
+        limits.segments,
+        limits.connections,
+        folder,
+    )
 }
 
 struct PublishState {
@@ -61,6 +80,7 @@ pub struct App {
     host: Arc<dyn Host>,
     settings: Mutex<SettingsStore>,
     binaries: Option<ManagedBinaries>,
+    limits: Limits,
     state: Mutex<PublishState>,
 }
 
@@ -86,6 +106,35 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
 
 impl App {
     pub fn new(host: Arc<dyn Host>, dependencies: Dependencies) -> Result<Arc<Self>, AppError> {
+        Self::with_limits(host, dependencies, DEFAULT_LIMITS)
+    }
+
+    /// [`Self::new`] with `max_concurrent` simultaneous downloads (and four
+    /// segments each), for the load harness. Must be at least 1.
+    pub fn new_with_concurrency(
+        host: Arc<dyn Host>,
+        dependencies: Dependencies,
+        max_concurrent: usize,
+    ) -> Result<Arc<Self>, AppError> {
+        if max_concurrent == 0 {
+            return Err(AppError::invalid(
+                "maxConcurrent",
+                "at least one download must be allowed",
+            ));
+        }
+        let limits = Limits {
+            concurrent: max_concurrent,
+            segments: 4,
+            connections: max_concurrent.saturating_mul(4),
+        };
+        Self::with_limits(host, dependencies, limits)
+    }
+
+    fn with_limits(
+        host: Arc<dyn Host>,
+        dependencies: Dependencies,
+        limits: Limits,
+    ) -> Result<Arc<Self>, AppError> {
         let data_dir = host.data_dir();
         std::fs::create_dir_all(&data_dir)
             .map_err(|e| AppError::failed(format!("cannot create {}: {e}", data_dir.display())))?;
@@ -94,7 +143,7 @@ impl App {
         let engine = DownloadEngine::new(
             dependencies.transport,
             dependencies.state_store,
-            engine_settings(settings.download_folder()),
+            engine_settings(limits, settings.download_folder()),
             dependencies.retry_policy,
             dependencies.resolver,
             dependencies.muxer,
@@ -106,6 +155,7 @@ impl App {
             host,
             settings: Mutex::new(settings),
             binaries: dependencies.binaries,
+            limits,
             state: Mutex::new(PublishState {
                 seq: 0,
                 differ: Differ::default(),
@@ -318,6 +368,11 @@ impl App {
         };
         let package =
             DownloadPackage::new(name).with_items(vec![DownloadItem::http(source, filename)]);
+        self.add_package(package).await
+    }
+
+    /// Hands a ready-made package to the engine and publishes the change.
+    pub(crate) async fn add_package(&self, package: DownloadPackage) -> Result<(), AppError> {
         self.engine.add(package).await;
         self.publish(false).await
     }
@@ -413,7 +468,7 @@ impl App {
         let new_settings = {
             let mut store = lock(&self.settings);
             store.update(dto)?;
-            engine_settings(store.download_folder())
+            engine_settings(self.limits, store.download_folder())
         };
         self.engine.update_settings(new_settings).await;
         self.publish(false).await

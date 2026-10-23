@@ -8,6 +8,7 @@ pub mod host;
 pub mod notify;
 pub mod protocol;
 pub mod settings;
+pub mod simulation;
 pub mod theme;
 
 mod convert;

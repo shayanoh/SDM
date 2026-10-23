@@ -9,6 +9,11 @@ workspace = "../../sdm-core"
 name = "sdm_tauri_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+# Builds the `--simulate <items> <active>` load harness into a release binary
+# (debug builds always have it).
+simulate = []
+
 [lints]
 workspace = true
 

@@ -3635,6 +3635,8 @@ name = "sdm-app"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bytes",
+ "futures",
  "percent-encoding",
  "sdm-core",
  "sdm-engine",
