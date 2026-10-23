@@ -26,3 +26,6 @@ SDMChromeExtension-Identity/
 ## Rust core build outputs
 SDMKit/Artifacts/
 SDMKit/Sources/SDMRust/Generated/
+
+## Brag
+brag-output/
