@@ -57,7 +57,13 @@ const fullPatch = (seq: number, ids: string[]): Patch =>
     full: true,
     structure: {
       packages: [
-        { id: "p1", name: "P", priority: 2, items: ids.map((id) => item(id)) },
+        {
+          id: "p1",
+          name: "P",
+          priority: 2,
+          folder: "/dl/P",
+          items: ids.map((id) => item(id)),
+        },
       ],
     },
     items: ids.map((id) => figures(id)),
@@ -103,7 +109,15 @@ describe("DownloadStore", () => {
     store.apply(
       patch(2, {
         structure: {
-          packages: [{ id: "p1", name: "P", priority: 2, items: [item("a")] }],
+          packages: [
+            {
+              id: "p1",
+              name: "P",
+              priority: 2,
+              folder: "/dl/P",
+              items: [item("a")],
+            },
+          ],
         },
       }),
     );
