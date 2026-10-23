@@ -7,6 +7,7 @@
   import ContextMenu from "./ContextMenu.svelte";
   import BottomBar from "./BottomBar.svelte";
   import PackageList from "./PackageList.svelte";
+  import ModalHost from "./ModalHost.svelte";
   import LinkgrabberPlaceholder from "./LinkgrabberPlaceholder.svelte";
   import Sidebar from "./Sidebar.svelte";
   import Toolbar from "./Toolbar.svelte";
@@ -82,6 +83,7 @@
     {/if}
   </section>
 </div>
+<ModalHost />
 <ContextMenu view={onDownloads ? downloads : completed} />
 
 <style>

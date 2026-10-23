@@ -56,3 +56,14 @@ test("02 03 06 details panel", async ({ page }) => {
   await page.waitForTimeout(600);
   await page.screenshot(shot("06-multi-select-details"));
 });
+
+test("07 delete sheet", async ({ page }) => {
+  await page.goto("/?theme=deep-purple");
+  await page.waitForTimeout(2500);
+  const items = page.locator('[data-row-id][data-kind="item"]');
+  await items.first().click();
+  await items.nth(2).click({ modifiers: ["Shift"] });
+  await page.getByRole("button", { name: /^Remove and Delete File/ }).click();
+  await page.waitForTimeout(500);
+  await page.screenshot(shot("07-delete-sheet"));
+});
