@@ -22,13 +22,7 @@ export interface ActionContext {
   bridge: Bridge;
   ui: UiState;
   clipboard: { writeText(text: string): Promise<void> };
-  /** Set for the package menu's actions: the package and its items, in order. */
-  packageId?: string;
-  packageItemIds?: string[];
 }
-
-const naturally = (a: string, b: string) =>
-  a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
 
 /**
  * Runs one menu or toolbar action on the selection. An action acts on the
@@ -49,15 +43,7 @@ export async function runMenu(
 
 async function perform(
   id: MenuId,
-  {
-    ids,
-    items,
-    bridge,
-    ui,
-    clipboard,
-    packageId,
-    packageItemIds,
-  }: ActionContext,
+  { ids, items, bridge, ui, clipboard }: ActionContext,
 ) {
   const chosen = ids.flatMap((itemId) => {
     const item = items.get(itemId);
@@ -144,32 +130,5 @@ async function perform(
     case "info":
       ui.panelVisible = !ui.panelVisible;
       return;
-    case "sortByName": {
-      if (!packageId) return;
-      const sorted = (packageItemIds ?? [])
-        .flatMap((itemId) => {
-          const item = items.get(itemId);
-          return item ? [item] : [];
-        })
-        .sort((a, b) => naturally(a.filename, b.filename))
-        .map((item) => item.id);
-      if (sorted.length > 0) await bridge.reorderItems(sorted, packageId);
-      return;
-    }
-    case "removePackage":
-      if (!packageId) return;
-      ui.selection.clear();
-      await bridge.removePackage(packageId, false);
-      return;
-    case "removePackageAndDelete": {
-      if (!packageId) return;
-      const target = { kind: "package" as const, id: packageId };
-      ui.modal = {
-        kind: "delete",
-        target,
-        info: await bridge.describeDeletion(target),
-      };
-      return;
-    }
   }
 }

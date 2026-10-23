@@ -2,19 +2,15 @@
   import { tick } from "svelte";
   import { runMenu } from "../lib/actions";
   import { useBridge, useStore, useUi } from "../lib/context";
-  import {
-    itemMenu,
-    packageMenu,
-    type MenuEntry,
-    type MenuId,
-  } from "../lib/menu";
+  import { itemMenu, type MenuEntry, type MenuId } from "../lib/menu";
   import { detectPlatform } from "../lib/platform";
   import { selectedItemIds, type ListView } from "../lib/views";
   import Icon from "./Icon.svelte";
 
   /**
-   * The right-click menu: the item menu on an item (acting on the whole
-   * selection when the item is part of it), the package menu on a header.
+   * The right-click menu: the item menu, acting on the selection. A package
+   * header is selected like a row, so its menu acts on all of the package's
+   * items, as in the SwiftUI app.
    */
   let { view }: { view: ListView } = $props();
 
@@ -28,17 +24,12 @@
   let top = $state(0);
 
   const menu = $derived(ui.menu);
-  const isPackage = $derived(
-    menu !== null && store.packages.has(menu.targetId),
-  );
   const ids = $derived(selectedItemIds(ui.selected, view));
   const entries = $derived<MenuEntry[]>(
-    isPackage
-      ? packageMenu()
-      : itemMenu(
-          ids.flatMap((id) => store.items.get(id) ?? []),
-          { platform },
-        ),
+    itemMenu(
+      ids.flatMap((id) => store.items.get(id) ?? []),
+      { platform },
+    ),
   );
 
   // Keep the menu inside the window: flip it left/up when it would overflow.
@@ -70,19 +61,13 @@
 
   function choose(entry: Exclude<MenuEntry, { id: "divider" }>) {
     if (entry.disabled) return;
-    const target = menu?.targetId;
     close();
-    const packageItemIds = isPackage
-      ? (view.packages.find((pkg) => pkg.id === target)?.itemIds ?? [])
-      : undefined;
     void runMenu(entry.id as MenuId, {
-      ids: isPackage ? [] : ids,
+      ids,
       items: store.items,
       bridge,
       ui,
       clipboard: navigator.clipboard,
-      packageId: isPackage ? target : undefined,
-      packageItemIds,
     });
   }
 

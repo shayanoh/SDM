@@ -104,16 +104,22 @@ describe("ContextMenu", () => {
     expect(app.bridge.calls).toEqual([]);
   });
 
-  it("opens the package menu on a header", async () => {
+  it("on a package header shows the item menu and acts on all of the package's items", async () => {
     const { app, view } = setup();
     renderIn(ContextMenu, app, { view });
+    // What a right-click on the header does: the package becomes the selection.
+    app.ui.selection.setOrder(["p", "stop", "fin"]);
+    app.ui.selection.contextTarget("p");
     app.ui.menu = { x: 5, y: 5, targetId: "p" };
     expect(
-      await screen.findByRole("menuitem", { name: "Sort Items by Name" }),
-    ).toBeTruthy();
-    expect(
-      screen.queryByRole("menuitem", { name: /Start Download/ }),
+      screen.queryByRole("menuitem", { name: "Sort Items by Name" }),
     ).toBeNull();
+    // Two items, so the plural labels; only the stopped one can start.
+    await fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Start Downloads" }),
+    );
+    expect(app.bridge.calls).toEqual([["startItems", ["stop"]]]);
+    expect(app.ui.menu).toBeNull();
   });
 
   it("closes on Escape and when its row disappears", async () => {

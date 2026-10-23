@@ -26,10 +26,7 @@ export type MenuId =
   | "moveToNew"
   | "removeFromList"
   | "removeAndDelete"
-  | "info"
-  | "sortByName"
-  | "removePackage"
-  | "removePackageAndDelete";
+  | "info";
 
 export type MenuEntry =
   | {
@@ -169,18 +166,5 @@ export function toolbarEntries(
   return [
     ...itemMenu(items, options).filter((entry) => entry.id !== "divider"),
     { id: "info", label: "Info Panel", icon: "panel-bottom", disabled: false },
-  ];
-}
-
-/** The menu on a package header. */
-export function packageMenu(): MenuEntry[] {
-  return [
-    { id: "sortByName", label: "Sort Items by Name", disabled: false },
-    { id: "removePackage", label: "Remove from List", disabled: false },
-    {
-      id: "removePackageAndDelete",
-      label: "Remove and Delete Files",
-      disabled: false,
-    },
   ];
 }

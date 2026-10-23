@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ItemStateDto } from "../bindings";
 import type { RowItem } from "./eligibility";
-import { itemMenu, packageMenu, toolbarEntries, type MenuEntry } from "./menu";
+import { itemMenu, toolbarEntries, type MenuEntry } from "./menu";
 import { detectPlatform } from "./platform";
 
 const item = (state: ItemStateDto, over: Partial<RowItem> = {}): RowItem => ({
@@ -162,16 +162,6 @@ describe("toolbar", () => {
     const entries = byId(toolbarEntries([], win));
     expect(entries.info.disabled).toBe(false);
     expect(entries.removeFromList.disabled).toBe(true);
-  });
-});
-
-describe("package menu", () => {
-  it("offers sort, remove from list and remove and delete", () => {
-    expect(real(packageMenu()).map((e) => [e.id, e.label])).toEqual([
-      ["sortByName", "Sort Items by Name"],
-      ["removePackage", "Remove from List"],
-      ["removePackageAndDelete", "Remove and Delete Files"],
-    ]);
   });
 });
 
