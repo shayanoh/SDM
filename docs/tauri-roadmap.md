@@ -38,14 +38,14 @@ Each spec gets a design under `docs/superpowers/specs/`, then a plan under
 `docs/superpowers/plans/`, then implementation. Status values: _not started_,
 _spec draft_, _spec approved_, _plan written_, _in progress_, _done_.
 
-| #   | Spec                    | Contents                                                                                                                                | Status                                                                                                                                     |
-| --- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1   | **Foundation**          | `sdm-app` crate, Tauri shell, patch protocol, a minimal live list, Windows/Linux core portability, build tooling, the performance gate  | plan written — [design](superpowers/specs/2026-10-14-tauri-foundation-design.md), [plan](superpowers/plans/2026-10-14-tauri-foundation.md) |
-| 2   | **Main window**         | Package and item list, toolbar, details panel, graphs, drag and drop, selection, context menus, Mica/Acrylic window effects             | not started                                                                                                                                |
-| 3   | **Link grabber**        | Grabber window, link verdicts and clustering display, format picker, playlists, Add Links sheet                                         | not started                                                                                                                                |
-| 4   | **Settings and themes** | All Settings tabs, theme roles as CSS variables, media-sites list, YouTube/managed-binaries tab                                         | not started                                                                                                                                |
-| 5   | **System integration**  | Tray icon and panel, notifications, activation (tray-only/taskbar) modes, clipboard watcher, launch at login, widened Tauri permissions | not started                                                                                                                                |
-| 6   | **Browser extension**   | Native-messaging host and install flow on Windows, Linux and macOS, hand-off channel to the running app                                 | not started                                                                                                                                |
+| #   | Spec                    | Contents                                                                                                                                | Status                                                                                                                                                                                                                                                                                                                                                                                                            |
+| --- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | **Foundation**          | `sdm-app` crate, Tauri shell, patch protocol, a minimal live list, Windows/Linux core portability, build tooling, the performance gate  | built (tasks 1–15 except the Windows VM check; task 16, the ffmpeg/qjs downloads, still open) — [design](superpowers/specs/2026-10-14-tauri-foundation-design.md), [plan](superpowers/plans/2026-10-14-tauri-foundation.md), [performance](tauri-performance.md). Windows VM checks 1–4 confirmed by the user 2026-10-23; the Windows CPU/memory measurement (check 5) and task 16 remain, so not yet marked done |
+| 2   | **Main window**         | Package and item list, toolbar, details panel, graphs, drag and drop, selection, context menus, Mica/Acrylic window effects             | not started                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 3   | **Link grabber**        | Grabber window, link verdicts and clustering display, format picker, playlists, Add Links sheet                                         | not started                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 4   | **Settings and themes** | All Settings tabs, theme roles as CSS variables, media-sites list, YouTube/managed-binaries tab                                         | not started                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 5   | **System integration**  | Tray icon and panel, notifications, activation (tray-only/taskbar) modes, clipboard watcher, launch at login, widened Tauri permissions | not started                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 6   | **Browser extension**   | Native-messaging host and install flow on Windows, Linux and macOS, hand-off channel to the running app                                 | not started                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 Order rationale: spec 1 proves the architecture and the cross-build before any
 UI is invested in. Specs 2–4 are the visible UI, in the order a user meets it.
@@ -117,10 +117,31 @@ later session.
   bundles should be built in a container or CI on the oldest base system to
   support, because of glibc compatibility.
 
+## Spec 2 next
+
+Facts a later session needs:
+
+- The controller API is `sdm-core/crates/sdm-app/src/app.rs` (`App`, `Dependencies`); the wire types are
+  `protocol.rs`; every f64 reaches TypeScript as `number | null` (a non-finite value becomes `null`) and the
+  frontend store reads `null` as zero.
+- All patches, including the result of a user action, arrive on the channel registered by `attach`;
+  commands return `()`.
+- The frontend store is `sdm-tauri/web/src/lib/store.svelte.ts`; bridges are `tauriBridge.ts` and
+  `mockBridge.ts`; `bindings.ts` is generated by `cargo test -p sdm-tauri export_bindings` (and by every debug
+  start) and is excluded from prettier.
+- Run: `cd sdm-tauri && pnpm tauri dev` (this reads the real data directory), or
+  `pnpm --dir web dev` in a browser against the mock. Load harness: a debug build, or a release build with
+  `--features simulate,tauri/custom-protocol`, takes `--simulate <items> <active>` (scratch folder, fake origin;
+  `SDM_SIMULATE_IDLE=1` pauses everything).
+- Build: `scripts/build-tauri.sh mac|windows|linux`; compile gates: `scripts/check-windows.sh`,
+  `scripts/check-linux.sh [--shell]`. Windows installers are unsigned.
+- The shell crate lives outside the Cargo workspace root, so it declares `workspace = "../../sdm-core"`.
+
 ## Log
 
 Newest first. One line per event: date, what happened, where to look.
 
+- 2026-10-23 — Spec 1 built on branch `tauri-ui` (plan tasks 1–15; macOS checks done). Verified: Rust workspace tests, Windows and Linux compile checks gated in `test.sh`, Svelte unit tests (22) and Playwright e2e against the mock (3), `scripts/build-tauri.sh mac` (`SDM.app`) and `windows` (`SDM_0.1.0_x64-setup.exe`, unsigned), `scripts/check-linux.sh --shell`. macOS release measurements pass the spec 10 thresholds (idle 0.3 % CPU, 50 active 10.3 % median, 206 MB): [tauri-performance.md](tauri-performance.md); screenshot against the mock: `docs/tauri-skeleton-mock.png`. **Windows VM (user, same day):** installer and stand-alone exe both work; adding a download, pause/resume, and restore after a restart all confirmed. The NSIS installer installs per user under `%LOCALAPPDATA%` (Tauri's default `installMode: currentUser`); the user chose to keep that. **Not done:** the Windows CPU/memory measurement (check 5, needs a build with the `simulate` feature) and a real `pnpm tauri dev` download on the Mac; task 16 (per-platform ffmpeg/ffprobe/qjs downloads) is still open. Spec synced to the five plan deviations.
 - 2026-10-14 — Plan for spec 1 written: `docs/superpowers/plans/2026-10-14-tauri-foundation.md` (16 tasks: portability 1–5, `sdm-app` 6–11, shell 12, frontend 13, load harness 14, cross-builds and closing 15, ffmpeg/qjs downloads 16). The portability survey found more Unix-only code than the spec first listed (positional file I/O, process environment, yt-dlp asset name); the spec's section 7 was corrected. Plan deviates from spec in five small ways, listed at the top of the plan; task 15 syncs the spec. Awaiting plan review and the choice of execution method.
 - 2026-10-14 — Brainstorming done; decisions T1–T9 settled. Spec 1 drafted:
   `docs/superpowers/specs/2026-10-14-tauri-foundation-design.md`. Core

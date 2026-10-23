@@ -1,8 +1,28 @@
+use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use sdm_app::host::{FakeHost, RecordingSink};
 use sdm_app::{App, Dependencies};
-use sdm_engine::{FakeOrigin, InMemoryStateStore, RetryPolicy, SystemTrash};
+use sdm_engine::{FakeOrigin, InMemoryStateStore, RetryPolicy, Trash};
+
+/// Moves "trashed" files into a scratch folder, so no test reaches the real
+/// Trash (the engine's trash-guard test forbids naming the system one).
+struct ScratchTrash {
+    directory: tempfile::TempDir,
+    counter: AtomicUsize,
+}
+
+impl Trash for ScratchTrash {
+    fn trash(&self, path: &Path) -> std::io::Result<()> {
+        let slot = self.directory.path().join(format!(
+            "{}-{}",
+            self.counter.fetch_add(1, Ordering::SeqCst),
+            path.file_name().unwrap_or_default().to_string_lossy()
+        ));
+        std::fs::rename(path, slot)
+    }
+}
 
 pub struct Harness {
     pub app: Arc<App>,
@@ -28,7 +48,10 @@ pub async fn harness(origin: FakeOrigin) -> Harness {
     let dependencies = Dependencies {
         transport: Arc::new(origin),
         state_store: Arc::new(InMemoryStateStore::new()),
-        trash: Arc::new(SystemTrash),
+        trash: Arc::new(ScratchTrash {
+            directory: tempfile::tempdir().unwrap(),
+            counter: AtomicUsize::new(0),
+        }),
         resolver: None,
         muxer: None,
         wholesale_downloader: None,

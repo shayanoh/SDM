@@ -115,7 +115,8 @@ changed. `sdm-app` keeps the last snapshot it sent and builds a patch against it
 
 ```rust
 pub struct Patch {
-    pub seq: u64,                          // strictly +1 per emitted patch
+    pub seq: u32,                          // +1 per emitted patch, wrapping at 2^32
+    pub full: bool,                        // drop all prior state and rebuild from this patch
     pub structure: Option<Structure>,      // present only when list shape changed
     pub items: Vec<ItemFigures>,           // only items whose figures changed
     pub packages: Vec<PackageFigures>,     // only packages whose aggregate changed
@@ -143,9 +144,11 @@ pub struct Structure {
   The frontend's canvas draws segments from it. If a profile shows this to be
   too large for 500 active items, sending a coarsened range list is the first
   optimization (the success-criteria gate in section 10 measures it).
-- **Resync.** `get_full_state()` returns a `Patch` with `seq` set to the
-  current counter and `structure` plus every item and package populated. The
-  frontend calls it on startup and whenever it sees a `seq` gap.
+- **Resync.** `full_state()` sends a `Patch` with `full` set, `seq` set to the
+  next counter value, and `structure` plus every item and package populated,
+  through the attached sink. The frontend calls it whenever it sees a `seq`
+  gap (a non-consecutive value, including wraparound) or a non-full patch
+  before any full one; the first patch after `attach` is always full.
 - **Ordering.** Patches are produced under one lock scope in `sdm-app` and
   assigned `seq` there, so user-action patches and tick patches cannot
   interleave out of order. The engine call itself (an `await`) happens outside
@@ -168,11 +171,14 @@ exist so spec 2 does not change the protocol.
 
 ### 4.5 Commands
 
-The commands the skeleton uses, each returning `Result<Option<Patch>, AppError>`:
+The commands the skeleton uses, each returning `Result<(), AppError>`; every
+patch goes through the attached sink, so one ordered transport carries both
+command results and ticks (no ordering race between a response and the
+channel):
 
 `add_url(url, package_name?)`, `start`, `stop`, `set_enabled`, `retry`,
 `remove(ids)`, `set_priority`, `get_settings`, `update_settings`,
-`get_full_state`, `set_list_visible`, `set_detail_items`, and
+`full_state`, `set_list_visible`, `set_detail_items`, and
 `binaries_status` (the managed-binaries provisioning state and progress).
 
 `add_url` validates the URL (scheme, host) before calling the engine. All
@@ -209,9 +215,9 @@ message changes or after a success. The heartbeat keeps running.
 - **Commands** are thin `#[tauri::command] #[specta::specta]` wrappers over
   `sdm-app`. Async commands return `Result<_, AppError>`.
 - **Patches stream** to the frontend through a `tauri::ipc::Channel<Patch>`
-  that the frontend registers once in an `attach` command. Patches returned
-  directly from user-action commands are applied by the frontend in order with
-  the streamed ones, keyed by `seq`.
+  that the frontend registers once in an `attach` command. Commands do not
+  return patches: every patch, including the result of a user action, arrives
+  on that channel and is applied by the frontend in `seq` order.
 - **Heartbeat:** a task spawned in `setup` with `tauri::async_runtime::spawn`
   calls `tick()` once per `1 / TICKS_PER_SECOND` seconds and sends any patch on
   the channel. If no channel is attached yet, the patch is dropped (the frontend
@@ -245,8 +251,8 @@ message changes or after a success. The heartbeat keeps running.
   ```ts
   interface Bridge {
     attach(onPatch: (p: Patch) => void): Promise<void>;
-    fullState(): Promise<Patch>;
-    addUrl(url: string): Promise<Patch | null>;
+    fullState(): Promise<void>;
+    addUrl(url: string): Promise<void>;
     // ...one method per command in 4.5
   }
   ```
@@ -341,7 +347,7 @@ the table above are expected.
   The frontend shows it as a dismissible banner.
 - A failed tick is logged with throttling (4.8); the heartbeat continues.
 - A panic is contained at the shell boundary and reported as `internal`.
-- A `seq` gap makes the frontend call `get_full_state()` rather than render
+- A `seq` gap makes the frontend call `full_state()` rather than render
   stale state. After an error that might have lost a patch (a failed
   `Channel::send`), `sdm-app` marks the next patch as full.
 - Provisioning failures (a binary download or hash mismatch) surface through
@@ -355,7 +361,7 @@ the table above are expected.
   `FakeHost`. Cases: a patch contains only changed items; an unchanged package
   is skipped; an idle engine returns `None`; a structural change emits
   `structure`; `seq` is strictly increasing across user-action and tick
-  patches; `get_full_state` equals applying every prior patch; hidden-list
+  patches; `full_state` equals applying every prior patch; hidden-list
   suppression and the full patch on re-show; detail histories appear only for
   reported items; notifications fire once on a transition and a moved item
   does not read as finished; input validation rejects bad URLs and settings.
