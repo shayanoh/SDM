@@ -180,7 +180,6 @@ async fn rename_move_merge_split_and_remove_a_package() {
     let view = grabber_view(&kit.harness);
     assert!(view.packages.len() >= 2, "{:?}", view.packages);
     let first = view.packages[0].clone();
-    let second = view.packages[1].clone();
 
     app.grabber_rename_package(&first.id, "  Renamed  ")
         .await
@@ -311,7 +310,7 @@ async fn cancel_checks_settles_the_waiting_rows_as_failed() {
     let verdicts = link_verdicts(&kit.harness);
     assert_eq!(verdicts.len(), 12);
     assert!(
-        verdicts.iter().any(|v| *v == Some(VerdictDto::CheckFailed)),
+        verdicts.contains(&Some(VerdictDto::CheckFailed)),
         "{verdicts:?}"
     );
     assert!(!grabber_view(&kit.harness).summary.is_checking);
@@ -344,7 +343,7 @@ async fn prune_removes_rows_older_than_thirty_minutes() {
         .unwrap();
     assert_eq!(grabber_view(&kit.harness).total_count, 2);
     // The prune runs once a minute: 60 seconds of ticks at the engine rate.
-    let per_minute = sdm_core::AppTiming::TICKS_PER_SECOND as usize * 60;
+    let per_minute = sdm_core::AppTiming::TICKS_PER_SECOND * 60;
     let h = &kit.harness;
     assert!(
         tick_until(app, per_minute + 5, || grabber_view(h).total_count == 1).await,
@@ -382,4 +381,60 @@ async fn without_a_grabber_every_action_is_a_clear_error() {
         Err(AppError::Failed { .. })
     ));
     assert!(h.app.grabber_clear().await.is_err());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_failed_tool_download_shows_an_error_notice_in_the_view() {
+    use sdm_resolve::testing::{FakeBinaryFetcher, FakeProcessRunner};
+    use sdm_resolve::{
+        ArchiveKind, CheckReason, ManagedBinaries, PlatformTool, ToolMember, YtDlpChannel,
+    };
+
+    let tool = PlatformTool {
+        name: "qjs".into(),
+        version: "q1".into(),
+        url: "https://tools.example/qjs".into(),
+        sha256: "0".repeat(64),
+        archive: ArchiveKind::Raw,
+        members: vec![ToolMember::new("", "qjs")],
+    };
+    let fetcher = std::sync::Arc::new(FakeBinaryFetcher::new());
+    fetcher.set_response(
+        Ok(b"TAMPERED".to_vec()),
+        &url::Url::parse("https://tools.example/qjs").unwrap(),
+    );
+    let bin = tempfile::tempdir().unwrap();
+    let binaries = ManagedBinaries::new(
+        bin.path().join("bin"),
+        fetcher,
+        std::sync::Arc::new(FakeProcessRunner::new()),
+        Vec::new,
+        || YtDlpChannel::Stable,
+    )
+    .with_platform_tools(vec![tool]);
+    let origin = std::sync::Arc::new(sdm_grabber::FakeProbeOrigin::new());
+    let grabber = sdm_app::grabber::GrabberController::new(
+        origin,
+        None,
+        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        None,
+    );
+    let h = harness_full(
+        FakeOrigin::new(payload(10)),
+        Some(grabber),
+        Some(binaries.clone()),
+    )
+    .await;
+    binaries.check_now(CheckReason::Launch).await;
+    h.app
+        .grabber_ingest_text("https://a.example.com/x.zip")
+        .await
+        .unwrap();
+    let notice = grabber_view(&h).tools.expect("a tools notice");
+    assert!(notice.is_error);
+    assert!(
+        notice.text.starts_with("Could not fetch qjs"),
+        "{}",
+        notice.text
+    );
 }

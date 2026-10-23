@@ -389,8 +389,10 @@ mod tests {
     #[test]
     fn matching_options_come_before_non_matching() {
         let row = resolved_row("t");
-        let mut prefs = QualityPreferences::default();
-        prefs.max_height = 360;
+        let prefs = QualityPreferences {
+            max_height: 360,
+            ..QualityPreferences::default()
+        };
         let view = build_view(&snapshot(vec![], vec![row], vec![]), &prefs, None, None);
         let GrabberRow::Media(media) = &view.rows[0] else {
             panic!()

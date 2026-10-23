@@ -12,12 +12,16 @@ use sdm_engine::{
     DownloadEngine, EngineSettings, EngineSnapshot, HttpTransport, Muxer, RetryPolicy, StateStore,
     Trash,
 };
+use sdm_grabber::{
+    GrabberSnapshot, MediaFormatMenu, MediaHandoff, MediaRow, MediaRowState, PackageCandidate,
+    ProbedLink, Verdict,
+};
 use sdm_resolve::{ManagedBinaries, ToolsActivity};
 use uuid::Uuid;
 
 use crate::differ::{Delta, Differ};
 use crate::error::AppError;
-use crate::grabber::GrabberController;
+use crate::grabber::{GrabberController, GrabberDefaults};
 use crate::host::{Host, PatchSink};
 use crate::notify::notifications_between;
 use crate::protocol::*;
@@ -935,6 +939,112 @@ impl App {
         self.publish(false).await
     }
 
+    /// The address "Copy URL" copies: a link's address or a media row's page.
+    pub fn grabber_copy_url(&self, id: &str) -> Result<String, AppError> {
+        let id = parse_id(id)?;
+        let snapshot = self.grabber()?.session.snapshot();
+        if let Some(link) = snapshot.links.iter().find(|l| l.id == id) {
+            return Ok(link.final_url.as_str().to_owned());
+        }
+        snapshot
+            .media_rows
+            .iter()
+            .find(|r| r.id == id)
+            .map(|r| r.source_url.as_str().to_owned())
+            .ok_or_else(|| AppError::invalid("id", "that link is no longer in the grabber"))
+    }
+
+    /// Applies one of the row's picker options. A stale option id (the row
+    /// was re-resolved, or is not pickable) changes nothing and says so.
+    pub async fn grabber_set_format(&self, id: &str, option_id: &str) -> Result<(), AppError> {
+        let grabber = self.grabber()?;
+        let id = parse_id(id)?;
+        let snapshot = grabber.session.snapshot();
+        let row = snapshot
+            .media_rows
+            .iter()
+            .find(|r| r.id == id)
+            .ok_or_else(|| AppError::invalid("id", "that video is no longer in the grabber"))?;
+        let media = row
+            .media
+            .as_ref()
+            .ok_or_else(|| AppError::invalid("optionId", "this video has no formats yet"))?;
+        let option = MediaFormatMenu::options(media, &GrabberDefaults::quality_preferences())
+            .into_iter()
+            .find(|option| option.id == option_id)
+            .ok_or_else(|| AppError::invalid("optionId", "that format is no longer offered"))?;
+        grabber.session.set_format_choice(option.choice, id);
+        self.publish(false).await
+    }
+
+    /// Hands grabber rows to the engine as packages, then removes the rows
+    /// that went. Package and "all" targets send every link and every
+    /// resolved media row (the rest are held back); a row selection sends
+    /// only addable rows (online or faulty links, resolved media).
+    pub async fn grabber_add_to_downloads(
+        &self,
+        target: HandoffTarget,
+        start: bool,
+    ) -> Result<(), AppError> {
+        let grabber = self.grabber()?;
+        let snapshot = grabber.session.snapshot();
+        let mut held_back_total: Option<usize> = None;
+        let mut groups: Vec<HandoffGroup> = Vec::new();
+        match &target {
+            HandoffTarget::Rows { ids } => {
+                let wanted: HashSet<Uuid> = parse_ids(ids)?.into_iter().collect();
+                groups = selection_groups(&snapshot, &wanted);
+            }
+            HandoffTarget::Package { id } => {
+                let id = parse_id(id)?;
+                let package = snapshot
+                    .packages
+                    .iter()
+                    .find(|p| p.id == id)
+                    .ok_or_else(|| AppError::invalid("id", "that package is no longer there"))?;
+                let (group, held) = package_group(&snapshot, package);
+                held_back_total = Some(held);
+                groups.extend(group);
+            }
+            HandoffTarget::All => {
+                let mut held = 0;
+                for package in &snapshot.packages {
+                    let (group, held_here) = package_group(&snapshot, package);
+                    held += held_here;
+                    groups.extend(group);
+                }
+                held_back_total = Some(held);
+            }
+        }
+        if let Some(held) = held_back_total {
+            grabber.set_held_back((held > 0).then_some(held as u32));
+        }
+        // Every group is resolved above, before anything is removed:
+        // removing a row reclusters the packages.
+        for group in groups {
+            let items: Vec<DownloadItem> = group
+                .items
+                .into_iter()
+                .map(|mut item| {
+                    item.state = if start {
+                        sdm_core::ItemState::Queued
+                    } else {
+                        sdm_core::ItemState::Stopped
+                    };
+                    item.is_enabled = true;
+                    item
+                })
+                .collect();
+            let mut package = DownloadPackage::new(group.name).with_items(items);
+            package.note = group.note;
+            self.add_package(package).await?;
+            for id in group.handoff_ids {
+                grabber.session.remove_link(id);
+            }
+        }
+        self.publish(false).await
+    }
+
     /// The managed-binaries provisioning step for launch: inflate bundled
     /// blobs (macOS) and check for a newer yt-dlp. Meant for a background task.
     pub async fn provision_binaries(&self) {
@@ -942,5 +1052,143 @@ impl App {
             binaries.provision_bundled_if_needed().await;
             let _ = binaries.check_now(sdm_resolve::CheckReason::Launch).await;
         }
+    }
+}
+
+/// One engine package's worth of grabber rows.
+struct HandoffGroup {
+    name: String,
+    note: Option<String>,
+    items: Vec<DownloadItem>,
+    /// The rows that become downloads and leave the grabber.
+    handoff_ids: Vec<Uuid>,
+}
+
+/// A whole grabber package. The second value counts media rows held back for
+/// want of a format. `None` when nothing in it can be handed off.
+fn package_group(
+    snapshot: &GrabberSnapshot,
+    package: &PackageCandidate,
+) -> (Option<HandoffGroup>, usize) {
+    let ids: HashSet<Uuid> = package.link_ids.iter().copied().collect();
+    let links: Vec<ProbedLink> = snapshot
+        .links
+        .iter()
+        .filter(|l| ids.contains(&l.id))
+        .cloned()
+        .collect();
+    let media: Vec<MediaRow> = snapshot
+        .media_rows
+        .iter()
+        .filter(|r| ids.contains(&r.id))
+        .cloned()
+        .collect();
+    let (items, held_back) = MediaHandoff::build(&links, &media);
+    if items.is_empty() {
+        return (None, held_back);
+    }
+    let handoff_ids = links
+        .iter()
+        .map(|l| l.id)
+        .chain(
+            media
+                .iter()
+                .filter(|r| r.state == MediaRowState::Resolved)
+                .map(|r| r.id),
+        )
+        .collect();
+    let group = HandoffGroup {
+        name: group_name(&package.name),
+        note: package.note.clone(),
+        items,
+        handoff_ids,
+    };
+    (Some(group), held_back)
+}
+
+/// A row is addable when an HTTP link is online or faulty, or a media row is resolved.
+fn is_addable(snapshot: &GrabberSnapshot, id: Uuid) -> bool {
+    if let Some(link) = snapshot.links.iter().find(|l| l.id == id) {
+        return matches!(link.verdict, Some(Verdict::Online | Verdict::Faulty { .. }));
+    }
+    snapshot
+        .media_rows
+        .iter()
+        .find(|r| r.id == id)
+        .is_some_and(|r| r.state == MediaRowState::Resolved)
+}
+
+/// One group per package the addable selected rows belong to; rows in no
+/// package each go under their own filename.
+fn selection_groups(snapshot: &GrabberSnapshot, wanted: &HashSet<Uuid>) -> Vec<HandoffGroup> {
+    struct Pending {
+        note: Option<String>,
+        links: Vec<ProbedLink>,
+        media: Vec<MediaRow>,
+    }
+    let mut order: Vec<String> = Vec::new();
+    let mut by_name: HashMap<String, Pending> = HashMap::new();
+    // Selection order is the session's row order, so the outcome is stable.
+    let row_ids = snapshot
+        .links
+        .iter()
+        .map(|l| l.id)
+        .chain(snapshot.media_rows.iter().map(|r| r.id))
+        .filter(|id| wanted.contains(id) && is_addable(snapshot, *id));
+    for id in row_ids {
+        let package = snapshot.packages.iter().find(|p| p.link_ids.contains(&id));
+        let link = snapshot.links.iter().find(|l| l.id == id);
+        let media = snapshot.media_rows.iter().find(|r| r.id == id);
+        let name = match package {
+            Some(package) => package.name.clone(),
+            None => link
+                .map(|l| l.effective_filename())
+                .or_else(|| media.map(|r| r.display_filename()))
+                .unwrap_or_else(|| "Download".to_owned()),
+        };
+        let pending = by_name.entry(name.clone()).or_insert_with(|| {
+            order.push(name.clone());
+            Pending {
+                note: package.and_then(|p| p.note.clone()),
+                links: Vec::new(),
+                media: Vec::new(),
+            }
+        });
+        if let Some(link) = link {
+            pending.links.push(link.clone());
+        } else if let Some(media) = media {
+            pending.media.push(media.clone());
+        }
+    }
+    order
+        .into_iter()
+        .filter_map(|name| {
+            let pending = by_name.remove(&name)?;
+            let (items, _) = MediaHandoff::build(&pending.links, &pending.media);
+            if items.is_empty() {
+                return None;
+            }
+            Some(HandoffGroup {
+                name: group_name(&name),
+                note: pending.note,
+                items,
+                handoff_ids: pending
+                    .links
+                    .iter()
+                    .map(|l| l.id)
+                    .chain(pending.media.iter().map(|r| r.id))
+                    .collect(),
+            })
+        })
+        .collect()
+}
+
+/// A package name the engine accepts (it refuses an empty one).
+fn group_name(name: &str) -> String {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        "Download".to_owned()
+    } else {
+        trimmed.to_owned()
     }
 }
