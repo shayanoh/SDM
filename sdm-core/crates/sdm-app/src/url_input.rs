@@ -45,7 +45,30 @@ pub(crate) fn derive_filename(url: &SourceUrl) -> String {
     let component = safe_path_component(&decoded);
     // `windows_safe_name` is what Windows will apply anyway; running it here
     // too keeps names stable across machines (and handles `CON.txt`).
-    windows_safe_name(&component).unwrap_or_else(|| "download".to_owned())
+    let name = windows_safe_name(&component).unwrap_or_else(|| "download".to_owned());
+    cap_bytes(name)
+}
+
+/// The longest file name macOS and Linux accept, in bytes (Windows counts
+/// UTF-16 units instead, which `windows_safe_name` already limits).
+const MAX_NAME_BYTES: usize = 255;
+
+/// Shortens `name` to `MAX_NAME_BYTES` bytes on a character boundary, keeping
+/// a short trailing extension, so multi-byte names do not fail at file creation.
+fn cap_bytes(name: String) -> String {
+    if name.len() <= MAX_NAME_BYTES {
+        return name;
+    }
+    let extension_start = name
+        .rfind('.')
+        .filter(|&dot| dot > 0 && name.len() - dot <= 16)
+        .unwrap_or(name.len());
+    let (stem, extension) = name.split_at(extension_start);
+    let mut end = MAX_NAME_BYTES.saturating_sub(extension.len());
+    while end > 0 && !stem.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}{extension}", &stem[..end])
 }
 #[cfg(test)]
 mod tests {
@@ -122,5 +145,15 @@ mod tests {
         let url = parse_download_url("https://example.com/CON.txt").unwrap();
         let name = derive_filename(&url);
         assert_eq!(name, "_CON.txt");
+    }
+    #[test]
+    fn a_long_multibyte_name_fits_the_255_byte_file_name_limit() {
+        // 120 three-byte characters: within 255 UTF-16 units, over 255 bytes.
+        let name = "日".repeat(120);
+        let url = parse_download_url(&format!("https://example.com/{name}.pdf")).unwrap();
+        let derived = derive_filename(&url);
+        assert!(derived.len() <= 255, "{} bytes", derived.len());
+        assert!(derived.ends_with(".pdf"), "{derived}");
+        assert!(derived.starts_with('日'));
     }
 }
