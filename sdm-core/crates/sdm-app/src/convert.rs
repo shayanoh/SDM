@@ -1,8 +1,5 @@
 //! Engine snapshot types -> wire types.
 
-// Callers arrive with the differ (Task 7); remove this allow there.
-#![allow(dead_code)]
-
 use sdm_core::ItemState;
 use sdm_engine::{EngineSnapshot, ItemSnapshot, PackageSnapshot};
 
