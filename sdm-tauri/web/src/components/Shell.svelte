@@ -3,7 +3,7 @@
   import { completedView } from "../lib/views";
   import Banner from "./Banner.svelte";
   import BottomBar from "./BottomBar.svelte";
-  import DownloadList from "./DownloadList.svelte";
+  import PackageList from "./PackageList.svelte";
   import LinkgrabberPlaceholder from "./LinkgrabberPlaceholder.svelte";
   import Sidebar from "./Sidebar.svelte";
 
@@ -55,7 +55,12 @@
     {#if ui.tab === "linkgrabber"}
       <LinkgrabberPlaceholder />
     {:else}
-      <DownloadList />
+      <PackageList
+        view={onDownloads ? downloads : completed}
+        tab={onDownloads ? "downloads" : "completed"}
+        allowsReordering={onDownloads}
+        showsLiveAggregates={onDownloads}
+      />
       <BottomBar
         view={onDownloads ? downloads : completed}
         showsPauseResume={onDownloads}

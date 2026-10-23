@@ -7,6 +7,7 @@ import type {
   PackageFigures,
   StructureItem,
 } from "../bindings";
+import { averageRecentSpeed } from "./rowText";
 
 /** The wire turns a non-finite `f64` into `null`; the UI reads that as zero. */
 const num = (value: number | null): number => value ?? 0;
@@ -39,9 +40,15 @@ export class ItemModel {
   speedHistory = $state.raw<number[]>([]);
   retryHoldSeconds = $state<number | null>(null);
   failedAttemptCount = $state<number | null>(null);
+  remainingAttempts = $state<number | null>(null);
   lastFailureReason = $state<string | null>(null);
   checkpointFailure = $state<string | null>(null);
   detailHistory = $state.raw<number[] | null>(null);
+
+  /** Queued after a failure that still has attempts left (the engine sets a failed-attempt count). */
+  get isRetrying(): boolean {
+    return this.state.kind === "queued" && this.failedAttemptCount !== null;
+  }
 
   constructor(id: string) {
     this.id = id;
@@ -69,6 +76,7 @@ export class ItemModel {
     this.speedHistory = nums(f.speedHistory);
     this.retryHoldSeconds = f.retryHoldSeconds;
     this.failedAttemptCount = f.failedAttemptCount;
+    this.remainingAttempts = f.remainingAttempts;
     this.lastFailureReason = f.lastFailureReason;
     this.checkpointFailure = f.checkpointFailure;
   }
@@ -177,6 +185,13 @@ export class DownloadStore {
       if (!livePackages.has(id)) this.packages.delete(id);
     this.order = order;
     this.onStructure?.();
+  }
+
+  /** The global download rate averaged over the last ten seconds (a queued item's ETA uses it). */
+  get globalRecentSpeed(): number {
+    const stats = this.stats;
+    if (!stats) return 0;
+    return averageRecentSpeed(nums(stats.history), num(stats.bytesPerSecond));
   }
 
   /** Every package id and item id currently in the list. */

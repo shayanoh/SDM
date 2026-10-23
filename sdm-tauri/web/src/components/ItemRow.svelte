@@ -1,123 +1,144 @@
 <script lang="ts">
-  import { errorMessage, useBridge, useUi } from "../lib/context";
-  import { formatBytes, formatSpeed } from "../lib/format";
+  import { useStore } from "../lib/context";
+  import { formatBytes, formatEta, formatSpeed } from "../lib/format";
+  import { describeItem, itemEta, statusTone } from "../lib/rowText";
   import type { ItemModel } from "../lib/store.svelte";
+  import Icon from "./Icon.svelte";
   import SegmentedBar from "./SegmentedBar.svelte";
   import Sparkline from "./Sparkline.svelte";
+  import StateIcon from "./StateIcon.svelte";
 
-  let { item, selected }: { item: ItemModel; selected: boolean } = $props();
+  let { item }: { item: ItemModel } = $props();
 
-  const bridge = useBridge();
-  const ui = useUi();
+  const store = useStore();
 
-  const kind = $derived(item.state.kind);
-  const label = $derived.by(() => {
-    const state = item.state;
-    switch (state.kind) {
-      case "running":
-        return "Running";
-      case "queued":
-        return "Queued";
-      case "stopped":
-        return "Paused";
-      case "completed":
-        return "Done";
-      case "failed":
-        return `Failed: ${state.reason}`;
-    }
-  });
-  const active = $derived(kind === "running" || kind === "queued");
-
-  async function run(action: () => Promise<void>) {
-    try {
-      await action();
-    } catch (error) {
-      ui.report(errorMessage(error));
-    }
-  }
+  const fraction = $derived(
+    item.totalBytes !== null && item.totalBytes > 0
+      ? item.completedBytes / item.totalBytes
+      : 0,
+  );
+  const status = $derived(
+    describeItem(item, item.isRetrying ? item.retryHoldSeconds : null),
+  );
+  const tone = $derived(statusTone(item));
+  const eta = $derived(
+    item.state.kind === "running" || item.state.kind === "queued"
+      ? itemEta(item, store.globalRecentSpeed)
+      : 0,
+  );
 </script>
 
-<div class="item" class:selected data-state={kind}>
-  <div class="top">
-    <span class="name" title={item.url}>{item.filename}</span>
-    <span class="figures">
-      {formatBytes(item.completedBytes)} / {item.totalBytes === null
-        ? "—"
-        : formatBytes(item.totalBytes)}
-    </span>
-    <span class="figures">{formatSpeed(item.bytesPerSecond)}</span>
-    <span class="state">{label}</span>
-    <Sparkline samples={item.speedHistory} />
-    <span class="actions">
-      {#if kind !== "completed"}
-        <button
-          type="button"
-          onclick={() =>
-            run(() =>
-              active
-                ? bridge.stopItems([item.id])
-                : bridge.startItems([item.id]),
-            )}
-        >
-          {active ? "Pause" : "Resume"}
-        </button>
-      {/if}
-      {#if kind === "failed"}
-        <button
-          type="button"
-          onclick={() => run(() => bridge.retryItems([item.id]))}
-        >
-          Retry
-        </button>
-      {/if}
-      <button
-        type="button"
-        onclick={() => run(() => bridge.removeItems([item.id], false))}
-      >
-        Remove
-      </button>
-    </span>
+<div class="item" class:disabled={!item.isEnabled}>
+  <div class="icon">
+    <StateIcon
+      state={item.state}
+      {fraction}
+      isRetrying={item.isRetrying}
+      isAssembling={item.isAssembling}
+    />
   </div>
-  <SegmentedBar completed={item.completed} total={item.totalBytes} />
+  <div class="body">
+    <div class="line">
+      <span
+        class="name"
+        class:struck={!item.isEnabled}
+        dir="auto"
+        title={item.url}
+      >
+        {item.filename}
+      </span>
+      {#if item.isResumable === false}
+        <span class="caption muted">not resumable</span>
+      {/if}
+      {#if item.fileMissing}
+        <span class="caption faulty">
+          <Icon name="triangle-alert" size={11} /> file missing
+        </span>
+      {/if}
+      <span class="spacer"></span>
+      <span class="caption mono muted"
+        >{item.activeSegments}/{item.configuredSegments} seg</span
+      >
+      <span class="caption mono">{formatSpeed(item.bytesPerSecond)}</span>
+      <Sparkline samples={item.speedHistory} width={48} height={16} />
+    </div>
+    <SegmentedBar completed={item.completed} total={item.totalBytes} />
+    <div class="line">
+      <span class="caption status tone-{tone}">{status}</span>
+      {#if item.checkpointFailure !== null}
+        <span class="caption faulty status">{item.checkpointFailure}</span>
+      {/if}
+      {#if eta > 0}
+        <span class="caption muted">ETA: {formatEta(eta)}</span>
+      {/if}
+      <span class="spacer"></span>
+      <span class="caption mono muted">
+        {formatBytes(item.completedBytes)} / {formatBytes(item.totalBytes ?? 0)}
+      </span>
+    </div>
+  </div>
 </div>
 
 <style>
   .item {
-    height: var(--row-height);
-    box-sizing: border-box;
-    padding: 6px 12px;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    height: 100%;
+    padding: 8px 20px 8px 43px;
+  }
+  .item.disabled {
+    opacity: 0.55;
+  }
+  .icon {
+    flex: none;
+    width: 20px;
+    padding-top: 1px;
+  }
+  .body {
+    flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 4px;
-    border-bottom: 1px solid var(--border);
   }
-  .item.selected {
-    background: var(--selection-tint);
-  }
-  .top {
+  .line {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
+    min-width: 0;
   }
   .name {
-    flex: 1;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .figures,
-  .state {
+  .name.struck {
     color: var(--text-secondary);
-    font-variant-numeric: tabular-nums;
+    text-decoration: line-through;
   }
-  [data-state="failed"] .state {
+  .spacer {
+    flex: 1;
+  }
+  .muted {
+    color: var(--text-secondary);
+  }
+  .faulty,
+  .tone-faulty {
+    color: var(--status-faulty);
+  }
+  .tone-failed {
     color: var(--status-failed);
   }
-  .actions {
-    display: flex;
-    gap: 6px;
+  .tone-secondary {
+    color: var(--text-secondary);
   }
-  button {
-    padding: 1px 8px;
+  .status {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
   }
 </style>
