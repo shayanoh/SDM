@@ -457,8 +457,10 @@ async fn a_failed_tool_download_shows_an_error_notice_in_the_view() {
 async fn view_cost_for_two_thousand_links() {
     let kit = grabber_kit(None, FakeOrigin::new(payload(10))).await;
     for i in 0..2000 {
-        kit.origin
-            .set_behavior(online(), &su(&format!("https://h{}.example.com/file{i}.zip", i % 50)));
+        kit.origin.set_behavior(
+            online(),
+            &su(&format!("https://h{}.example.com/file{i}.zip", i % 50)),
+        );
     }
     let text = (0..2000)
         .map(|i| format!("https://h{}.example.com/file{i}.zip", i % 50))

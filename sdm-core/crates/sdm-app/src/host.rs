@@ -15,6 +15,11 @@ pub trait Host: Send + Sync {
     /// Holds `state.json`, resume sidecars, `settings.json` and `bin/`.
     fn data_dir(&self) -> PathBuf;
     fn default_download_dir(&self) -> PathBuf;
+    /// The folder of the app's bundled LZFSE tool blobs and `vendor-manifest.json`,
+    /// where the platform ships them (macOS); `None` where tools are downloaded.
+    fn bundled_tools_dir(&self) -> Option<PathBuf> {
+        None
+    }
     /// Shows `path` selected in the file manager.
     fn reveal_in_file_manager(&self, path: &Path) -> Result<(), HostError>;
     /// Opens `path` with the OS default application (a folder opens in the file manager).

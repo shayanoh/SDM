@@ -46,8 +46,13 @@ pub fn production_dependencies(host: &dyn Host) -> Dependencies {
     let muxer: Arc<dyn Muxer> =
         Arc::new(FfmpegMuxer::new(Arc::clone(&runner), Arc::clone(&locator)));
 
-    // No bundled blobs here: on macOS the SwiftUI app's bundle holds them and
-    // shares this `bin/` directory; Windows and Linux download the pinned tools.
+    // macOS inflates the blobs its bundle ships into `bin/` (shared with the
+    // SwiftUI app); Windows and Linux download the tools instead.
+    let bundled_dir = host.bundled_tools_dir();
+    let vendor_assets = move || match &bundled_dir {
+        Some(dir) => sdm_resolve::vendor_assets(dir, sdm_resolve::host_vendor_arch()),
+        None => Vec::new(),
+    };
     let invalidate = Arc::clone(&locator);
     // Whether `ffmpeg` is on disk, which the grabber needs to offer muxed
     // formats; refreshed whenever the managed binaries change.
@@ -63,7 +68,7 @@ pub fn production_dependencies(host: &dyn Host) -> Dependencies {
         bin_directory,
         Arc::new(ReqwestBinaryFetcher::new()),
         runner,
-        Vec::new,
+        vendor_assets,
         || YtDlpChannel::Stable,
     )
     .with_on_binaries_changed(move || {
