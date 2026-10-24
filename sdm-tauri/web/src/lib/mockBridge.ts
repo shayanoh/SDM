@@ -808,6 +808,22 @@ export class MockBridge implements Bridge {
     for (const listener of [...this.#themeListeners]) listener(themeId);
   }
 
+  #navigateListeners = new Set<(route: string) => void>();
+
+  async showMain(route?: string) {
+    if (route !== undefined) this.emitNavigate(route);
+  }
+
+  onNavigate(handler: (route: string) => void) {
+    this.#navigateListeners.add(handler);
+    return () => void this.#navigateListeners.delete(handler);
+  }
+
+  /** What the backend does when a notification is clicked. */
+  emitNavigate(route: string) {
+    for (const handler of this.#navigateListeners) handler(route);
+  }
+
   onThemePreview(handler: (themeId: string | null) => void) {
     this.#themeListeners.add(handler);
     return () => void this.#themeListeners.delete(handler);

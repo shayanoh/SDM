@@ -38,6 +38,8 @@ export const commands = {
 	 *  window created from a synchronous command deadlocks on Windows.
 	 */
 	openSettings: () => typedError<null, AppError>(__TAURI_INVOKE("open_settings")),
+	/**  Shows the main window, on the tab `route` names when it names one. */
+	showMain: (route: string | null) => typedError<null, AppError>(__TAURI_INVOKE("show_main", { route })),
 	/**  Previews a theme in every window; `None` goes back to the stored theme. */
 	broadcastTheme: (themeId: string | null) => typedError<null, AppError>(__TAURI_INVOKE("broadcast_theme", { themeId })),
 	themeCss: (themeId: string | null) => typedError<string, AppError>(__TAURI_INVOKE("theme_css", { themeId })),

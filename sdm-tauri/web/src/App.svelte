@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import Shell from "./components/Shell.svelte";
   import { errorMessage, useBridge, useStore, useUi } from "./lib/context";
+  import { wireNavigation } from "./lib/navigation";
   import { startTheming } from "./lib/theme";
   import { syncVibrancy } from "./lib/vibrancy";
 
@@ -23,6 +24,7 @@
     };
     document.addEventListener("visibilitychange", onVisibility);
 
+    const stopNavigation = wireNavigation(bridge, ui);
     let stopTheming: (() => void) | undefined;
     void guarded(async () => {
       // `?theme=deep-purple` shows another bundled theme (the screenshots use it).
@@ -37,6 +39,7 @@
     return () => {
       document.removeEventListener("visibilitychange", onVisibility);
       stopTheming?.();
+      stopNavigation();
     };
   });
 </script>

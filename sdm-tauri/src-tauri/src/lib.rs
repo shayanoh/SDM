@@ -1,5 +1,7 @@
 mod commands;
 mod host;
+mod main_window;
+mod notify;
 mod settings_window;
 mod vibrancy;
 
@@ -70,6 +72,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
         check_binaries_now,
         list_themes,
         open_settings,
+        show_main,
         broadcast_theme,
         theme_css,
         vibrancy_active,
@@ -145,6 +148,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
         // Remembers the main window's size, position and maximized state.
         .plugin(
             tauri_plugin_window_state::Builder::default()
@@ -176,6 +180,7 @@ pub fn run() {
         })
         .setup(move |tauri_app| {
             builder.mount_events(tauri_app);
+            notify::install_click_handler(tauri_app.handle())?;
             #[cfg(target_os = "macos")]
             install_menu(tauri_app.handle())?;
             let (app, simulation) = build_app(tauri_app.handle())?;

@@ -63,14 +63,6 @@ impl Host for TauriHost {
     }
 
     fn notify(&self, notification: Notification) -> Result<(), HostError> {
-        // Spec 5 turns this into an OS notification.
-        let _ = &self.app;
-        match notification {
-            Notification::Finished { filename } => tracing::info!("finished: {filename}"),
-            Notification::Failed { filename, reason } => {
-                tracing::info!("failed: {filename}: {reason}")
-            }
-        }
-        Ok(())
+        crate::notify::show(&self.app, &notification)
     }
 }

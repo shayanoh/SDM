@@ -115,6 +115,15 @@ export class TauriBridge implements Bridge {
     );
     return () => void stopping.then((stop) => stop());
   }
+  showMain(route?: string) {
+    return unwrapVoid(commands.showMain(route ?? null));
+  }
+  onNavigate(handler: (route: string) => void) {
+    const stopping = listen<string>("navigate", (event) =>
+      handler(event.payload),
+    );
+    return () => void stopping.then((stop) => stop());
+  }
   vibrancyActive() {
     return unwrap(commands.vibrancyActive());
   }

@@ -260,6 +260,13 @@ pub async fn open_settings(handle: tauri::AppHandle) -> Result<(), AppError> {
     crate::settings_window::open(&handle)
 }
 
+/// Shows the main window, on the tab `route` names when it names one.
+#[tauri::command]
+#[specta::specta]
+pub async fn show_main(handle: tauri::AppHandle, route: Option<String>) -> Result<(), AppError> {
+    crate::main_window::show(&handle, route.as_deref())
+}
+
 /// Previews a theme in every window; `None` goes back to the stored theme.
 #[tauri::command]
 #[specta::specta]
