@@ -29,6 +29,7 @@ use crate::notify::{Notification, notifications_between};
 use crate::protocol::*;
 use crate::settings::SettingsStore;
 use crate::theme::theme_css;
+use crate::tray::TrayStatus;
 use crate::url_input::{derive_filename, parse_download_url};
 
 /// The engine's collaborators. `production()` (in `toolchain.rs`) builds the
@@ -1034,6 +1035,21 @@ impl App {
         // The caller is about to put this on the clipboard: do not grab it back.
         lock(&self.clipboard).ignore_own_write(&url);
         Ok(url)
+    }
+
+    /// What the tray shows now, from the last published snapshot. Takes no
+    /// engine await, so the shell can call it on every tick.
+    pub fn tray_status(&self) -> TrayStatus {
+        let links_waiting = self.grabber.as_ref().map_or(0, |grabber| {
+            u32::try_from(grabber.session.row_ids().len()).unwrap_or(u32::MAX)
+        });
+        match &lock(&self.state).previous {
+            Some(snapshot) => TrayStatus::from_snapshot(snapshot, links_waiting),
+            None => TrayStatus::from_snapshot(
+                &EngineSnapshot::new(Vec::new(), 0.0, Vec::new(), 0),
+                links_waiting,
+            ),
+        }
     }
 
     /// Whether the clipboard should be read at all. The shell checks this

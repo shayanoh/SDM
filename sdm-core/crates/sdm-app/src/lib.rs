@@ -14,6 +14,7 @@ pub mod protocol;
 pub mod settings;
 pub mod simulation;
 pub mod theme;
+pub mod tray;
 
 mod convert;
 mod differ;
