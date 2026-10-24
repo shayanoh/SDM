@@ -333,12 +333,15 @@ function liveApp(text?: string): App & { mock: MockBridge } {
 const settle = { timeout: 5000 };
 
 describe("LinkgrabberView", () => {
-  it("shows the empty state with the download folder still reachable", async () => {
+  it("shows the empty state with no download folder field and no tools line", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     try {
-      renderIn(LinkgrabberView, liveApp());
+      const view = renderIn(LinkgrabberView, liveApp());
       expect(screen.getByText("No links yet.")).toBeTruthy();
-      expect(await screen.findByLabelText("Download folder")).toBeTruthy();
+      // Give a stray status poll the time it would need to appear.
+      await vi.advanceTimersByTimeAsync(6000);
+      expect(screen.queryByLabelText("Download folder")).toBeNull();
+      expect(view.container.textContent).not.toMatch(/yt-dlp|ffmpeg|qjs/);
     } finally {
       vi.useRealTimers();
     }

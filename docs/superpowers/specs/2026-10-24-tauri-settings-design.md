@@ -1,6 +1,6 @@
 # Tauri UI, spec 4: Settings window and themes
 
-Status: **draft for review** (2026-10-24). Part of [docs/tauri-roadmap.md](../../tauri-roadmap.md);
+Status: **IMPLEMENTED** on branch `tauri-ui` (2026-10-24); see the roadmap log for what was and was not verified. Part of [docs/tauri-roadmap.md](../../tauri-roadmap.md);
 builds on the [foundation](2026-10-14-tauri-foundation-design.md), the
 [main window](2026-10-23-tauri-main-window-design.md) and the
 [link grabber](2026-10-24-tauri-link-grabber-design.md).

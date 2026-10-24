@@ -20,7 +20,6 @@
   import Icon from "./Icon.svelte";
   import MenuSurface from "./MenuSurface.svelte";
   import RenamePackagePrompt from "./RenamePackagePrompt.svelte";
-  import TemporaryTools from "./TemporaryTools.svelte";
 
   /**
    * The link grabber, as SwiftUI lays it out: an Add Links action, the
@@ -122,7 +121,6 @@
     <div class="empty">
       <p class="message">No links yet.</p>
       <p class="muted">Paste or drop links, or choose Add Links.</p>
-      <TemporaryTools />
     </div>
   {:else}
     <GrabberList
