@@ -34,7 +34,7 @@
 
 ## Phase T: platform tools (`sdm-core/crates/sdm-resolve`)
 
-### Task 1: Pin the tool sources
+### Task 1: Name the tool sources (built as a pinned table, then changed to latest-only on 2026-10-24)
 
 **Files:**
 - Create: `sdm-core/crates/sdm-resolve/src/platform_tools.rs` (table and doc comment only in this task)

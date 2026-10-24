@@ -22,7 +22,7 @@ use crate::managed_binaries_types::{
     BinariesManifest, CheckOutcome, CheckReason, ManagedBinariesStatus, ToolsActivity, VendorAsset,
     YtDlpChannel, YtDlpVersion, yt_dlp_asset_name,
 };
-use crate::platform_tools::{PlatformTool, platform_tools};
+use crate::platform_tools::{PlatformTool, UpdatePolicy, VersionSource, platform_tools};
 use crate::process_runner::ProcessRunner;
 use crate::tool_install::install_tool;
 
@@ -97,6 +97,23 @@ enum DownloadError {
 #[derive(Deserialize)]
 struct GitHubRelease {
     tag_name: String,
+}
+
+/// The parts of a GitHub release a platform tool needs.
+#[derive(Deserialize)]
+struct ToolRelease {
+    tag_name: String,
+    published_at: Option<String>,
+    #[serde(default)]
+    assets: Vec<ToolAsset>,
+}
+
+#[derive(Deserialize)]
+struct ToolAsset {
+    name: String,
+    browser_download_url: String,
+    /// `sha256:<hex>`, which GitHub computes for every asset.
+    digest: Option<String>,
 }
 
 impl ManagedBinaries {
@@ -321,8 +338,9 @@ impl Inner {
         outcome
     }
 
-    /// Downloads, verifies and installs each pinned tool that is missing or
-    /// at another version. A failure is recorded and retried by the next check.
+    /// Installs each platform tool that is missing or out of date from its
+    /// release's newest asset, checked against the digest the release
+    /// publishes. A failure is recorded and retried by the next check.
     async fn ensure_platform_tools(&self) {
         let mut changed = false;
         let mut failure: Option<String> = None;
@@ -332,22 +350,25 @@ impl Inner {
                 .members
                 .iter()
                 .all(|m| is_executable_file(&self.bin_directory.join(&m.file_name)));
-            if present && manifest.version_for(&tool.name) == Some(tool.version.as_str()) {
+            let recorded = manifest.version_for(&tool.name).map(str::to_owned);
+            // Nothing to ask the network when the file is there and never replaced.
+            if present && tool.policy == UpdatePolicy::IfMissing {
                 continue;
             }
             self.state.lock().unwrap().tools_activity = ToolsActivity::Fetching(tool.name.clone());
-            match self.fetch_and_install(tool).await {
-                Ok(()) => {
+            match self.fetch_and_install(tool, present, recorded).await {
+                Ok(Some(version)) => {
                     let mut manifest = self.load_manifest();
                     match tool.name.as_str() {
-                        "ffmpeg" => manifest.ffmpeg_version = Some(tool.version.clone()),
-                        "qjs" => manifest.qjs_version = Some(tool.version.clone()),
+                        "ffmpeg" => manifest.ffmpeg_version = Some(version),
+                        "qjs" => manifest.qjs_version = Some(version),
                         _ => {}
                     }
                     manifest.last_error = None;
                     let _ = self.save_manifest(&manifest);
                     changed = true;
                 }
+                Ok(None) => {}
                 Err(message) => {
                     let message = format!("fetch {}: {message}", tool.name);
                     let mut manifest = self.load_manifest();
@@ -366,16 +387,51 @@ impl Inner {
         }
     }
 
-    async fn fetch_and_install(&self, tool: &PlatformTool) -> Result<(), String> {
-        let url = url::Url::parse(&tool.url).map_err(|e| e.to_string())?;
+    /// Reads the release, and installs its asset unless the tool is present at
+    /// that version. Returns the installed version, or `None` if already current.
+    async fn fetch_and_install(
+        &self,
+        tool: &PlatformTool,
+        present: bool,
+        recorded: Option<String>,
+    ) -> Result<Option<String>, String> {
+        let api = url::Url::parse(&tool.release_api).map_err(|e| e.to_string())?;
+        let info = self.fetcher.data(&api).await.map_err(|e| e.to_string())?;
+        let release: ToolRelease =
+            serde_json::from_slice(&info).map_err(|e| format!("release info: {e}"))?;
+        let version = match tool.version_source {
+            VersionSource::Tag => release.tag_name.clone(),
+            VersionSource::PublishedDate => release
+                .published_at
+                .as_deref()
+                .and_then(|at| at.get(..10))
+                .unwrap_or(&release.tag_name)
+                .to_owned(),
+        };
+        if present && recorded.as_deref() == Some(version.as_str()) {
+            return Ok(None);
+        }
+        let asset = release
+            .assets
+            .iter()
+            .find(|a| a.name == tool.asset_name)
+            .ok_or_else(|| format!("the release has no {}", tool.asset_name))?;
+        let sha256 = asset
+            .digest
+            .as_deref()
+            .and_then(|d| d.strip_prefix("sha256:"))
+            .ok_or_else(|| format!("the release has no checksum for {}", tool.asset_name))?
+            .to_owned();
+        let url = url::Url::parse(&asset.browser_download_url).map_err(|e| e.to_string())?;
         let bytes = self.fetcher.data(&url).await.map_err(|e| e.to_string())?;
         let tool = tool.clone();
         let bin = self.bin_directory.clone();
-        // Hashing and unpacking a 190 MB archive must not block an async worker.
-        tokio::task::spawn_blocking(move || install_tool(&tool, &bytes, &bin))
+        // Hashing and unpacking a 200 MB archive must not block an async worker.
+        tokio::task::spawn_blocking(move || install_tool(&tool, &sha256, &bytes, &bin))
             .await
             .map_err(|e| e.to_string())?
-            .map_err(|e| e.to_string())
+            .map_err(|e| e.to_string())?;
+        Ok(Some(version))
     }
 
     async fn perform_yt_dlp_check(&self, reason: CheckReason) -> CheckOutcome {

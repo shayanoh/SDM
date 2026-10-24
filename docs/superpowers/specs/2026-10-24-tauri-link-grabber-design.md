@@ -29,7 +29,7 @@ Two things ship together, because the first is where the second first hurts:
 | G7 | *(my call)* The session is the native Rust `sdm_grabber::GrabberSession`, built in `sdm-app` with the production prober and the same resolver `production_dependencies` already builds. Not the UniFFI wrapper in `sdm-ffi` (that is SwiftUI's seam; it needs `Toolchain` and `GrabberSettings` plumbing the controller does not). | me |
 | G8 | *(my call)* Until spec 4 adds the settings, the grabber runs on the SwiftUI defaults: deep sniff on, auto-clear after 30 minutes, default quality preferences, no cookie source, 50 playlist videos, no extra yt-dlp arguments, probe limits 8 global / 4 per host (the engine's defaults) and 4 concurrent resolves. They are constants in one `GrabberDefaults` struct that spec 4 replaces with stored settings. | me |
 | G9 | *(my call)* The "known downloads" duplicate marking is wired: after every engine publish whose set of item URLs changed, the controller calls `set_known_download_urls`. | me |
-| G10 | *(my call)* `ffmpeg`, `ffprobe` and `qjs` archives are downloaded as **pinned releases with SHA-256 verification**, never a floating `latest` URL (section 6). | me |
+| G10 | **Latest only, no pins** (Shayan, 2026-10-24, replacing my pinned-build call: a pinned build expires when its publisher deletes it and keeping a pin fresh is upkeep the product should not need). `ffmpeg`, `ffprobe` and `qjs` come from the newest release asset, verified against the SHA-256 digest that release publishes (section 6). | Shayan |
 
 ## 3. Goals, non-goals, anti-goals
 
@@ -167,31 +167,34 @@ the first line of a failure).
 
 ### 6.1 What gets downloaded
 
-| Tool | Source | Platforms |
-|---|---|---|
-| `ffmpeg`, `ffprobe` | BtbN `FFmpeg-Builds` GPL static build archive (`.zip` on Windows, `.tar.xz` on Linux) from a **tagged** release | Windows x64, Linux x86_64 |
-| `qjs` | `quickjs-ng/quickjs` release asset (the single `qjs` executable for the platform) | Windows x64, Linux x86_64 |
+| Tool | Source | Asset | Updated |
+|---|---|---|---|
+| `ffmpeg`, `ffprobe` | BtbN `FFmpeg-Builds`, the rolling `latest` release (GPL `master` builds) | `ffmpeg-master-latest-win64-gpl.zip` / `ffmpeg-master-latest-linux64-gpl.tar.xz` | Only when a file is missing: the build is rebuilt daily and is 150 to 200 MB, so an installed ffmpeg is left alone and a re-download is "delete the file". |
+| `qjs` | `quickjs-ng/quickjs`, the newest release | `qjs-windows-x86_64.exe` / `qjs-linux-x86_64` (a single executable) | When the release tag differs from the recorded one (2 MB). |
 
-The exact tags, URLs, archive layouts and SHA-256 values are decided **while planning** (spec 1's plan said the
-same), recorded in a doc comment at the top of `platform_tools.rs` with the date, and re-verified against the
-release pages. If BtbN does not publish a usable pinned tag, the fallback is gyan.dev (Windows) and John Van
-Sickle's static builds (Linux), and the plan stops and asks. Licences: the GPL build is downloaded by the
-user's machine at run time, not redistributed.
+Both are read from the GitHub releases API. The asset to take is named exactly; its checksum is the `digest`
+(`sha256:…`) GitHub publishes with every asset, the same trust level `yt-dlp`'s update already uses. A release
+that has no such asset or no digest is refused with a clear message. The `master` builds are chosen because their
+asset names never change (the numbered `ffmpeg-n9.0-latest-…` names are renamed at every FFmpeg release). The
+trade-off Shayan accepted: a compromised release would be trusted, and the ffmpeg of the day is whatever BtbN
+built. Licences: the GPL build is downloaded by the user's machine at run time, not redistributed.
 
 ### 6.2 Mechanism
 
-`platform_tools.rs` holds a table `PlatformTool { name, url, sha256, archive: Raw | Zip{member} | TarXz{member} }`
-per supported target, compiled in with `cfg(all(target_os, target_arch))`; on any other target the table is
-empty and nothing downloads. `ManagedBinaries` gets the step "ensure platform tools": for each tool whose file
-is missing or whose recorded version (`ffmpegVersion` / `qjsVersion` in the manifest) differs from the pinned
-one, download through the existing `BinaryFetching` seam, verify the SHA-256 **before** extracting, extract the
-one member, write atomically (temp file then rename, executable bit on Linux), and update the manifest.
-`ffmpeg` and `ffprobe` come from one archive, downloaded once. Failures set `lastError` (as yt-dlp's do) and
-retry on the existing absent-interval cadence; a partial archive is never left in `bin/`. Time stays
-tick-driven; no clock, no sleeping tests.
+`platform_tools.rs` holds a table `PlatformTool { name, release_api, asset_name, archive, members, policy,
+version_source }` per supported target, compiled in with `cfg(all(target_os, target_arch))`; on any other target
+the table is empty and nothing downloads. A member names an archive entry by a path suffix (`bin/ffmpeg.exe`),
+because the build's top folder is renamed with every build; entries that climb out (`..`) or are absolute never
+match. `ManagedBinaries` gets the step "ensure platform tools": for each tool whose files are missing or (qjs) whose
+recorded version differs from the release's, read the release, take the asset and its digest, download through the
+existing `BinaryFetching` seam, verify the SHA-256 **before** extracting, extract the members, write atomically
+(temp file then rename, executable bit on Linux), and update the manifest (`ffmpegVersion` is the release's
+publication day, `qjsVersion` its tag). `ffmpeg` and `ffprobe` come from one archive, downloaded once. Failures set
+`lastError` (as yt-dlp's do) and retry on the existing absent-interval cadence; a partial archive is never left in
+`bin/`. Time stays tick-driven; no clock, no sleeping tests.
 
-Archive handling needs new dependencies (`zip`, `tar`, an xz decoder). They are added with `cargo add` and
-chosen for being pure Rust, so the Windows cross-build and the Docker Linux build need no system library.
+Archive handling needs new dependencies (`zip`, `tar`, `lzma-rs`), pure Rust so the Windows cross-build and the
+Docker Linux build need no system library.
 
 ### 6.3 When it runs
 
@@ -244,7 +247,7 @@ Recorded here, in the roadmap's spec 3 and spec 4 rows, and in the project memor
 
 | Risk | Handling |
 |---|---|
-| BtbN keeps only recent tagged builds, so a pinned URL may disappear | Pin to a tagged release asset, re-verify at planning time, record the date; if it breaks, a hand-updated table row is the fix (one place) |
+| BtbN or quickjs-ng renames an asset | The table names assets exactly and the failure says `the release has no <asset>`; the fix is one table edit. The `master` builds were chosen so the names are stable |
 | ~150 MB `ffmpeg` archive on a slow link | The download runs in the background with a visible notice and retries; the grabber works for plain links meanwhile |
 | Full-view replacement at the tick rate for a very large batch | Send only when the view changed; windowed list. Measure with a 2,000-link fixture; if the patch is too heavy, the fallback is a row-level diff on the same `grabber` field |
 | `FormatChoice` ids unstable across snapshots | Option ids are derived from the format ids, not positions; the action re-derives from the row's media, and a stale id is a no-op with an error toast |

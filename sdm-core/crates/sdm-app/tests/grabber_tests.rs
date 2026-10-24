@@ -387,21 +387,32 @@ async fn without_a_grabber_every_action_is_a_clear_error() {
 async fn a_failed_tool_download_shows_an_error_notice_in_the_view() {
     use sdm_resolve::testing::{FakeBinaryFetcher, FakeProcessRunner};
     use sdm_resolve::{
-        ArchiveKind, CheckReason, ManagedBinaries, PlatformTool, ToolMember, YtDlpChannel,
+        ArchiveKind, CheckReason, ManagedBinaries, PlatformTool, ToolMember, UpdatePolicy,
+        VersionSource, YtDlpChannel,
     };
 
     let tool = PlatformTool {
         name: "qjs".into(),
-        version: "q1".into(),
-        url: "https://tools.example/qjs".into(),
-        sha256: "0".repeat(64),
+        release_api: "https://api.example/qjs/releases/latest".into(),
+        asset_name: "qjs-linux".into(),
         archive: ArchiveKind::Raw,
         members: vec![ToolMember::new("", "qjs")],
+        policy: UpdatePolicy::WhenVersionChanges,
+        version_source: VersionSource::Tag,
     };
     let fetcher = std::sync::Arc::new(FakeBinaryFetcher::new());
+    // The release claims one checksum; the bytes it serves are another.
+    fetcher.set_response(
+        Ok(format!(
+            "{{\"tag_name\":\"v1\",\"published_at\":null,\"assets\":[{{\"name\":\"qjs-linux\",\"browser_download_url\":\"https://dl.example/qjs\",\"digest\":\"sha256:{}\"}}]}}",
+            "0".repeat(64)
+        )
+        .into_bytes()),
+        &url::Url::parse("https://api.example/qjs/releases/latest").unwrap(),
+    );
     fetcher.set_response(
         Ok(b"TAMPERED".to_vec()),
-        &url::Url::parse("https://tools.example/qjs").unwrap(),
+        &url::Url::parse("https://dl.example/qjs").unwrap(),
     );
     let bin = tempfile::tempdir().unwrap();
     let binaries = ManagedBinaries::new(

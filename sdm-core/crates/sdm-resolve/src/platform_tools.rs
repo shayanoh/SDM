@@ -1,23 +1,22 @@
-//! The pinned downloads for `ffmpeg`, `ffprobe` and `qjs` on Windows x64 and
-//! Linux x86_64 (macOS bundles its own; see `ManagedBinaries`).
+//! Where `ffmpeg`, `ffprobe` and `qjs` come from on Windows x64 and Linux
+//! x86_64 (macOS bundles its own; see `ManagedBinaries`).
 //!
-//! Pins recorded 2026-10-24. Every value was checked against the publisher's
-//! own checksum list and against a download that was inspected by hand.
+//! Nothing here is pinned to a build: each tool names a GitHub release and an
+//! asset, and the managed binaries resolve the newest one when they need it
+//! (decision of 2026-10-24: a pinned build expires when its publisher
+//! deletes it, and keeping a pin fresh is upkeep this app should not need).
+//! The checksum comes from the release itself (the asset `digest` GitHub
+//! publishes), the same trust `yt-dlp`'s update already places in its release.
 //!
-//! | Tool | Source | Asset | Size | SHA-256 source |
-//! |---|---|---|---|---|
-//! | ffmpeg, ffprobe (Windows) | BtbN/FFmpeg-Builds `autobuild-2026-10-23-13-04` | `ffmpeg-n9.0.2-35-g9a9b70bb8c-win64-gpl-9.0.zip`, members `…/bin/ffmpeg.exe`, `…/bin/ffprobe.exe` | 194 MB | the release's `checksums.sha256` |
-//! | ffmpeg, ffprobe (Linux) | same release | `ffmpeg-n9.0.2-35-g9a9b70bb8c-linux64-gpl-9.0.tar.xz`, members `…/bin/ffmpeg`, `…/bin/ffprobe` | 151 MB | the release's `checksums.sha256` |
-//! | qjs (Windows) | quickjs-ng/quickjs `v0.17.0` | `qjs-windows-x86_64.exe` (a single executable) | 2.1 MB | the GitHub release asset digest, matched by a local hash |
-//! | qjs (Linux) | quickjs-ng/quickjs `v0.17.0` | `qjs-linux-x86_64` (a single executable) | 2.6 MB | same |
-//!
-//! BtbN keeps only its recent dated autobuilds, so this pin eventually 404s.
-//! The fix is one edit: choose a newer `autobuild-…` tag, download the two
-//! archives, copy the checksums from that release's `checksums.sha256`, and
-//! update `FFMPEG_VERSION` and the file names below. Never pin `latest`.
+//! | Tool | Release | Asset | Updated |
+//! |---|---|---|---|
+//! | ffmpeg, ffprobe | BtbN/FFmpeg-Builds, the rolling `latest` tag | `ffmpeg-master-latest-win64-gpl.zip`, `ffmpeg-master-latest-linux64-gpl.tar.xz` | only when missing (the build is rebuilt daily and is 150 to 200 MB) |
+//! | qjs | quickjs-ng/quickjs, the newest release | `qjs-windows-x86_64.exe`, `qjs-linux-x86_64` | when the release tag changes (2 MB) |
 //!
 //! The GPL builds are downloaded by the user's machine at run time; SDM does
-//! not redistribute them (decision T7).
+//! not redistribute them (decision T7). The `master` builds are used because
+//! their asset names never change; the numbered ones are renamed at every
+//! FFmpeg release.
 
 /// How a download is packed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,7 +30,9 @@ pub enum ArchiveKind {
 /// One file taken out of a download.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolMember {
-    /// The path inside the archive (empty for [`ArchiveKind::Raw`]).
+    /// Which archive entry: the entry's path must equal this or end with `/` and
+    /// this (the top folder of a build changes name with every build). Empty for
+    /// [`ArchiveKind::Raw`].
     pub path_in_archive: String,
     /// The file name written into `bin/`.
     pub file_name: String,
@@ -46,76 +47,91 @@ impl ToolMember {
     }
 }
 
-/// One pinned download: a version, where it comes from, its SHA-256 and the
-/// files it provides. `ffmpeg` and `ffprobe` share one download.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PlatformTool {
-    /// `"ffmpeg"` (provides `ffmpeg` and `ffprobe`) or `"qjs"`.
-    pub name: String,
-    /// What the manifest records once installed.
-    pub version: String,
-    pub url: String,
-    /// Lowercase hex.
-    pub sha256: String,
-    pub archive: ArchiveKind,
-    pub members: Vec<ToolMember>,
+/// When an installed tool is replaced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpdatePolicy {
+    /// Only when a file is missing. No network at all otherwise.
+    IfMissing,
+    /// When the release's version differs from the recorded one.
+    WhenVersionChanges,
 }
 
-const FFMPEG_VERSION: &str = "n9.0.2-35-g9a9b70bb8c";
-const FFMPEG_RELEASE: &str =
-    "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-23-13-04";
-const QJS_VERSION: &str = "v0.17.0";
-const QJS_RELEASE: &str = "https://github.com/quickjs-ng/quickjs/releases/download/v0.17.0";
+/// What the recorded version is made of.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VersionSource {
+    /// The release's tag (`v0.17.0`).
+    Tag,
+    /// The day the release was published (`2026-10-23`), for a rolling tag.
+    PublishedDate,
+}
+
+/// A download SDM keeps installed: which release asset, how it is packed and
+/// which files to take from it. `ffmpeg` and `ffprobe` share one download.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlatformTool {
+    /// `"ffmpeg"` (provides `ffmpeg` and `ffprobe`) or `"qjs"`; the manifest key.
+    pub name: String,
+    /// The GitHub API address of the release to read.
+    pub release_api: String,
+    /// The asset's exact name in that release.
+    pub asset_name: String,
+    pub archive: ArchiveKind,
+    pub members: Vec<ToolMember>,
+    pub policy: UpdatePolicy,
+    pub version_source: VersionSource,
+}
+
+const FFMPEG_RELEASE: &str = "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/tags/latest";
+const QJS_RELEASE: &str = "https://api.github.com/repos/quickjs-ng/quickjs/releases/latest";
+
+fn ffmpeg(asset: &str, archive: ArchiveKind, exe: &str) -> PlatformTool {
+    PlatformTool {
+        name: "ffmpeg".into(),
+        release_api: FFMPEG_RELEASE.into(),
+        asset_name: asset.into(),
+        archive,
+        members: vec![
+            ToolMember::new(format!("bin/ffmpeg{exe}"), format!("ffmpeg{exe}")),
+            ToolMember::new(format!("bin/ffprobe{exe}"), format!("ffprobe{exe}")),
+        ],
+        policy: UpdatePolicy::IfMissing,
+        version_source: VersionSource::PublishedDate,
+    }
+}
+
+fn qjs(asset: &str, file_name: &str) -> PlatformTool {
+    PlatformTool {
+        name: "qjs".into(),
+        release_api: QJS_RELEASE.into(),
+        asset_name: asset.into(),
+        archive: ArchiveKind::Raw,
+        members: vec![ToolMember::new("", file_name)],
+        policy: UpdatePolicy::WhenVersionChanges,
+        version_source: VersionSource::Tag,
+    }
+}
 
 #[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn windows_x64_tools() -> Vec<PlatformTool> {
-    let dir = format!("ffmpeg-{FFMPEG_VERSION}-win64-gpl-9.0");
     vec![
-        PlatformTool {
-            name: "ffmpeg".into(),
-            version: FFMPEG_VERSION.into(),
-            url: format!("{FFMPEG_RELEASE}/{dir}.zip"),
-            sha256: "bc5c5d45a5bb24bb8b7e83eb6ca8ed9373b85098fbdde1e2951a48f91d91b54a".into(),
-            archive: ArchiveKind::Zip,
-            members: vec![
-                ToolMember::new(format!("{dir}/bin/ffmpeg.exe"), "ffmpeg.exe"),
-                ToolMember::new(format!("{dir}/bin/ffprobe.exe"), "ffprobe.exe"),
-            ],
-        },
-        PlatformTool {
-            name: "qjs".into(),
-            version: QJS_VERSION.into(),
-            url: format!("{QJS_RELEASE}/qjs-windows-x86_64.exe"),
-            sha256: "2aeabf0092c3262d6b2609824418f7dd7ed1f1df939f73b2b15645230cac0d77".into(),
-            archive: ArchiveKind::Raw,
-            members: vec![ToolMember::new("", "qjs.exe")],
-        },
+        ffmpeg(
+            "ffmpeg-master-latest-win64-gpl.zip",
+            ArchiveKind::Zip,
+            ".exe",
+        ),
+        qjs("qjs-windows-x86_64.exe", "qjs.exe"),
     ]
 }
 
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(crate) fn linux_x64_tools() -> Vec<PlatformTool> {
-    let dir = format!("ffmpeg-{FFMPEG_VERSION}-linux64-gpl-9.0");
     vec![
-        PlatformTool {
-            name: "ffmpeg".into(),
-            version: FFMPEG_VERSION.into(),
-            url: format!("{FFMPEG_RELEASE}/{dir}.tar.xz"),
-            sha256: "143e31ca53d65d95bde12cc861e331fd2275e48a6ca988e62c46e8f5b77b9811".into(),
-            archive: ArchiveKind::TarXz,
-            members: vec![
-                ToolMember::new(format!("{dir}/bin/ffmpeg"), "ffmpeg"),
-                ToolMember::new(format!("{dir}/bin/ffprobe"), "ffprobe"),
-            ],
-        },
-        PlatformTool {
-            name: "qjs".into(),
-            version: QJS_VERSION.into(),
-            url: format!("{QJS_RELEASE}/qjs-linux-x86_64"),
-            sha256: "0bfc02511a9f549c28b53880d988fc7cd5d361e90c5e8afdfcd7dc6774ceace5".into(),
-            archive: ArchiveKind::Raw,
-            members: vec![ToolMember::new("", "qjs")],
-        },
+        ffmpeg(
+            "ffmpeg-master-latest-linux64-gpl.tar.xz",
+            ArchiveKind::TarXz,
+            "",
+        ),
+        qjs("qjs-linux-x86_64", "qjs"),
     ]
 }
 
@@ -144,19 +160,26 @@ mod tests {
     }
 
     #[test]
-    fn platform_tools_are_pinned() {
+    fn nothing_is_pinned_to_a_build() {
+        let allowed = [
+            "ffmpeg-master-latest-win64-gpl.zip",
+            "ffmpeg-master-latest-linux64-gpl.tar.xz",
+            "qjs-windows-x86_64.exe",
+            "qjs-linux-x86_64",
+        ];
         for tool in all() {
-            assert!(!tool.url.contains("/latest"), "{} floats", tool.url);
-            assert!(tool.url.starts_with("https://github.com/"), "{}", tool.url);
-            assert_eq!(tool.sha256.len(), 64, "{}", tool.url);
             assert!(
-                tool.sha256
-                    .chars()
-                    .all(|c| matches!(c, '0'..='9' | 'a'..='f')),
+                tool.release_api.ends_with("/releases/latest")
+                    || tool.release_api.ends_with("/releases/tags/latest"),
                 "{}",
-                tool.url
+                tool.release_api
             );
-            assert!(!tool.version.is_empty());
+            // Asset names carry no version or date, or they would expire.
+            assert!(
+                allowed.contains(&tool.asset_name.as_str()),
+                "{}",
+                tool.asset_name
+            );
             assert!(!tool.members.is_empty());
             for member in &tool.members {
                 assert_eq!(
@@ -185,6 +208,14 @@ mod tests {
                     format!("qjs{exe}")
                 ]
             );
+        }
+    }
+
+    #[test]
+    fn ffmpeg_is_fetched_only_when_missing_and_qjs_follows_its_release() {
+        for tools in [windows_x64_tools(), linux_x64_tools()] {
+            assert_eq!(tools[0].policy, UpdatePolicy::IfMissing);
+            assert_eq!(tools[1].policy, UpdatePolicy::WhenVersionChanges);
         }
     }
 }

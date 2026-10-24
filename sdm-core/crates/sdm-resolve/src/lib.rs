@@ -29,7 +29,9 @@ pub use managed_binaries_types::{
     BinariesManifest, CheckOutcome, CheckReason, ManagedBinariesStatus, ToolsActivity, VendorAsset,
     YtDlpChannel, YtDlpVersion, yt_dlp_asset_name,
 };
-pub use platform_tools::{ArchiveKind, PlatformTool, ToolMember, platform_tools};
+pub use platform_tools::{
+    ArchiveKind, PlatformTool, ToolMember, UpdatePolicy, VersionSource, platform_tools,
+};
 pub use process_runner::{ProcessOutput, ProcessRunError, ProcessRunner};
 pub use site_registry::{HostMatch, SitePattern, SiteRegistry};
 pub use system_process_runner::SystemProcessRunner;

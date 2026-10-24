@@ -32,14 +32,16 @@ impl From<io::Error> for ToolInstallError {
     }
 }
 
-/// Verifies `bytes` against `tool.sha256`, then writes every member of `tool`
-/// into `bin_dir` (executable on Unix). Either all members land or none do.
+/// Verifies `bytes` against `sha256` (lowercase or uppercase hex), then writes
+/// every member of `tool` into `bin_dir` (executable on Unix). Either all
+/// members land or none do.
 pub fn install_tool(
     tool: &PlatformTool,
+    sha256: &str,
     bytes: &[u8],
     bin_dir: &Path,
 ) -> Result<(), ToolInstallError> {
-    if hex::encode(Sha256::digest(bytes)) != tool.sha256.to_ascii_lowercase() {
+    if hex::encode(Sha256::digest(bytes)) != sha256.to_ascii_lowercase() {
         return Err(ToolInstallError::ChecksumMismatch);
     }
     fs::create_dir_all(bin_dir)?;
@@ -128,9 +130,19 @@ fn stage_members(
             let mut archive = zip::ZipArchive::new(Cursor::new(bytes))
                 .map_err(|e| ToolInstallError::Archive(e.to_string()))?;
             for member in &tool.members {
+                let index = (0..archive.len())
+                    .find(|&i| {
+                        matches!(
+                            archive.name_for_index(i),
+                            Some(Ok(name)) if entry_matches(&name, &member.path_in_archive)
+                        )
+                    })
+                    .ok_or_else(|| {
+                        ToolInstallError::MemberMissing(member.path_in_archive.clone())
+                    })?;
                 let mut entry = archive
-                    .by_name(&member.path_in_archive)
-                    .map_err(|_| ToolInstallError::MemberMissing(member.path_in_archive.clone()))?;
+                    .by_index(index)
+                    .map_err(|e| ToolInstallError::Archive(e.to_string()))?;
                 let mut file = staged.create(member)?;
                 io::copy(&mut entry, &mut file)
                     .map_err(|e| ToolInstallError::Archive(e.to_string()))?;
@@ -157,7 +169,7 @@ fn stage_members(
                     let mut entry = entry.map_err(|e| ToolInstallError::Archive(e.to_string()))?;
                     let is_wanted = entry
                         .path()
-                        .map(|p| p.to_string_lossy() == member.path_in_archive.as_str())
+                        .map(|p| entry_matches(&p.to_string_lossy(), &member.path_in_archive))
                         .unwrap_or(false);
                     if is_wanted {
                         let mut file = staged.create(member)?;
@@ -178,6 +190,17 @@ fn stage_members(
     }
 }
 
+/// Whether an archive entry is the wanted member: its path equals `wanted` or
+/// ends with `/wanted` (the build's top folder has a different name each time).
+/// An entry that climbs out (`..`) or is absolute never matches.
+fn entry_matches(entry: &str, wanted: &str) -> bool {
+    let entry = entry.replace('\\', "/");
+    if entry.starts_with('/') || entry.split('/').any(|part| part == "..") {
+        return false;
+    }
+    entry == wanted || entry.ends_with(&format!("/{wanted}"))
+}
+
 struct RemoveOnDrop(PathBuf);
 
 impl Drop for RemoveOnDrop {
@@ -191,18 +214,23 @@ mod tests {
     use super::*;
     use std::io::Write;
 
-    fn tool(archive: ArchiveKind, bytes: &[u8], members: &[(&str, &str)]) -> PlatformTool {
+    fn tool(archive: ArchiveKind, _bytes: &[u8], members: &[(&str, &str)]) -> PlatformTool {
         PlatformTool {
             name: "ffmpeg".into(),
-            version: "t1".into(),
-            url: "https://example.com/x".into(),
-            sha256: hex::encode(Sha256::digest(bytes)),
+            release_api: "https://api.github.com/repos/o/r/releases/latest".into(),
+            asset_name: "asset".into(),
             archive,
             members: members
                 .iter()
                 .map(|(a, b)| ToolMember::new(*a, *b))
                 .collect(),
+            policy: crate::platform_tools::UpdatePolicy::IfMissing,
+            version_source: crate::platform_tools::VersionSource::Tag,
         }
+    }
+
+    fn sum(bytes: &[u8]) -> String {
+        hex::encode(Sha256::digest(bytes))
     }
 
     fn zip_bytes(entries: &[(&str, &[u8])]) -> Vec<u8> {
@@ -263,7 +291,7 @@ mod tests {
             ],
         );
         let dir = tempfile::tempdir().unwrap();
-        install_tool(&t, &bytes, dir.path()).unwrap();
+        install_tool(&t, &sum(&bytes), &bytes, dir.path()).unwrap();
         assert_eq!(names(dir.path()), vec!["ffmpeg.exe", "ffprobe.exe"]);
         assert_eq!(fs::read(dir.path().join("ffmpeg.exe")).unwrap(), b"FF");
         assert_eq!(fs::read(dir.path().join("ffprobe.exe")).unwrap(), b"PR");
@@ -282,7 +310,7 @@ mod tests {
             &[("d/bin/ffmpeg", "ffmpeg"), ("d/bin/ffprobe", "ffprobe")],
         );
         let dir = tempfile::tempdir().unwrap();
-        install_tool(&t, &bytes, dir.path()).unwrap();
+        install_tool(&t, &sum(&bytes), &bytes, dir.path()).unwrap();
         assert_eq!(names(dir.path()), vec!["ffmpeg", "ffprobe"]);
         assert_eq!(fs::read(dir.path().join("ffprobe")).unwrap(), b"PR");
     }
@@ -291,17 +319,16 @@ mod tests {
     fn raw_archive_writes_the_bytes() {
         let t = tool(ArchiveKind::Raw, b"QJS", &[("", "qjs")]);
         let dir = tempfile::tempdir().unwrap();
-        install_tool(&t, b"QJS", dir.path()).unwrap();
+        install_tool(&t, &sum(b"QJS"), b"QJS", dir.path()).unwrap();
         assert_eq!(fs::read(dir.path().join("qjs")).unwrap(), b"QJS");
     }
 
     #[test]
     fn checksum_mismatch_writes_nothing() {
-        let mut t = tool(ArchiveKind::Raw, b"QJS", &[("", "qjs")]);
-        t.sha256 = "0".repeat(64);
+        let t = tool(ArchiveKind::Raw, b"QJS", &[("", "qjs")]);
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(
-            install_tool(&t, b"QJS", dir.path()),
+            install_tool(&t, &"0".repeat(64), b"QJS", dir.path()),
             Err(ToolInstallError::ChecksumMismatch)
         );
         assert!(names(dir.path()).is_empty());
@@ -320,7 +347,7 @@ mod tests {
         );
         let dir = tempfile::tempdir().unwrap();
         assert_eq!(
-            install_tool(&t, &bytes, dir.path()),
+            install_tool(&t, &sum(&bytes), &bytes, dir.path()),
             Err(ToolInstallError::MemberMissing("d/bin/ffprobe.exe".into()))
         );
         assert!(names(dir.path()).is_empty());
@@ -331,7 +358,7 @@ mod tests {
             &[("d/bin/ffmpeg", "ffmpeg"), ("d/bin/ffprobe", "ffprobe")],
         );
         assert!(matches!(
-            install_tool(&t, &bytes, dir.path()),
+            install_tool(&t, &sum(&bytes), &bytes, dir.path()),
             Err(ToolInstallError::MemberMissing(_))
         ));
         assert!(names(dir.path()).is_empty());
@@ -348,14 +375,14 @@ mod tests {
         );
         let dir = tempfile::tempdir().unwrap();
         assert!(matches!(
-            install_tool(&t, truncated, dir.path()),
+            install_tool(&t, &sum(truncated), truncated, dir.path()),
             Err(ToolInstallError::Archive(_))
         ));
         assert!(names(dir.path()).is_empty());
         let full = tar_xz_bytes(&[("d/bin/ffmpeg", &[7u8; 4096])]);
         let truncated = &full[..full.len() / 2];
         let t = tool(ArchiveKind::TarXz, truncated, &[("d/bin/ffmpeg", "ffmpeg")]);
-        assert!(install_tool(&t, truncated, dir.path()).is_err());
+        assert!(install_tool(&t, &sum(truncated), truncated, dir.path()).is_err());
         assert!(names(dir.path()).is_empty());
     }
 
@@ -369,14 +396,56 @@ mod tests {
         );
         let root = tempfile::tempdir().unwrap();
         let bin = root.path().join("bin");
-        install_tool(&t, &bytes, &bin).unwrap();
+        install_tool(&t, &sum(&bytes), &bytes, &bin).unwrap();
         assert!(!root.path().join("evil").exists());
         assert_eq!(names(&bin), vec!["ffmpeg.exe"]);
         // A member whose configured destination name is a path keeps only its file name.
         let t = tool(ArchiveKind::Raw, b"Q", &[("", "../escape")]);
-        install_tool(&t, b"Q", &bin).unwrap();
+        install_tool(&t, &sum(b"Q"), b"Q", &bin).unwrap();
         assert!(!root.path().join("escape").exists());
         assert!(bin.join("escape").exists());
+    }
+
+    #[test]
+    fn a_member_is_found_under_any_top_folder_and_never_through_dot_dot() {
+        let bytes = zip_bytes(&[
+            ("../bin/ffmpeg.exe", b"EVIL"),
+            ("ffmpeg-master-latest-win64-gpl/bin/ffmpeg.exe", b"FF"),
+            (
+                "ffmpeg-master-latest-win64-gpl/doc/bin/ffmpeg.exe.txt",
+                b"X",
+            ),
+        ]);
+        let t = tool(
+            ArchiveKind::Zip,
+            &bytes,
+            &[("bin/ffmpeg.exe", "ffmpeg.exe")],
+        );
+        let dir = tempfile::tempdir().unwrap();
+        install_tool(&t, &sum(&bytes), &bytes, dir.path()).unwrap();
+        assert_eq!(fs::read(dir.path().join("ffmpeg.exe")).unwrap(), b"FF");
+
+        let only_evil = zip_bytes(&[("../bin/ffmpeg.exe", b"EVIL")]);
+        let t = tool(
+            ArchiveKind::Zip,
+            &only_evil,
+            &[("bin/ffmpeg.exe", "ffmpeg.exe")],
+        );
+        let clean = tempfile::tempdir().unwrap();
+        assert!(matches!(
+            install_tool(&t, &sum(&only_evil), &only_evil, clean.path()),
+            Err(ToolInstallError::MemberMissing(_))
+        ));
+        assert!(names(clean.path()).is_empty());
+    }
+
+    #[test]
+    fn a_partial_name_is_not_a_match() {
+        assert!(entry_matches("top/bin/ffmpeg", "bin/ffmpeg"));
+        assert!(entry_matches("bin/ffmpeg", "bin/ffmpeg"));
+        assert!(!entry_matches("top/xbin/ffmpeg", "bin/ffmpeg"));
+        assert!(!entry_matches("/bin/ffmpeg", "bin/ffmpeg"));
+        assert!(entry_matches("top\\bin\\ffmpeg", "bin/ffmpeg"));
     }
 
     #[cfg(unix)]
@@ -385,7 +454,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let t = tool(ArchiveKind::Raw, b"Q", &[("", "qjs")]);
         let dir = tempfile::tempdir().unwrap();
-        install_tool(&t, b"Q", dir.path()).unwrap();
+        install_tool(&t, &sum(b"Q"), b"Q", dir.path()).unwrap();
         let mode = fs::metadata(dir.path().join("qjs"))
             .unwrap()
             .permissions()
@@ -398,7 +467,7 @@ mod tests {
         let t = tool(ArchiveKind::Raw, b"NEW", &[("", "qjs")]);
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("qjs"), b"OLD").unwrap();
-        install_tool(&t, b"NEW", dir.path()).unwrap();
+        install_tool(&t, &sum(b"NEW"), b"NEW", dir.path()).unwrap();
         assert_eq!(fs::read(dir.path().join("qjs")).unwrap(), b"NEW");
     }
 }
