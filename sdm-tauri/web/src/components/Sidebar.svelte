@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { useStore, useUi } from "../lib/context";
+  import { errorMessage, useBridge, useStore, useUi } from "../lib/context";
   import type { Tab } from "../lib/ui.svelte";
   import Icon from "./Icon.svelte";
   import OverviewBlock from "./OverviewBlock.svelte";
 
+  const bridge = useBridge();
   const store = useStore();
   const ui = useUi();
 
@@ -76,6 +77,18 @@
     <h2 class="caption section">Overview</h2>
     <OverviewBlock />
   </section>
+  <button
+    type="button"
+    class="gear"
+    aria-label="Settings"
+    title="Settings"
+    onclick={() =>
+      void bridge
+        .openSettings()
+        .catch((error) => ui.report(errorMessage(error)))}
+  >
+    <Icon name="settings" size={16} />
+  </button>
 </nav>
 
 <style>
@@ -136,6 +149,24 @@
   }
   .overview {
     padding: 0 14px;
+  }
+  /* The one button the SwiftUI sidebar lacks: Windows and Linux have no app menu. */
+  .gear {
+    display: grid;
+    place-items: center;
+    align-self: flex-start;
+    width: 28px;
+    height: 28px;
+    margin: auto 0 10px 14px;
+    padding: 0;
+    color: var(--text-secondary);
+    background: none;
+    border: none;
+    border-radius: 6px;
+  }
+  .gear:hover {
+    color: var(--text-primary);
+    background: var(--selection-tint);
   }
   .section {
     margin: 0 0 6px;

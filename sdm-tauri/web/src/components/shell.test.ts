@@ -46,6 +46,15 @@ describe("Sidebar", () => {
     ).toBeNull();
   });
 
+  it("has a gear that opens Settings through the bridge", async () => {
+    const app = appWith([]);
+    renderIn(Sidebar, app);
+    await fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(app.bridge.calls.filter(([m]) => m === "openSettings")).toHaveLength(
+      1,
+    );
+  });
+
   it("selects a tab on click", async () => {
     const view = renderIn(Sidebar, appWith([]));
     await fireEvent.click(screen.getByText("Completed"));

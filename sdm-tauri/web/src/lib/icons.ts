@@ -17,6 +17,7 @@ import Play from "@lucide/svelte/icons/play";
 import RefreshCw from "@lucide/svelte/icons/refresh-cw";
 import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
 import RotateCw from "@lucide/svelte/icons/rotate-cw";
+import Settings from "@lucide/svelte/icons/settings";
 import SquarePlay from "@lucide/svelte/icons/square-play";
 import ToggleLeft from "@lucide/svelte/icons/toggle-left";
 import ToggleRight from "@lucide/svelte/icons/toggle-right";
@@ -45,6 +46,7 @@ export const ICONS = {
   "refresh-cw": RefreshCw,
   "rotate-ccw": RotateCcw,
   "rotate-cw": RotateCw,
+  settings: Settings,
   "square-play": SquarePlay,
   "toggle-left": ToggleLeft,
   "toggle-right": ToggleRight,

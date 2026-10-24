@@ -9,12 +9,37 @@ export async function closeWindow(): Promise<void> {
   await getCurrentWindow().close();
 }
 
-/** Resizes the window's content area to `width` x `height` points. */
-export async function fitWindow(width: number, height: number): Promise<void> {
-  if (!inTauri() || !(height > 0)) return;
-  const { getCurrentWindow, LogicalSize } =
-    await import("@tauri-apps/api/window");
-  await getCurrentWindow().setSize(new LogicalSize(width, Math.ceil(height)));
+let fitting: Promise<void> = Promise.resolve();
+
+const nextFrame = () =>
+  new Promise<void>((done) => requestAnimationFrame(() => done()));
+
+/**
+ * Resizes the window so the page has `width` x `height` points to itself.
+ * Calls run one after another, so a stale size can never land last. The size
+ * is then checked against what the page actually got (`innerHeight`):
+ * platforms disagree on whether a window's size includes its titlebar, and
+ * the shortfall is made up in a second step. The window is centered after
+ * every fit so a tall tab stays on screen.
+ */
+export function fitWindow(width: number, height: number): Promise<void> {
+  if (!inTauri() || !(height > 0)) return Promise.resolve();
+  fitting = fitting.then(async () => {
+    const { getCurrentWindow, LogicalSize } =
+      await import("@tauri-apps/api/window");
+    const window = getCurrentWindow();
+    const target = Math.ceil(height);
+    await window.setSize(new LogicalSize(width, target));
+    await nextFrame();
+    const shortfall = target - globalThis.innerHeight;
+    if (shortfall > 1) {
+      await window.setSize(new LogicalSize(width, target + shortfall));
+      await nextFrame();
+    }
+    // A taller tab must not push the window's bottom off the screen.
+    await window.center();
+  });
+  return fitting.catch(() => {});
 }
 
 /** Runs `handler` when the user closes the window by its titlebar; returns the way to stop. */

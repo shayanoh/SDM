@@ -14,6 +14,7 @@ function context(over: Partial<ShortcutContext> = {}) {
     selectAll: () => log.push("selectAll"),
     moveSelection: (delta, extend) => log.push(`move:${delta}:${extend}`),
     closeMenu: () => log.push("closeMenu"),
+    openSettings: () => log.push("openSettings"),
     ...over,
   };
   return { ctx, log };
@@ -146,5 +147,50 @@ describe("when shortcuts must stay out of the way", () => {
     for (const k of ["ArrowDown", "ArrowUp", "Enter"]) {
       expect(press({ key: k }, { menuOpen: true }).handled).toBe(false);
     }
+  });
+});
+
+describe("the Settings shortcut", () => {
+  it("is Ctrl+, on Windows and Linux", () => {
+    for (const platform of ["windows", "linux"] as Platform[]) {
+      const result = press({ key: ",", ctrlKey: true }, { platform });
+      expect(result.log).toEqual(["openSettings"]);
+      expect(result.prevented).toBe(true);
+    }
+  });
+
+  it("is Cmd+, on macOS", () => {
+    expect(press({ key: ",", metaKey: true }, { platform: "mac" }).log).toEqual(
+      ["openSettings"],
+    );
+  });
+
+  it("ignores the other platform's modifier and a bare comma", () => {
+    expect(press({ key: ",", metaKey: true }).handled).toBe(false);
+    expect(
+      press({ key: ",", ctrlKey: true }, { platform: "mac" }).handled,
+    ).toBe(false);
+    expect(press({ key: "," }).handled).toBe(false);
+  });
+
+  it("stays out of the way of a modal, an open menu and a text field", () => {
+    for (const over of [
+      { modalOpen: true },
+      { menuOpen: true },
+      { focusInEditable: true },
+    ]) {
+      expect(press({ key: ",", ctrlKey: true }, over).handled).toBe(false);
+    }
+  });
+
+  it("still works when the list shortcuts are off (the Linkgrabber tab)", () => {
+    const result = press({ key: ",", ctrlKey: true }, { listShortcuts: false });
+    expect(result.log).toEqual(["openSettings"]);
+    expect(press({ key: "Enter" }, { listShortcuts: false }).handled).toBe(
+      false,
+    );
+    expect(
+      press({ key: "a", ctrlKey: true }, { listShortcuts: false }).handled,
+    ).toBe(false);
   });
 });

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { useBridge, useStore, useUi } from "../lib/context";
+  import { errorMessage, useBridge, useStore, useUi } from "../lib/context";
   import { runMenu } from "../lib/actions";
   import { detectPlatform } from "../lib/platform";
   import { handleKey } from "../lib/shortcuts";
@@ -40,10 +40,14 @@
   }
 
   function onKeyDown(event: KeyboardEvent) {
-    // The shortcuts belong to the two list tabs.
-    if (ui.tab === "linkgrabber") return;
     handleKey(event, {
       platform,
+      // The list shortcuts belong to the two list tabs; Settings is global.
+      listShortcuts: ui.tab !== "linkgrabber",
+      openSettings: () =>
+        void bridge
+          .openSettings()
+          .catch((error) => ui.report(errorMessage(error))),
       modalOpen: ui.modal !== null,
       menuOpen: ui.menu !== null,
       focusInEditable:

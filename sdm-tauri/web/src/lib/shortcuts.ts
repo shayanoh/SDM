@@ -11,6 +11,9 @@ export interface ShortcutContext {
   selectAll(): void;
   moveSelection(delta: -1 | 1, extend: boolean): void;
   closeMenu(): void;
+  openSettings(): void;
+  /** False on a tab that has no list (the Linkgrabber): only the global keys work. Default true. */
+  listShortcuts?: boolean;
 }
 
 /**
@@ -20,7 +23,8 @@ export interface ShortcutContext {
  * the arrows move the selection. Mod is Ctrl (Command on macOS, where the
  * delete key is Backspace). Returns whether the key was handled; a handled key
  * has its default prevented. Nothing is handled behind a modal, inside a text
- * field, or (apart from Escape) while a menu is open.
+ * field, or (apart from Escape) while a menu is open. Mod+, opens Settings
+ * from any tab.
  */
 export function handleKey(event: KeyboardEvent, ctx: ShortcutContext): boolean {
   if (ctx.modalOpen || event.altKey) return false;
@@ -41,6 +45,10 @@ export function handleKey(event: KeyboardEvent, ctx: ShortcutContext): boolean {
       : false;
   }
   if (ctx.menuOpen || ctx.focusInEditable) return false;
+
+  if (event.key === "," && mod && !event.shiftKey)
+    return handled(ctx.openSettings);
+  if (ctx.listShortcuts === false) return false;
 
   const key = event.key;
   if (key === "Enter" && !event.shiftKey) {

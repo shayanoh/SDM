@@ -14,6 +14,31 @@ use sdm_core::AppTiming;
 use tauri::Manager;
 use tauri_specta::{Builder, collect_commands};
 
+/// The id of the app menu's "Settings…" item on macOS.
+#[cfg(target_os = "macos")]
+const SETTINGS_MENU_ID: &str = "settings";
+
+/// macOS: the default app menu with "Settings…" (Cmd+,) added under About, as
+/// the SwiftUI app has it. Windows and Linux get no menu bar.
+#[cfg(target_os = "macos")]
+fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
+    use tauri::menu::{Menu, MenuItem, MenuItemKind, PredefinedMenuItem};
+    let menu = Menu::default(app)?;
+    if let Some(MenuItemKind::Submenu(application)) = menu.items()?.into_iter().next() {
+        let settings = MenuItem::with_id(
+            app,
+            SETTINGS_MENU_ID,
+            "Settings…",
+            true,
+            Some("CmdOrCtrl+,"),
+        )?;
+        application.insert(&settings, 2)?;
+        application.insert(&PredefinedMenuItem::separator(app)?, 3)?;
+    }
+    app.set_menu(menu)?;
+    Ok(())
+}
+
 fn specta_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new().commands(collect_commands![
         attach,
@@ -127,8 +152,25 @@ pub fn run() {
                 .build(),
         )
         .invoke_handler(builder.invoke_handler())
+        .on_menu_event(|app, event| {
+            #[cfg(target_os = "macos")]
+            if event.id() == SETTINGS_MENU_ID {
+                // A window made inside a menu event handler can deadlock on
+                // some platforms; its own task is safe everywhere.
+                let handle = app.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(error) = settings_window::open(&handle) {
+                        tracing::error!("could not open Settings: {error}");
+                    }
+                });
+            }
+            #[cfg(not(target_os = "macos"))]
+            let _ = (app, event);
+        })
         .setup(move |tauri_app| {
             builder.mount_events(tauri_app);
+            #[cfg(target_os = "macos")]
+            install_menu(tauri_app.handle())?;
             let (app, simulation) = build_app(tauri_app.handle())?;
             tauri_app.manage(Arc::clone(&app));
             let effect = tauri_app
