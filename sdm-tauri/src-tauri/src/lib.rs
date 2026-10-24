@@ -4,6 +4,8 @@ mod host;
 mod main_window;
 mod notify;
 mod settings_window;
+mod tray;
+mod tray_icon;
 mod vibrancy;
 
 use std::sync::Arc;
@@ -188,6 +190,7 @@ pub fn run() {
             let (app, simulation) = build_app(tauri_app.handle())?;
             tauri_app.manage(Arc::clone(&app));
             clipboard::spawn(tauri_app.handle().clone(), Arc::clone(&app));
+            tray::install(tauri_app.handle())?;
             let effect = tauri_app
                 .get_webview_window("main")
                 .and_then(|window| vibrancy::apply(&window));
@@ -195,6 +198,7 @@ pub fn run() {
 
             // Restore, then provision binaries in the background, then beat.
             let heartbeat_app = Arc::clone(&app);
+            let tray_handle = tauri_app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 if let Some((items, active)) = simulation {
                     if let Err(error) = populate(&heartbeat_app, items, active).await {
@@ -229,6 +233,7 @@ pub fn run() {
                             Ok(())
                         })
                         .await;
+                    tray::refresh(&tray_handle, &heartbeat_app.tray_status());
                 }
             });
             Ok(())
