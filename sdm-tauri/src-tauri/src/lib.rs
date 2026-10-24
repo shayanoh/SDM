@@ -1,3 +1,4 @@
+mod clipboard;
 mod commands;
 mod host;
 mod main_window;
@@ -149,6 +150,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         // Remembers the main window's size, position and maximized state.
         .plugin(
             tauri_plugin_window_state::Builder::default()
@@ -185,6 +187,7 @@ pub fn run() {
             install_menu(tauri_app.handle())?;
             let (app, simulation) = build_app(tauri_app.handle())?;
             tauri_app.manage(Arc::clone(&app));
+            clipboard::spawn(tauri_app.handle().clone(), Arc::clone(&app));
             let effect = tauri_app
                 .get_webview_window("main")
                 .and_then(|window| vibrancy::apply(&window));
