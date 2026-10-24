@@ -16,6 +16,7 @@ import Play from "@lucide/svelte/icons/play";
 import RefreshCw from "@lucide/svelte/icons/refresh-cw";
 import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
 import RotateCw from "@lucide/svelte/icons/rotate-cw";
+import SquarePlay from "@lucide/svelte/icons/square-play";
 import ToggleLeft from "@lucide/svelte/icons/toggle-left";
 import ToggleRight from "@lucide/svelte/icons/toggle-right";
 import Trash2 from "@lucide/svelte/icons/trash-2";
@@ -42,6 +43,7 @@ export const ICONS = {
   "refresh-cw": RefreshCw,
   "rotate-ccw": RotateCcw,
   "rotate-cw": RotateCw,
+  "square-play": SquarePlay,
   "toggle-left": ToggleLeft,
   "toggle-right": ToggleRight,
   "trash-2": Trash2,

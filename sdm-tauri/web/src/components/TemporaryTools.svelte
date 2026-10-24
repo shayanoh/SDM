@@ -4,31 +4,14 @@
   import { errorMessage, useBridge, useUi } from "../lib/context";
 
   /**
-   * Add a link, the download folder and the yt-dlp status: the only way to
-   * reach those until the Linkgrabber (spec 3) and Settings (spec 4) exist.
+   * The download folder and the tools status: the only way to reach those
+   * until Settings (spec 4) exists. TODO(spec 4): remove with the Settings tab.
    */
   const bridge = useBridge();
   const ui = useUi();
 
-  let url = $state("");
-  let busy = $state(false);
   let folder = $state("");
   let binaries = $state<BinariesStatusDto | null>(null);
-
-  async function addUrl(event: SubmitEvent) {
-    event.preventDefault();
-    if (busy) return;
-    busy = true;
-    try {
-      await bridge.addUrl(url);
-      url = "";
-      ui.dismiss();
-    } catch (error) {
-      ui.report(errorMessage(error));
-    } finally {
-      busy = false;
-    }
-  }
 
   async function saveFolder() {
     try {
@@ -58,16 +41,6 @@
 </script>
 
 <div class="tools">
-  <form onsubmit={addUrl}>
-    <input
-      type="text"
-      class="selectable"
-      placeholder="Paste a link to download"
-      aria-label="Download address"
-      bind:value={url}
-    />
-    <button type="submit" disabled={busy}>Add</button>
-  </form>
   <label>
     Download folder
     <input
@@ -78,7 +51,10 @@
       aria-label="Download folder"
     />
   </label>
-  <p class="muted">yt-dlp: {binaries?.ytDlpVersion ?? "not installed"}</p>
+  <p class="muted">
+    yt-dlp: {binaries?.ytDlpVersion ?? "not installed"} · ffmpeg: {binaries?.ffmpegVersion ??
+      "not installed"} · qjs: {binaries?.qjsVersion ?? "not installed"}
+  </p>
 </div>
 
 <style>
@@ -88,7 +64,6 @@
     gap: 12px;
     width: min(560px, 100%);
   }
-  form,
   label {
     display: flex;
     gap: 8px;

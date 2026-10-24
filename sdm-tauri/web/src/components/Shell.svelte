@@ -11,7 +11,7 @@
   import BottomBar from "./BottomBar.svelte";
   import PackageList from "./PackageList.svelte";
   import ModalHost from "./ModalHost.svelte";
-  import LinkgrabberPlaceholder from "./LinkgrabberPlaceholder.svelte";
+  import LinkgrabberView from "./LinkgrabberView.svelte";
   import Sidebar from "./Sidebar.svelte";
   import Toolbar from "./Toolbar.svelte";
 
@@ -102,7 +102,7 @@
   <section class="detail">
     <Banner />
     {#if ui.tab === "linkgrabber"}
-      <LinkgrabberPlaceholder />
+      <LinkgrabberView />
     {:else}
       <Toolbar view={onDownloads ? downloads : completed} />
       <PackageList
