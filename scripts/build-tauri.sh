@@ -6,7 +6,9 @@ export PATH="$HOME/.cargo/bin:$(brew --prefix llvm 2>/dev/null)/bin:$PATH"
 pnpm --dir web install --frozen-lockfile
 case "${1:-}" in
   mac)
-    pnpm tauri build
+    # Universal (arm64 + x86_64); needs both Apple Rust targets installed.
+    pnpm tauri build --target universal-apple-darwin
+    echo "App: ../sdm-core/target/universal-apple-darwin/release/bundle/macos/SDM.app"
     ;;
   windows)
     pnpm tauri build --runner cargo-xwin --target x86_64-pc-windows-msvc
