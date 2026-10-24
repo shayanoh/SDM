@@ -19,6 +19,7 @@ use sdm_grabber::{
 use sdm_resolve::{CheckReason, ManagedBinaries, ToolsActivity};
 use uuid::Uuid;
 
+use crate::autoadd::ready_packages;
 use crate::differ::{Delta, Differ};
 use crate::error::AppError;
 use crate::grabber::GrabberController;
@@ -95,6 +96,8 @@ pub struct App {
     binaries: Option<ManagedBinaries>,
     grabber: Option<Arc<GrabberController>>,
     fixed_limits: Option<Limits>,
+    /// Row ids already sent to the downloads by auto-add.
+    auto_added: Mutex<HashSet<Uuid>>,
     state: Mutex<PublishState>,
 }
 
@@ -186,6 +189,7 @@ impl App {
             binaries: dependencies.binaries,
             grabber: dependencies.grabber,
             fixed_limits,
+            auto_added: Mutex::new(HashSet::new()),
             state: Mutex::new(PublishState {
                 seq: 0,
                 differ: Differ::default(),
@@ -242,7 +246,37 @@ impl App {
         if run_binaries_tick && let Some(binaries) = &self.binaries {
             binaries.tick().await;
         }
-        self.publish(false).await
+        self.publish(false).await?;
+        self.auto_add_ready().await
+    }
+
+    /// With auto-add-and-start on, sends every fully ready grabbed package to
+    /// the downloads and starts it, once per package. A failure is logged and
+    /// leaves the rest of the tick alone.
+    pub async fn auto_add_ready(&self) -> Result<(), AppError> {
+        let Some(grabber) = &self.grabber else {
+            return Ok(());
+        };
+        if !lock(&self.settings).get().auto_add_and_start_on_grab {
+            return Ok(());
+        }
+        let ready = {
+            let mut added = lock(&self.auto_added);
+            let ready = ready_packages(&grabber.session.snapshot(), &added);
+            for (_, rows) in &ready {
+                added.extend(rows.iter().copied());
+            }
+            ready
+        };
+        for (package, _) in ready {
+            let target = HandoffTarget::Package {
+                id: package.to_string(),
+            };
+            if let Err(error) = self.grabber_add_to_downloads(target, true).await {
+                tracing::warn!("could not auto-add a grabbed package: {error}");
+            }
+        }
+        Ok(())
     }
 
     /// `tick`, with a failure logged once per distinct message instead of on
