@@ -1,3 +1,5 @@
+#[cfg(target_os = "macos")]
+mod activation;
 mod autostart;
 mod clipboard;
 mod commands;
@@ -217,6 +219,8 @@ pub fn run() {
             #[cfg(any(windows, target_os = "macos"))]
             popover::init(tauri_app.handle());
             tray::install(tauri_app.handle())?;
+            #[cfg(target_os = "macos")]
+            activation::apply_current(tauri_app.handle());
             if simulation.is_none() {
                 let (handle, core) = (tauri_app.handle().clone(), Arc::clone(&app));
                 tauri::async_runtime::spawn(async move {

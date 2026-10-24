@@ -116,6 +116,8 @@ fn hide_main(app: &AppHandle, leave_taskbar: bool) {
         }
     }
     crate::settings_window::close(app);
+    #[cfg(target_os = "macos")]
+    crate::activation::apply(app, false);
 }
 
 /// The run loop's events: every exit goes through the guard unless approved,

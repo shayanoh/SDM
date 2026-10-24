@@ -245,6 +245,9 @@ pub async fn update_settings(
         let _ = app.update_settings(reverted).await;
         return Err(error);
     }
+    // The Dock / Menu Bar mode applies at once, with or without a window.
+    #[cfg(target_os = "macos")]
+    crate::activation::apply_current(&handle);
     Ok(())
 }
 

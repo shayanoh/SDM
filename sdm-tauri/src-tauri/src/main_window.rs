@@ -12,6 +12,8 @@ pub fn show(app: &AppHandle, route: Option<&str>) -> Result<(), AppError> {
     let window = app
         .get_webview_window(LABEL)
         .ok_or_else(|| AppError::failed("the main window is gone"))?;
+    #[cfg(target_os = "macos")]
+    crate::activation::apply(app, true);
     window
         .set_skip_taskbar(false)
         .and_then(|()| window.show())
