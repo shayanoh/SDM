@@ -90,3 +90,23 @@ test("10 11 collapsed package and hidden panel", async ({ page }) => {
   await page.waitForTimeout(400);
   await page.screenshot(shot("11-info-panel-hidden"));
 });
+
+test("grabber 01 populated and 02 menus", async ({ page }) => {
+  await page.goto("/?theme=deep-purple&grabber=demo&ffmpeg=off");
+  await page.getByRole("button", { name: /Linkgrabber/ }).click();
+  await page.waitForTimeout(4500);
+  await page.screenshot(shot("grabber-01-populated"));
+  await page
+    .locator("[data-row-id]")
+    .filter({ hasText: "ubuntu-24.04.iso" })
+    .click({ button: "right" });
+  await page.waitForTimeout(300);
+  await page.screenshot(shot("grabber-02-row-menu"));
+  await page.keyboard.press("Escape");
+  await page
+    .getByRole("button", { name: /choose a format/ })
+    .first()
+    .click();
+  await page.waitForTimeout(300);
+  await page.screenshot(shot("grabber-03-format-picker"));
+});

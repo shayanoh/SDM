@@ -449,3 +449,39 @@ async fn a_failed_tool_download_shows_an_error_notice_in_the_view() {
         notice.text
     );
 }
+
+/// Not a pass/fail gate: prints what one full-view patch costs for 2,000 links
+/// (`cargo test -p sdm-app --test grabber_tests view_cost -- --ignored --nocapture`).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "a measurement, not a test"]
+async fn view_cost_for_two_thousand_links() {
+    let kit = grabber_kit(None, FakeOrigin::new(payload(10))).await;
+    for i in 0..2000 {
+        kit.origin
+            .set_behavior(online(), &su(&format!("https://h{}.example.com/file{i}.zip", i % 50)));
+    }
+    let text = (0..2000)
+        .map(|i| format!("https://h{}.example.com/file{i}.zip", i % 50))
+        .collect::<Vec<_>>()
+        .join("\n");
+    kit.harness.app.grabber_ingest_text(&text).await.unwrap();
+    let view = grabber_view(&kit.harness);
+    let started = std::time::Instant::now();
+    let rounds = 20;
+    let mut bytes = 0;
+    for _ in 0..rounds {
+        // What the channel does with a patch: serialize it.
+        bytes = serde_json::to_vec(&view_as_json(&view)).unwrap().len();
+    }
+    println!(
+        "2000 links: {} KB per view, {:?} per serialization",
+        bytes / 1024,
+        started.elapsed() / rounds
+    );
+}
+
+fn view_as_json(view: &sdm_app::protocol::GrabberView) -> serde_json::Value {
+    // `GrabberView` only derives `Serialize` for the wire; a round trip through
+    // `serde_json::to_value` is what the Tauri channel does.
+    serde_json::to_value(view).unwrap()
+}

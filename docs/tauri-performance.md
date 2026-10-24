@@ -69,3 +69,21 @@ noisier and probably higher than a quiet run.
   Profiled in Chromium with the mock at the same load (`?simulate=500:50`): the UI's JavaScript is
   under 3 % of a core, so what remains is WebKit style, layout and paint.
 - Windows rows (WebView2) are still pending.
+
+## Link grabber (spec 3, 2026-10-24)
+
+The grabber's view travels whole on the patch stream, and only when it changed (an idle grabber sends
+nothing: `an_idle_grabber_sends_no_grabber_field`). The cost of one view for **2,000 links**, measured by
+`cargo test --release -p sdm-app --test grabber_tests view_cost -- --ignored --nocapture` (build the
+view, convert to JSON and encode it, on the Intel Mac):
+
+| Build   | View size | Per view |
+| ------- | --------- | -------- |
+| release | 538 KB    | 8 ms     |
+| debug   | 538 KB    | 67 ms    |
+
+At the heartbeat rate (5 Hz) while the batch is still being checked that is about 40 ms of work a
+second, then nothing once every row has a verdict. A typical batch (tens of links) is 20 to 30 KB.
+The list is windowed, so rendering costs the same for 20 rows as for 2,000. Not measured: the
+WebView-side parse of a 538 KB patch, and a real 2,000-link probe over the network. If either is
+visible, the fallback in the spec's risk table is a row-level diff on the same `grabber` field.
