@@ -20,6 +20,7 @@ use sdm_resolve::{CheckReason, ManagedBinaries, ToolsActivity};
 use uuid::Uuid;
 
 use crate::autoadd::ready_packages;
+use crate::clipboard::ClipboardWatcher;
 use crate::differ::{Delta, Differ};
 use crate::error::AppError;
 use crate::grabber::GrabberController;
@@ -98,6 +99,7 @@ pub struct App {
     fixed_limits: Option<Limits>,
     /// Row ids already sent to the downloads by auto-add.
     auto_added: Mutex<HashSet<Uuid>>,
+    clipboard: Mutex<ClipboardWatcher>,
     state: Mutex<PublishState>,
 }
 
@@ -190,6 +192,7 @@ impl App {
             grabber: dependencies.grabber,
             fixed_limits,
             auto_added: Mutex::new(HashSet::new()),
+            clipboard: Mutex::new(ClipboardWatcher::new()),
             state: Mutex::new(PublishState {
                 seq: 0,
                 differ: Differ::default(),
@@ -1019,15 +1022,40 @@ impl App {
     pub fn grabber_copy_url(&self, id: &str) -> Result<String, AppError> {
         let id = parse_id(id)?;
         let snapshot = self.grabber()?.session.snapshot();
-        if let Some(link) = snapshot.links.iter().find(|l| l.id == id) {
-            return Ok(link.final_url.as_str().to_owned());
+        let url = match snapshot.links.iter().find(|l| l.id == id) {
+            Some(link) => link.final_url.as_str().to_owned(),
+            None => snapshot
+                .media_rows
+                .iter()
+                .find(|r| r.id == id)
+                .map(|r| r.source_url.as_str().to_owned())
+                .ok_or_else(|| AppError::invalid("id", "that link is no longer in the grabber"))?,
+        };
+        // The caller is about to put this on the clipboard: do not grab it back.
+        lock(&self.clipboard).ignore_own_write(&url);
+        Ok(url)
+    }
+
+    /// Whether the clipboard should be read at all. The shell checks this
+    /// before every read so a switched-off watcher never touches the clipboard.
+    pub fn clipboard_watching_enabled(&self) -> bool {
+        lock(&self.settings).get().clipboard_watching_enabled
+    }
+
+    /// The shell's clipboard poll: `text` is what the clipboard holds now
+    /// (`None` when empty or not text). Links in new text go to the grabber.
+    pub async fn clipboard_changed(&self, text: Option<String>) -> Result<(), AppError> {
+        if !self.clipboard_watching_enabled() {
+            return Ok(());
         }
-        snapshot
-            .media_rows
-            .iter()
-            .find(|r| r.id == id)
-            .map(|r| r.source_url.as_str().to_owned())
-            .ok_or_else(|| AppError::invalid("id", "that link is no longer in the grabber"))
+        let fresh = {
+            let mut watcher = lock(&self.clipboard);
+            watcher.changed(text.as_deref()).map(str::to_owned)
+        };
+        match fresh {
+            Some(text) if self.grabber.is_some() => self.grabber_ingest_text(&text).await,
+            _ => Ok(()),
+        }
     }
 
     /// Applies one of the row's picker options. A stale option id (the row
