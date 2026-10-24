@@ -135,15 +135,129 @@ pub struct ItemHistory {
     pub speed_history: Vec<f64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+/// How long an ungrabbed link or media row stays in the link grabber.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 #[serde(rename_all = "camelCase")]
+pub enum AutoClearInterval {
+    FifteenMinutes,
+    ThirtyMinutes,
+    OneHour,
+    OneDay,
+    Never,
+}
+
+impl AutoClearInterval {
+    /// `None` for `Never`.
+    pub fn duration(self) -> Option<std::time::Duration> {
+        let seconds = match self {
+            Self::FifteenMinutes => 15 * 60,
+            Self::ThirtyMinutes => 30 * 60,
+            Self::OneHour => 60 * 60,
+            Self::OneDay => 24 * 60 * 60,
+            Self::Never => return None,
+        };
+        Some(std::time::Duration::from_secs(seconds))
+    }
+}
+
+/// Where the app shows itself. Only macOS offers a choice; the other
+/// platforms always store `Both`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub enum ActivationMode {
+    MenuBarOnly,
+    DockOnly,
+    Both,
+}
+
+/// Every setting the Settings window edits, as stored in `settings.json` and
+/// sent over the wire. The defaults are the SwiftUI app's. `download_folder`
+/// is always `Some` when read; on update, `None` keeps the stored folder.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "camelCase", default)]
 pub struct SettingsDto {
-    pub download_folder: String,
+    pub download_folder: Option<String>,
+
+    pub max_concurrent: u32,
+    pub segments_per_item: u32,
+    pub global_max_connections: u32,
+    pub max_connections_per_host: u32,
+    pub min_segment_size_mb: u32,
+    pub auto_start_downloads_on_launch: bool,
+
+    pub clipboard_watching_enabled: bool,
+    pub auto_add_and_start_on_grab: bool,
+    pub deep_sniff_enabled: bool,
+    pub auto_clear_interval: AutoClearInterval,
+
+    pub yt_max_height: u32,
+    pub allow_av1: bool,
+    pub allow_vp9: bool,
+    pub allow_h264: bool,
+    pub allow_mp4: bool,
+    pub allow_webm: bool,
+    pub allow_opus: bool,
+    pub allow_aac: bool,
+    pub max_playlist_videos: u32,
+    /// `none`, `safari`, `chrome`, `firefox`, `edge` or `brave`.
+    pub cookie_source: String,
+    /// `stable` or `nightly`.
+    pub yt_dlp_channel: String,
+
+    pub notify_download_finished: bool,
+    pub notify_package_finished: bool,
+    pub notify_download_failed: bool,
+    pub notify_links_grabbed: bool,
+
+    pub launch_at_login: bool,
+    pub activation_mode: ActivationMode,
+    /// A bundled theme's id, or `system` to follow the OS.
+    pub theme_id: String,
+}
+
+impl Default for SettingsDto {
+    fn default() -> Self {
+        Self {
+            download_folder: None,
+            max_concurrent: 3,
+            segments_per_item: 8,
+            global_max_connections: 32,
+            max_connections_per_host: 8,
+            min_segment_size_mb: 10,
+            auto_start_downloads_on_launch: false,
+            clipboard_watching_enabled: true,
+            auto_add_and_start_on_grab: false,
+            deep_sniff_enabled: true,
+            auto_clear_interval: AutoClearInterval::ThirtyMinutes,
+            yt_max_height: 1080,
+            allow_av1: true,
+            allow_vp9: true,
+            allow_h264: true,
+            allow_mp4: true,
+            allow_webm: true,
+            allow_opus: true,
+            allow_aac: true,
+            max_playlist_videos: 50,
+            cookie_source: "none".to_owned(),
+            yt_dlp_channel: "stable".to_owned(),
+            notify_download_finished: true,
+            notify_package_finished: true,
+            notify_download_failed: true,
+            notify_links_grabbed: true,
+            launch_at_login: false,
+            activation_mode: ActivationMode::Both,
+            theme_id: "system".to_owned(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct BinariesStatusDto {
+    /// The tools ship inside the app (macOS) rather than being downloaded.
+    pub bundled: bool,
+    /// A tool is being downloaded right now.
+    pub downloading: bool,
     pub yt_dlp_version: Option<String>,
     pub latest_known: Option<String>,
     pub ffmpeg_version: Option<String>,

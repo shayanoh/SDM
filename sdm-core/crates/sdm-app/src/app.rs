@@ -787,6 +787,8 @@ impl App {
             Some(binaries) => {
                 let status = binaries.status();
                 BinariesStatusDto {
+                    bundled: false,
+                    downloading: false,
                     yt_dlp_version: status.yt_dlp_version,
                     latest_known: status.latest_known,
                     ffmpeg_version: status.ffmpeg_version,
@@ -795,6 +797,8 @@ impl App {
                 }
             }
             None => BinariesStatusDto {
+                bundled: false,
+                downloading: false,
                 yt_dlp_version: None,
                 latest_known: None,
                 ffmpeg_version: None,

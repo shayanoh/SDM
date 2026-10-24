@@ -226,20 +226,22 @@ async fn settings_updates_apply_to_the_engine_and_bad_ones_are_rejected() {
     let new_folder = h.data.path().join("new-downloads");
     h.app
         .update_settings(sdm_app::protocol::SettingsDto {
-            download_folder: new_folder.to_string_lossy().into_owned(),
+            download_folder: Some(new_folder.to_string_lossy().into_owned()),
+            ..Default::default()
         })
         .await
         .unwrap();
     assert_eq!(
-        h.app.get_settings().download_folder,
-        new_folder.to_string_lossy()
+        h.app.get_settings().download_folder.as_deref(),
+        Some(new_folder.to_string_lossy().as_ref())
     );
 
     let before = h.app.get_settings();
     let bad = h
         .app
         .update_settings(sdm_app::protocol::SettingsDto {
-            download_folder: "".into(),
+            download_folder: Some("".into()),
+            ..Default::default()
         })
         .await;
     assert!(bad.is_err());
@@ -314,7 +316,8 @@ async fn package_folder_follows_the_download_folder_setting() {
     h.sink.take();
     h.app
         .update_settings(sdm_app::protocol::SettingsDto {
-            download_folder: elsewhere.path().to_string_lossy().into_owned(),
+            download_folder: Some(elsewhere.path().to_string_lossy().into_owned()),
+            ..Default::default()
         })
         .await
         .unwrap();
