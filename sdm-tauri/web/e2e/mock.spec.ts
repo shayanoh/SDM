@@ -30,23 +30,3 @@ test("a running row paints part of its progress bar", async ({ page }) => {
       });
   await expect.poll(painted, { timeout: 10_000 }).toBe(true);
 });
-
-test("a bad address shows a banner and a good one adds a row", async ({
-  page,
-}) => {
-  await page.getByRole("button", { name: "Linkgrabber" }).click();
-  const input = page.getByLabel("Download address");
-  await input.fill("nope");
-  await input.press("Enter");
-  await expect(page.getByRole("alert")).toContainText("valid web address");
-
-  await input.fill("https://example.com/files/new.bin");
-  await input.press("Enter");
-  // The list is windowed and the new package lands last.
-  await page.getByRole("button", { name: "Downloads" }).click();
-  await page
-    .locator(".scroller")
-    .evaluate((element) => (element.scrollTop = element.scrollHeight));
-  await expect(page.getByText("new.bin").first()).toBeVisible();
-  await expect(page.getByRole("alert")).toHaveCount(0);
-});

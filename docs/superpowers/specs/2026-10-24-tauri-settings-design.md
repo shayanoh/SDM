@@ -231,3 +231,10 @@ veto.
 - Icons for the tabs and the gear (Lucide, per the main-window spec's SF Symbol table; the tab icons
   are `paintbrush`, `arrow.down.circle`, `link`, `film.stack`, `bell`).
 - The stepped number field's exact look, matched to the screenshot.
+
+## 12. Known follow-ups (found in the final review, 2026-10-24)
+
+- **Partial updates reset settings.** `SettingsDto` has `#[serde(default)]` and `SettingsStore::update` stores what
+  it is given, so an update that omits fields writes their defaults. No caller does this today. Fix it before spec 5
+  adds single-field updates; see "Spec 5 next" in [the roadmap](../../tauri-roadmap.md).
+- The smaller deferred items are listed there too.

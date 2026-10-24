@@ -441,8 +441,15 @@ async fn a_failed_tool_download_shows_an_error_notice_in_the_view() {
         .grabber_ingest_text("https://a.example.com/x.zip")
         .await
         .unwrap();
+    // Ingesting also starts a check of its own, which shows "Fetching qjs…"
+    // until it fails the same way; the notice settles on the error, so wait
+    // for it rather than reading the view in the middle of that check.
+    let settled = tick_until(&h.app, 400, || {
+        grabber_view(&h).tools.is_some_and(|notice| notice.is_error)
+    })
+    .await;
+    assert!(settled, "the tools notice never settled on the error");
     let notice = grabber_view(&h).tools.expect("a tools notice");
-    assert!(notice.is_error);
     assert!(
         notice.text.starts_with("Could not fetch qjs"),
         "{}",
