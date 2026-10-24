@@ -53,6 +53,20 @@ fn unit_fraction(value: f64) -> f64 {
 }
 
 impl TrayStatus {
+    /// Nothing running and nothing waiting: what the tray shows before the
+    /// first snapshot.
+    pub fn idle() -> Self {
+        Self {
+            running_count: 0,
+            non_resumable_count: 0,
+            bytes_per_second: 0.0,
+            history: Vec::new(),
+            overall_fraction: 0.0,
+            items: Vec::new(),
+            links_waiting: 0,
+        }
+    }
+
     pub fn from_snapshot(snapshot: &EngineSnapshot, links_waiting: u32) -> Self {
         let running: Vec<_> = snapshot
             .packages
@@ -254,6 +268,15 @@ mod tests {
                 bytes_per_second: 2.0 * MB
             }]
         );
+    }
+
+    #[test]
+    fn an_idle_status_has_nothing_running_and_nothing_waiting() {
+        let idle = TrayStatus::idle();
+        assert_eq!(idle.running_count, 0);
+        assert_eq!(idle.links_waiting, 0);
+        assert_eq!(idle.quit_warning(), None);
+        assert_eq!(idle.menu_status_lines(), vec!["No downloads running"]);
     }
 
     #[test]
