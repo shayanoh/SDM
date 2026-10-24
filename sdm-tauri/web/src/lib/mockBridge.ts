@@ -420,7 +420,7 @@ export class MockBridge implements Bridge {
   #listener: ((patch: Patch) => void) | null = null;
   #seq = 0;
   #timer: ReturnType<typeof setInterval> | null = null;
-  #settings: SettingsDto = { downloadFolder: "/Users/mock/Downloads/SDM" };
+  #settings: SettingsDto = { downloadFolder: "/Users/mock/Downloads" };
   #globalHistory: number[] = [];
   #detail = new Map<string, Set<string>>();
   #vibrancy: boolean;

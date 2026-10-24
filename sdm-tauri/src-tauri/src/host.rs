@@ -19,7 +19,8 @@ impl TauriHost {
         // the SwiftUI app, decision D5), %APPDATA% on Windows and
         // $XDG_DATA_HOME or ~/.local/share on Linux.
         let data_dir = paths.data_dir().map_err(|e| e.to_string())?.join("SDM");
-        let download_dir = paths.download_dir().map_err(|e| e.to_string())?.join("SDM");
+        // The user's Downloads folder itself, as in the SwiftUI app.
+        let download_dir = paths.download_dir().map_err(|e| e.to_string())?;
         Ok(Self {
             data_dir,
             download_dir,
