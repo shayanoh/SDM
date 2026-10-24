@@ -21,7 +21,7 @@ use uuid::Uuid;
 
 use crate::differ::{Delta, Differ};
 use crate::error::AppError;
-use crate::grabber::{GrabberController, GrabberDefaults};
+use crate::grabber::GrabberController;
 use crate::host::{Host, PatchSink};
 use crate::notify::notifications_between;
 use crate::protocol::*;
@@ -1004,7 +1004,7 @@ impl App {
             .media
             .as_ref()
             .ok_or_else(|| AppError::invalid("optionId", "this video has no formats yet"))?;
-        let option = MediaFormatMenu::options(media, &GrabberDefaults::quality_preferences())
+        let option = MediaFormatMenu::options(media, &grabber.quality_preferences())
             .into_iter()
             .find(|option| option.id == option_id)
             .ok_or_else(|| AppError::invalid("optionId", "that format is no longer offered"))?;

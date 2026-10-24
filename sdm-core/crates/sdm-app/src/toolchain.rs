@@ -9,21 +9,20 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use sdm_core::{LinkResolver, WholesaleDownloader};
 use sdm_engine::{FfmpegMuxer, JsonStateStore, Muxer, ReqwestTransport, RetryPolicy, SystemTrash};
 use sdm_resolve::{
-    BinaryLocator, CookieSource, ManagedBinaries, ProcessRunner, ReqwestBinaryFetcher,
-    SystemProcessRunner, YtDlpChannel, YtDlpResolver, YtDlpWholesaleDownloader,
+    BinaryLocator, ManagedBinaries, ProcessRunner, ReqwestBinaryFetcher, SystemProcessRunner,
+    YtDlpResolver, YtDlpWholesaleDownloader,
 };
 
 use crate::app::{App, Dependencies};
 use crate::error::AppError;
 use crate::grabber::GrabberController;
 use crate::host::Host;
-use crate::settings::SettingsStore;
-
-const DEFAULT_MAX_PLAYLIST_VIDEOS: usize = 50;
+use crate::settings::{SettingsStore, channel_reader, cookie_source_reader, playlist_cap_reader};
 
 pub fn production_dependencies(host: &dyn Host) -> Dependencies {
     let data_dir = host.data_dir();
     let settings = SettingsStore::load(data_dir.join("settings.json"), host.default_download_dir());
+    let shared = settings.shared();
     let bin_directory = data_dir.join("bin");
     let runner: Arc<dyn ProcessRunner> = Arc::new(SystemProcessRunner::new());
 
@@ -35,14 +34,14 @@ pub fn production_dependencies(host: &dyn Host) -> Dependencies {
     let resolver: Arc<dyn LinkResolver> = Arc::new(YtDlpResolver::new(
         Arc::clone(&runner),
         Arc::clone(&locator),
-        Arc::new(|| CookieSource::None),
-        Arc::new(|| DEFAULT_MAX_PLAYLIST_VIDEOS),
+        cookie_source_reader(&shared),
+        playlist_cap_reader(&shared),
         Arc::new(Vec::new),
     ));
     let wholesale: Arc<dyn WholesaleDownloader> = Arc::new(YtDlpWholesaleDownloader::new(
         Arc::clone(&runner),
         Arc::clone(&locator),
-        Arc::new(|| CookieSource::None),
+        cookie_source_reader(&shared),
         Arc::new(Vec::new),
     ));
     let muxer: Arc<dyn Muxer> =
@@ -71,7 +70,7 @@ pub fn production_dependencies(host: &dyn Host) -> Dependencies {
         Arc::new(ReqwestBinaryFetcher::new()),
         runner,
         vendor_assets,
-        || YtDlpChannel::Stable,
+        channel_reader(&shared),
     )
     .with_on_binaries_changed(move || {
         let locator = Arc::clone(&invalidate);
@@ -83,7 +82,11 @@ pub fn production_dependencies(host: &dyn Host) -> Dependencies {
         })
     });
 
-    let grabber = GrabberController::production(Some(Arc::clone(&resolver)), ffmpeg_available);
+    let grabber = GrabberController::production(
+        Some(Arc::clone(&resolver)),
+        ffmpeg_available,
+        Arc::clone(&shared),
+    );
 
     Dependencies {
         transport: Arc::new(ReqwestTransport::new()),

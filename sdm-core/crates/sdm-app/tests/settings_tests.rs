@@ -5,8 +5,19 @@ use std::sync::Arc;
 use sdm_app::host::{FakeHost, RecordingSink};
 use sdm_app::protocol::{ItemStateDto, Patch, SettingsDto};
 use sdm_app::{App, Dependencies};
-use sdm_engine::{FakeOrigin, FakeOriginBehavior, InMemoryStateStore, RetryPolicy, SystemTrash};
+use sdm_engine::{FakeOrigin, FakeOriginBehavior, InMemoryStateStore, RetryPolicy, Trash};
 use support::*;
+
+/// These tests never delete a file; if one tried, it fails loudly.
+struct NoTrash;
+
+impl Trash for NoTrash {
+    fn trash(&self, _path: &std::path::Path) -> std::io::Result<()> {
+        Err(std::io::Error::other(
+            "a settings test must not trash files",
+        ))
+    }
+}
 
 /// A body big enough, and a chunk small enough, that a download is still
 /// running after a handful of ticks.
@@ -131,7 +142,7 @@ fn app_over(host: &Arc<FakeHost>, store: &Arc<InMemoryStateStore>, origin: FakeO
         Dependencies {
             transport: Arc::new(origin),
             state_store: store.clone(),
-            trash: Arc::new(SystemTrash),
+            trash: Arc::new(NoTrash),
             resolver: None,
             muxer: None,
             wholesale_downloader: None,
@@ -168,7 +179,7 @@ async fn restart_with_auto_resume(auto_resume: bool, disable_the_item: bool) -> 
         .find_map(|p| p.structure.as_ref())
         .map(|s| s.packages[0].items[0].id.clone())
         .expect("the item");
-    first.stop_items(&[id.clone()]).await.unwrap();
+    first.stop_items(std::slice::from_ref(&id)).await.unwrap();
     if disable_the_item {
         first.set_items_enabled(&[id], false).await.unwrap();
     }
@@ -246,7 +257,7 @@ async fn the_bundled_flag_follows_the_hosts_tool_folder() {
         Dependencies {
             transport: Arc::new(FakeOrigin::new(payload(10))),
             state_store: store,
-            trash: Arc::new(SystemTrash),
+            trash: Arc::new(NoTrash),
             resolver: None,
             muxer: None,
             wholesale_downloader: None,

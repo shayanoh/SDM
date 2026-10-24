@@ -191,6 +191,34 @@ fn lenient(data: &[u8]) -> SettingsDto {
     serde_json::from_value(serde_json::Value::Object(merged)).unwrap_or_default()
 }
 
+fn read(shared: &SharedSettings) -> std::sync::RwLockReadGuard<'_, SettingsDto> {
+    shared
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// The cookie browser, read fresh on every call.
+pub fn cookie_source_reader(
+    shared: &SharedSettings,
+) -> Arc<dyn Fn() -> CookieSource + Send + Sync> {
+    let shared = Arc::clone(shared);
+    Arc::new(move || read(&shared).cookie_source())
+}
+
+/// The playlist cap, read fresh on every call.
+pub fn playlist_cap_reader(shared: &SharedSettings) -> Arc<dyn Fn() -> usize + Send + Sync> {
+    let shared = Arc::clone(shared);
+    Arc::new(move || read(&shared).max_playlist_videos as usize)
+}
+
+/// The yt-dlp channel, read fresh on every call.
+pub fn channel_reader(
+    shared: &SharedSettings,
+) -> impl Fn() -> YtDlpChannel + Send + Sync + 'static {
+    let shared = Arc::clone(shared);
+    move || read(&shared).channel()
+}
+
 pub struct SettingsStore {
     path: PathBuf,
     /// `download_folder` is always `Some` and validated.
@@ -642,6 +670,54 @@ mod tests {
         })
         .unwrap();
         assert_eq!(shared.read().unwrap().max_concurrent, 9);
+    }
+
+    #[test]
+    fn the_readers_follow_the_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut s = store(&dir);
+        let shared = s.shared();
+        let cookies = cookie_source_reader(&shared);
+        let cap = playlist_cap_reader(&shared);
+        let channel = channel_reader(&shared);
+        assert_eq!(cookies(), CookieSource::None);
+        assert_eq!(cap(), 50);
+        assert_eq!(channel(), YtDlpChannel::Stable);
+        s.update(SettingsDto {
+            cookie_source: "chrome".into(),
+            max_playlist_videos: 120,
+            yt_dlp_channel: "nightly".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(cookies(), CookieSource::Chrome);
+        assert_eq!(cap(), 120);
+        assert_eq!(channel(), YtDlpChannel::Nightly);
+    }
+
+    #[test]
+    fn quality_preferences_follow_the_toggles() {
+        let preferences = SettingsDto {
+            yt_max_height: 720,
+            allow_av1: false,
+            allow_webm: false,
+            allow_aac: false,
+            ..Default::default()
+        }
+        .quality_preferences();
+        assert_eq!(preferences.max_height, 720);
+        assert_eq!(
+            preferences.video_codecs,
+            [VideoCodec::Vp9, VideoCodec::H264].into_iter().collect()
+        );
+        assert_eq!(
+            preferences.containers,
+            [MediaContainer::Mp4].into_iter().collect()
+        );
+        assert_eq!(
+            preferences.audio_codecs,
+            [AudioCodec::Opus].into_iter().collect()
+        );
     }
 
     #[test]

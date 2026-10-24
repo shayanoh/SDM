@@ -15,6 +15,7 @@ use crate::probed_link::{ProbedLink, Stage};
 pub struct LinkProber {
     transport: Arc<dyn ProbeTransport>,
     pub deep_sniff_enabled: bool,
+    deep_sniff_source: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
 }
 
 impl LinkProber {
@@ -23,6 +24,25 @@ impl LinkProber {
         Self {
             transport,
             deep_sniff_enabled,
+            deep_sniff_source: None,
+        }
+    }
+
+    /// Reads deep sniff from `source` on every probe instead of using the
+    /// `deep_sniff_enabled` flag, so a setting can change under a running
+    /// session.
+    pub fn with_deep_sniff_source(
+        mut self,
+        source: impl Fn() -> bool + Send + Sync + 'static,
+    ) -> Self {
+        self.deep_sniff_source = Some(Arc::new(source));
+        self
+    }
+
+    fn deep_sniff(&self) -> bool {
+        match &self.deep_sniff_source {
+            Some(source) => source(),
+            None => self.deep_sniff_enabled,
         }
     }
 
@@ -132,7 +152,7 @@ impl LinkProber {
         let Some(status) = link.status_code else {
             return;
         };
-        if !self.deep_sniff_enabled || !(200..=299).contains(&status) {
+        if !self.deep_sniff() || !(200..=299).contains(&status) {
             return;
         }
         link.stage = Stage::Sniffing;

@@ -3,8 +3,8 @@
 
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{Duration, SystemTime};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock};
+use std::time::SystemTime;
 
 use sdm_core::{LinkResolver, QualityPreferences, SourceUrl};
 use sdm_grabber::{
@@ -12,23 +12,18 @@ use sdm_grabber::{
 };
 
 use crate::grabber_view::build_view;
+use crate::protocol::SettingsDto;
 use crate::protocol::{GrabberView, ToolsNotice};
+use crate::settings::SharedSettings;
 
-/// The grabber settings until Settings exist (spec 4): the SwiftUI defaults.
-/// Spec 4 replaces these constants with stored settings.
+/// The grabber's probe budgets. Nothing in Settings changes these (SwiftUI
+/// has no such controls), so they stay constants.
 pub struct GrabberDefaults;
 
 impl GrabberDefaults {
-    pub const DEEP_SNIFF: bool = true;
-    /// How long an ungrabbed row stays before it is cleared automatically.
-    pub const AUTO_CLEAR_AFTER: Duration = Duration::from_secs(30 * 60);
     pub const MAX_CONCURRENT_PROBES: usize = 32;
     pub const MAX_CONCURRENT_PER_HOST: usize = 8;
     pub const MAX_CONCURRENT_RESOLVES: usize = 4;
-
-    pub fn quality_preferences() -> QualityPreferences {
-        QualityPreferences::default()
-    }
 
     pub fn budget() -> GrabberBudget {
         GrabberBudget::new(
@@ -42,9 +37,16 @@ impl GrabberDefaults {
 pub struct GrabberController {
     pub(crate) session: GrabberSession,
     clock: Clock,
+    settings: SharedSettings,
     held_back: Mutex<Option<u32>>,
     last_sent: Mutex<Option<GrabberView>>,
     known_urls: Mutex<HashSet<SourceUrl>>,
+}
+
+fn read(settings: &SharedSettings) -> std::sync::RwLockReadGuard<'_, SettingsDto> {
+    settings
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -54,18 +56,35 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl GrabberController {
-    /// A controller over an injected transport (tests) with an optional clock.
+    /// A controller over an injected transport (tests) with an optional clock
+    /// and the default settings.
     pub fn new(
         transport: Arc<dyn ProbeTransport>,
         resolver: Option<Arc<dyn LinkResolver>>,
         ffmpeg_available: Arc<AtomicBool>,
         clock: Option<Clock>,
     ) -> Arc<Self> {
+        let settings = Arc::new(RwLock::new(SettingsDto::default()));
+        Self::new_with_settings(transport, resolver, ffmpeg_available, clock, settings)
+    }
+
+    /// [`Self::new`] reading the live `settings` for deep sniff, quality
+    /// preferences and the auto-clear interval.
+    pub fn new_with_settings(
+        transport: Arc<dyn ProbeTransport>,
+        resolver: Option<Arc<dyn LinkResolver>>,
+        ffmpeg_available: Arc<AtomicBool>,
+        clock: Option<Clock>,
+        settings: SharedSettings,
+    ) -> Arc<Self> {
         let clock: Clock = clock.unwrap_or_else(|| Arc::new(SystemTime::now));
-        let prober = LinkProber::new(transport, GrabberDefaults::DEEP_SNIFF);
+        let sniff = Arc::clone(&settings);
+        let prober = LinkProber::new(transport, true)
+            .with_deep_sniff_source(move || read(&sniff).deep_sniff_enabled);
+        let preferences = Arc::clone(&settings);
         let mut builder = GrabberSession::builder(prober)
             .budget(GrabberDefaults::budget())
-            .quality_preferences(GrabberDefaults::quality_preferences)
+            .quality_preferences(move || read(&preferences).quality_preferences())
             .ffmpeg_available(move || ffmpeg_available.load(Ordering::SeqCst))
             .clock({
                 let clock = Arc::clone(&clock);
@@ -77,6 +96,7 @@ impl GrabberController {
         Arc::new(Self {
             session: builder.build(),
             clock,
+            settings,
             held_back: Mutex::new(None),
             last_sent: Mutex::new(None),
             known_urls: Mutex::new(HashSet::new()),
@@ -87,19 +107,26 @@ impl GrabberController {
     pub fn production(
         resolver: Option<Arc<dyn LinkResolver>>,
         ffmpeg_available: Arc<AtomicBool>,
+        settings: SharedSettings,
     ) -> Arc<Self> {
-        Self::new(
+        Self::new_with_settings(
             Arc::new(ReqwestProbeTransport::new()),
             resolver,
             ffmpeg_available,
             None,
+            settings,
         )
+    }
+
+    /// The quality preferences in force now.
+    pub fn quality_preferences(&self) -> QualityPreferences {
+        read(&self.settings).quality_preferences()
     }
 
     pub(crate) fn view(&self, tools: Option<ToolsNotice>) -> GrabberView {
         build_view(
             &self.session.snapshot(),
-            &GrabberDefaults::quality_preferences(),
+            &self.quality_preferences(),
             *lock(&self.held_back),
             tools,
         )
@@ -139,8 +166,10 @@ impl GrabberController {
     }
 
     /// Drops rows older than the auto-clear age.
-    pub(crate) fn prune(&self) {
-        self.session
-            .prune_older_than(GrabberDefaults::AUTO_CLEAR_AFTER, (self.clock)());
+    pub fn prune(&self) {
+        let interval = read(&self.settings).auto_clear_interval.duration();
+        if let Some(age) = interval {
+            self.session.prune_older_than(age, (self.clock)());
+        }
     }
 }
