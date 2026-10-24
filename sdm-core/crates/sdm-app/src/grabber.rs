@@ -10,6 +10,7 @@ use sdm_core::{LinkResolver, QualityPreferences, SourceUrl};
 use sdm_grabber::{
     Clock, GrabberBudget, GrabberSession, LinkProber, ProbeTransport, ReqwestProbeTransport,
 };
+use uuid::Uuid;
 
 use crate::grabber_view::build_view;
 use crate::protocol::SettingsDto;
@@ -41,6 +42,7 @@ pub struct GrabberController {
     held_back: Mutex<Option<u32>>,
     last_sent: Mutex<Option<GrabberView>>,
     known_urls: Mutex<HashSet<SourceUrl>>,
+    announced_rows: Mutex<HashSet<Uuid>>,
 }
 
 fn read(settings: &SharedSettings) -> std::sync::RwLockReadGuard<'_, SettingsDto> {
@@ -100,6 +102,7 @@ impl GrabberController {
             held_back: Mutex::new(None),
             last_sent: Mutex::new(None),
             known_urls: Mutex::new(HashSet::new()),
+            announced_rows: Mutex::new(HashSet::new()),
         })
     }
 
@@ -163,6 +166,19 @@ impl GrabberController {
             *known = urls.clone();
             self.session.set_known_download_urls(urls);
         }
+    }
+
+    /// How many rows exist now that were never reported before, remembering
+    /// them. A row that leaves and comes back under the same id is not new.
+    pub(crate) fn take_fresh_rows(&self) -> u32 {
+        let mut announced = lock(&self.announced_rows);
+        let fresh = self
+            .session
+            .row_ids()
+            .into_iter()
+            .filter(|id| announced.insert(*id))
+            .count();
+        u32::try_from(fresh).unwrap_or(u32::MAX)
     }
 
     /// Drops rows older than the auto-clear age.

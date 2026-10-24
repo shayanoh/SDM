@@ -23,7 +23,7 @@ use crate::differ::{Delta, Differ};
 use crate::error::AppError;
 use crate::grabber::GrabberController;
 use crate::host::{Host, PatchSink};
-use crate::notify::notifications_between;
+use crate::notify::{Notification, notifications_between};
 use crate::protocol::*;
 use crate::settings::SettingsStore;
 use crate::theme::theme_css;
@@ -417,7 +417,14 @@ impl App {
         if let (Some(grabber), Some(urls)) = (&self.grabber, known_urls) {
             grabber.set_known_download_urls(urls);
         }
-        for notification in due {
+        if let Some(grabber) = &self.grabber {
+            let count = grabber.take_fresh_rows();
+            if count > 0 {
+                due.push(Notification::LinksGrabbed { count });
+            }
+        }
+        let settings = lock(&self.settings).get();
+        for notification in due.into_iter().filter(|n| n.enabled(&settings)) {
             if let Err(error) = self.host.notify(notification) {
                 tracing::warn!("could not show a notification: {error}");
             }

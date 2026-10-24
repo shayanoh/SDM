@@ -304,6 +304,12 @@ impl GrabberSession {
         self.inner.state().snapshot()
     }
 
+    /// The ids of every link and media row, in session order. Cheaper than a
+    /// snapshot, for callers that only watch which rows exist.
+    pub fn row_ids(&self) -> Vec<Uuid> {
+        self.inner.state().order.clone()
+    }
+
     /// Refreshes which grabbed links are already in the download list.
     /// Spec §7.5: badged as duplicates, never silently dropped.
     pub fn set_known_download_urls(&self, urls: HashSet<SourceUrl>) {
