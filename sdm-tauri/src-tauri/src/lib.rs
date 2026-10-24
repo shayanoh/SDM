@@ -1,6 +1,8 @@
 mod clipboard;
 mod commands;
 mod host;
+mod lifecycle;
+mod linux_tray;
 mod main_window;
 mod notify;
 mod settings_window;
@@ -153,6 +155,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_dialog::init())
         // Remembers the main window's size, position and maximized state.
         .plugin(
             tauri_plugin_window_state::Builder::default()
@@ -163,8 +166,17 @@ pub fn run() {
         .on_window_event(|window, event| {
             // Settings is a second window, so closing the main one no longer
             // ends the app by itself: take Settings down with it.
-            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
-                settings_window::close(window.app_handle());
+            if window.label() != main_window::LABEL {
+                return;
+            }
+            match event {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    // Closing is a request, answered by the platform's rule.
+                    api.prevent_close();
+                    lifecycle::on_close_requested(window.app_handle());
+                }
+                tauri::WindowEvent::Destroyed => settings_window::close(window.app_handle()),
+                _ => {}
             }
         })
         .on_menu_event(|app, event| {
@@ -238,8 +250,9 @@ pub fn run() {
             });
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running the SDM application");
+        .build(tauri::generate_context!())
+        .expect("error while building the SDM application")
+        .run(|app, event| lifecycle::on_run_event(app, &event));
 }
 
 #[cfg(all(test, debug_assertions))]
