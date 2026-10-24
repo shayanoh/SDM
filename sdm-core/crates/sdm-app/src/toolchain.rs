@@ -17,11 +17,13 @@ use crate::app::{App, Dependencies};
 use crate::error::AppError;
 use crate::grabber::GrabberController;
 use crate::host::Host;
+use crate::settings::SettingsStore;
 
 const DEFAULT_MAX_PLAYLIST_VIDEOS: usize = 50;
 
 pub fn production_dependencies(host: &dyn Host) -> Dependencies {
     let data_dir = host.data_dir();
+    let settings = SettingsStore::load(data_dir.join("settings.json"), host.default_download_dir());
     let bin_directory = data_dir.join("bin");
     let runner: Arc<dyn ProcessRunner> = Arc::new(SystemProcessRunner::new());
 
@@ -93,6 +95,7 @@ pub fn production_dependencies(host: &dyn Host) -> Dependencies {
         retry_policy: RetryPolicy::new(),
         binaries: Some(binaries),
         grabber: Some(grabber),
+        settings: Some(settings),
     }
 }
 

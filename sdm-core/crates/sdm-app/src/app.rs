@@ -16,7 +16,7 @@ use sdm_grabber::{
     GrabberSnapshot, MediaFormatMenu, MediaHandoff, MediaRow, MediaRowState, PackageCandidate,
     ProbedLink, Verdict,
 };
-use sdm_resolve::{ManagedBinaries, ToolsActivity};
+use sdm_resolve::{CheckReason, ManagedBinaries, ToolsActivity};
 use uuid::Uuid;
 
 use crate::differ::{Delta, Differ};
@@ -42,6 +42,9 @@ pub struct Dependencies {
     pub binaries: Option<ManagedBinaries>,
     /// The link grabber; `None` leaves every `grabber_*` action an error.
     pub grabber: Option<Arc<GrabberController>>,
+    /// The loaded settings, when the caller shares them with other
+    /// components (production does); `None` makes the app load its own.
+    pub settings: Option<SettingsStore>,
 }
 
 /// How many downloads, segments and connections the engine may use at once.
@@ -52,21 +55,24 @@ struct Limits {
     connections: usize,
 }
 
-/// Engine defaults the SwiftUI app uses (`EngineSettingsStore`): 3 concurrent
-/// downloads, 8 segments, 32 connections, 8 per host, 10 MB minimum segment.
-const DEFAULT_LIMITS: Limits = Limits {
-    concurrent: 3,
-    segments: 8,
-    connections: 32,
-};
-
-fn engine_settings(limits: Limits, folder: std::path::PathBuf) -> EngineSettings {
-    EngineSettings::new(
-        limits.concurrent,
-        limits.segments,
-        limits.connections,
-        folder,
-    )
+/// Engine limits fixed by the load harness (`new_with_concurrency`), taking
+/// precedence over the stored concurrency, segment and connection settings.
+fn engine_settings(
+    settings: &SettingsDto,
+    folder: std::path::PathBuf,
+    fixed: Option<Limits>,
+) -> EngineSettings {
+    let (concurrent, segments, connections) = match fixed {
+        Some(limits) => (limits.concurrent, limits.segments, limits.connections),
+        None => (
+            settings.max_concurrent as usize,
+            settings.segments_per_item as usize,
+            settings.global_max_connections as usize,
+        ),
+    };
+    EngineSettings::new(concurrent, segments, connections, folder)
+        .with_max_connections_per_host(settings.max_connections_per_host as usize)
+        .with_min_segment_size_bytes(i64::from(settings.min_segment_size_mb) * 1024 * 1024)
 }
 
 struct PublishState {
@@ -88,7 +94,7 @@ pub struct App {
     settings: Mutex<SettingsStore>,
     binaries: Option<ManagedBinaries>,
     grabber: Option<Arc<GrabberController>>,
-    limits: Limits,
+    fixed_limits: Option<Limits>,
     state: Mutex<PublishState>,
 }
 
@@ -128,7 +134,7 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
 
 impl App {
     pub fn new(host: Arc<dyn Host>, dependencies: Dependencies) -> Result<Arc<Self>, AppError> {
-        Self::with_limits(host, dependencies, DEFAULT_LIMITS)
+        Self::with_limits(host, dependencies, None)
     }
 
     /// [`Self::new`] with `max_concurrent` simultaneous downloads (and four
@@ -149,23 +155,24 @@ impl App {
             segments: 4,
             connections: max_concurrent.saturating_mul(4),
         };
-        Self::with_limits(host, dependencies, limits)
+        Self::with_limits(host, dependencies, Some(limits))
     }
 
     fn with_limits(
         host: Arc<dyn Host>,
         dependencies: Dependencies,
-        limits: Limits,
+        fixed_limits: Option<Limits>,
     ) -> Result<Arc<Self>, AppError> {
         let data_dir = host.data_dir();
         std::fs::create_dir_all(&data_dir)
             .map_err(|e| AppError::failed(format!("cannot create {}: {e}", data_dir.display())))?;
-        let settings =
-            SettingsStore::load(data_dir.join("settings.json"), host.default_download_dir());
+        let settings = dependencies.settings.unwrap_or_else(|| {
+            SettingsStore::load(data_dir.join("settings.json"), host.default_download_dir())
+        });
         let engine = DownloadEngine::new(
             dependencies.transport,
             dependencies.state_store,
-            engine_settings(limits, settings.download_folder()),
+            engine_settings(&settings.get(), settings.download_folder(), fixed_limits),
             dependencies.retry_policy,
             dependencies.resolver,
             dependencies.muxer,
@@ -178,7 +185,7 @@ impl App {
             settings: Mutex::new(settings),
             binaries: dependencies.binaries,
             grabber: dependencies.grabber,
-            limits,
+            fixed_limits,
             state: Mutex::new(PublishState {
                 seq: 0,
                 differ: Differ::default(),
@@ -199,6 +206,9 @@ impl App {
     /// Loads durable state. Call once, before the first `tick`.
     pub async fn restore(&self) -> Result<(), AppError> {
         self.engine.restore().await;
+        if lock(&self.settings).get().auto_start_downloads_on_launch {
+            self.engine.resume_all().await;
+        }
         self.publish(false).await
     }
 
@@ -776,7 +786,7 @@ impl App {
         let new_settings = {
             let mut store = lock(&self.settings);
             store.update(dto)?;
-            engine_settings(self.limits, store.download_folder())
+            engine_settings(&store.get(), store.download_folder(), self.fixed_limits)
         };
         self.engine.update_settings(new_settings).await;
         self.publish(false).await
@@ -787,8 +797,8 @@ impl App {
             Some(binaries) => {
                 let status = binaries.status();
                 BinariesStatusDto {
-                    bundled: false,
-                    downloading: false,
+                    bundled: self.host.bundled_tools_dir().is_some(),
+                    downloading: matches!(binaries.tools_activity(), ToolsActivity::Fetching(_)),
                     yt_dlp_version: status.yt_dlp_version,
                     latest_known: status.latest_known,
                     ffmpeg_version: status.ffmpeg_version,
@@ -797,7 +807,7 @@ impl App {
                 }
             }
             None => BinariesStatusDto {
-                bundled: false,
+                bundled: self.host.bundled_tools_dir().is_some(),
                 downloading: false,
                 yt_dlp_version: None,
                 latest_known: None,
@@ -806,6 +816,27 @@ impl App {
                 last_error: None,
             },
         }
+    }
+
+    /// Looks for a newer yt-dlp now ("Check now"). Waits for the check.
+    pub async fn check_binaries_now(&self) -> Result<(), AppError> {
+        let binaries = self
+            .binaries
+            .as_ref()
+            .ok_or_else(|| AppError::failed("the managed tools are not available"))?;
+        binaries.check_now(CheckReason::Manual).await;
+        Ok(())
+    }
+
+    /// The bundled themes for the picker, by name.
+    pub fn list_themes(&self) -> Vec<ThemeInfo> {
+        ThemeCatalog::built_in_themes()
+            .into_iter()
+            .map(|theme| ThemeInfo {
+                id: theme.id,
+                name: theme.name,
+            })
+            .collect()
     }
 
     /// The CSS for `theme_id` (the default theme, `dark`, when `None`).

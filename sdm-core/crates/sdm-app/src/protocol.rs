@@ -265,6 +265,14 @@ pub struct BinariesStatusDto {
     pub last_error: Option<String>,
 }
 
+/// A bundled theme, for the picker.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ThemeInfo {
+    pub id: String,
+    pub name: String,
+}
+
 /// What a "Remove and Delete" confirmation is about.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Type)]
 #[serde(tag = "kind", rename_all = "camelCase")]

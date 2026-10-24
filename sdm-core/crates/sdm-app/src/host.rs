@@ -40,6 +40,7 @@ pub trait PatchSink: Send + Sync {
 pub struct FakeHost {
     data_dir: PathBuf,
     download_dir: PathBuf,
+    bundled_tools_dir: Option<PathBuf>,
     notifications: Mutex<Vec<Notification>>,
     opened: Mutex<Vec<PathBuf>>,
     revealed: Mutex<Vec<PathBuf>>,
@@ -50,10 +51,17 @@ impl FakeHost {
         Self {
             data_dir,
             download_dir,
+            bundled_tools_dir: None,
             notifications: Mutex::new(Vec::new()),
             opened: Mutex::new(Vec::new()),
             revealed: Mutex::new(Vec::new()),
         }
+    }
+
+    /// Pretends the app bundles its tools in `dir`, as the macOS build does.
+    pub fn with_bundled_tools_dir(mut self, dir: PathBuf) -> Self {
+        self.bundled_tools_dir = Some(dir);
+        self
     }
 
     /// Every path passed to `open_path`, in order.
@@ -86,6 +94,9 @@ impl Host for FakeHost {
     }
     fn default_download_dir(&self) -> PathBuf {
         self.download_dir.clone()
+    }
+    fn bundled_tools_dir(&self) -> Option<PathBuf> {
+        self.bundled_tools_dir.clone()
     }
     fn reveal_in_file_manager(&self, path: &Path) -> Result<(), HostError> {
         self.revealed

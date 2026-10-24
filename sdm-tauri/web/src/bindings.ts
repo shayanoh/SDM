@@ -30,6 +30,16 @@ export const commands = {
 	getSettings: () => typedError<SettingsDto, AppError>(__TAURI_INVOKE("get_settings")),
 	updateSettings: (settings: SettingsDto) => typedError<null, AppError>(__TAURI_INVOKE("update_settings", { settings })),
 	binariesStatus: () => typedError<BinariesStatusDto, AppError>(__TAURI_INVOKE("binaries_status")),
+	/**  Looks for a newer yt-dlp now and waits for the check. */
+	checkBinariesNow: () => typedError<null, AppError>(__TAURI_INVOKE("check_binaries_now")),
+	listThemes: () => typedError<ThemeInfo[], AppError>(__TAURI_INVOKE("list_themes")),
+	/**
+	 *  Opens the Settings window, or focuses it if it is open. Async because a
+	 *  window created from a synchronous command deadlocks on Windows.
+	 */
+	openSettings: () => typedError<null, AppError>(__TAURI_INVOKE("open_settings")),
+	/**  Previews a theme in every window; `None` goes back to the stored theme. */
+	broadcastTheme: (themeId: string | null) => typedError<null, AppError>(__TAURI_INVOKE("broadcast_theme", { themeId })),
 	themeCss: (themeId: string | null) => typedError<string, AppError>(__TAURI_INVOKE("theme_css", { themeId })),
 	/**
 	 *  Whether the window has a translucent backdrop (Mica or Acrylic), so the
@@ -53,12 +63,25 @@ export const commands = {
 };
 
 /* Types */
+/**
+ *  Where the app shows itself. Only macOS offers a choice; the other
+ *  platforms always store `Both`.
+ */
+export type ActivationMode = "menuBarOnly" | "dockOnly" | "both";
+
 /**  What a command reports to the UI. `kind` is stable; `message` is for people. */
 export type AppError = { kind: "invalidArgument"; argument: string; message: string } | { kind: "failed"; message: string } | { kind: "internal"; message: string };
 
 export type AssemblyDto = "none" | "mux";
 
+/**  How long an ungrabbed link or media row stays in the link grabber. */
+export type AutoClearInterval = "fifteenMinutes" | "thirtyMinutes" | "oneHour" | "oneDay" | "never";
+
 export type BinariesStatusDto = {
+	/**  The tools ship inside the app (macOS) rather than being downloaded. */
+	bundled: boolean,
+	/**  A tool is being downloaded right now. */
+	downloading: boolean,
 	ytDlpVersion: string | null,
 	latestKnown: string | null,
 	ffmpegVersion: string | null,
@@ -223,8 +246,44 @@ export type RangeDto = {
 	end: number | null,
 };
 
+/**
+ *  Every setting the Settings window edits, as stored in `settings.json` and
+ *  sent over the wire. The defaults are the SwiftUI app's. `download_folder`
+ *  is always `Some` when read; on update, `None` keeps the stored folder.
+ */
 export type SettingsDto = {
-	downloadFolder: string,
+	downloadFolder?: string | null,
+	maxConcurrent?: number,
+	segmentsPerItem?: number,
+	globalMaxConnections?: number,
+	maxConnectionsPerHost?: number,
+	minSegmentSizeMb?: number,
+	autoStartDownloadsOnLaunch?: boolean,
+	clipboardWatchingEnabled?: boolean,
+	autoAddAndStartOnGrab?: boolean,
+	deepSniffEnabled?: boolean,
+	autoClearInterval?: AutoClearInterval,
+	ytMaxHeight?: number,
+	allowAv1?: boolean,
+	allowVp9?: boolean,
+	allowH264?: boolean,
+	allowMp4?: boolean,
+	allowWebm?: boolean,
+	allowOpus?: boolean,
+	allowAac?: boolean,
+	maxPlaylistVideos?: number,
+	/**  `none`, `safari`, `chrome`, `firefox`, `edge` or `brave`. */
+	cookieSource?: string,
+	/**  `stable` or `nightly`. */
+	ytDlpChannel?: string,
+	notifyDownloadFinished?: boolean,
+	notifyPackageFinished?: boolean,
+	notifyDownloadFailed?: boolean,
+	notifyLinksGrabbed?: boolean,
+	launchAtLogin?: boolean,
+	activationMode?: ActivationMode,
+	/**  A bundled theme's id, or `system` to follow the OS. */
+	themeId?: string,
 };
 
 export type Structure = {
@@ -256,6 +315,12 @@ export type StructurePackage = {
 	 */
 	folder: string,
 	items: StructureItem[],
+};
+
+/**  A bundled theme, for the picker. */
+export type ThemeInfo = {
+	id: string,
+	name: string,
 };
 
 /**  A line under the grabber header about the downloaded tools. */

@@ -1,5 +1,6 @@
 mod commands;
 mod host;
+mod settings_window;
 mod vibrancy;
 
 use std::sync::Arc;
@@ -41,6 +42,10 @@ fn specta_builder() -> Builder<tauri::Wry> {
         get_settings,
         update_settings,
         binaries_status,
+        check_binaries_now,
+        list_themes,
+        open_settings,
+        broadcast_theme,
         theme_css,
         vibrancy_active,
         grabber_ingest_text,
@@ -116,7 +121,11 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         // Remembers the main window's size, position and maximized state.
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_denylist(&[settings_window::LABEL])
+                .build(),
+        )
         .invoke_handler(builder.invoke_handler())
         .setup(move |tauri_app| {
             builder.mount_events(tauri_app);

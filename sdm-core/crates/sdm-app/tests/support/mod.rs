@@ -76,6 +76,7 @@ pub async fn harness_full(
         retry_policy: RetryPolicy::new(),
         binaries,
         grabber,
+        settings: None,
     };
     let app = App::new(host.clone(), dependencies).expect("app");
     let sink = Arc::new(RecordingSink::default());

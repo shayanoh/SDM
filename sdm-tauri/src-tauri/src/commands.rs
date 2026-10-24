@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use sdm_app::host::{PatchSink, SinkClosed};
 use sdm_app::protocol::{
-    BinariesStatusDto, DeletionInfo, DeletionTarget, HandoffTarget, Patch, SettingsDto,
+    BinariesStatusDto, DeletionInfo, DeletionTarget, HandoffTarget, Patch, SettingsDto, ThemeInfo,
 };
 use sdm_app::{App, AppError};
 use tauri::State;
@@ -236,6 +236,38 @@ pub async fn update_settings(app: Shared<'_>, settings: SettingsDto) -> Result<(
 #[specta::specta]
 pub async fn binaries_status(app: Shared<'_>) -> Result<BinariesStatusDto, AppError> {
     Ok(app.binaries_status())
+}
+
+/// Looks for a newer yt-dlp now and waits for the check.
+#[tauri::command]
+#[specta::specta]
+pub async fn check_binaries_now(app: Shared<'_>) -> Result<(), AppError> {
+    app.guarded(|app| async move { app.check_binaries_now().await })
+        .await
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn list_themes(app: Shared<'_>) -> Result<Vec<ThemeInfo>, AppError> {
+    Ok(app.list_themes())
+}
+
+/// Opens the Settings window, or focuses it if it is open. Async because a
+/// window created from a synchronous command deadlocks on Windows.
+#[tauri::command]
+#[specta::specta]
+pub async fn open_settings(handle: tauri::AppHandle) -> Result<(), AppError> {
+    crate::settings_window::open(&handle)
+}
+
+/// Previews a theme in every window; `None` goes back to the stored theme.
+#[tauri::command]
+#[specta::specta]
+pub async fn broadcast_theme(
+    handle: tauri::AppHandle,
+    theme_id: Option<String>,
+) -> Result<(), AppError> {
+    crate::settings_window::broadcast_theme(&handle, theme_id)
 }
 
 #[tauri::command]

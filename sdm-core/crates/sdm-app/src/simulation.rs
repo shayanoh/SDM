@@ -163,6 +163,7 @@ pub fn simulated_dependencies(_host: &dyn Host, _items: usize, _active: usize) -
             Arc::new(std::sync::atomic::AtomicBool::new(false)),
             None,
         )),
+        settings: None,
     }
 }
 
