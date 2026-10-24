@@ -85,7 +85,11 @@
     if (!draft) return;
     try {
       // Everything else goes back as last saved: an update sends every field.
-      await bridge.updateSettings({ ...draft.saved, ytDlpChannel: channel });
+      await bridge.updateSettings({
+        ...draft.saved,
+        downloadFolder: null,
+        ytDlpChannel: channel,
+      });
       draft.markSaved({ ytDlpChannel: channel });
       error = null;
       await bridge.checkBinariesNow();

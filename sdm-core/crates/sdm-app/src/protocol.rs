@@ -174,7 +174,7 @@ pub enum ActivationMode {
 /// sent over the wire. The defaults are the SwiftUI app's. `download_folder`
 /// is always `Some` when read; on update, `None` keeps the stored folder.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase")]
 pub struct SettingsDto {
     pub download_folder: Option<String>,
 

@@ -64,7 +64,7 @@ describe("the Settings window", () => {
     expect(update).toHaveBeenCalledTimes(1);
     const sent = update.mock.calls[0][0];
     expect(sent.maxConcurrent).toBe(5);
-    expect("downloadFolder" in sent).toBe(false);
+    expect(sent.downloadFolder).toBeNull();
     expect((await bridge.getSettings()).maxConcurrent).toBe(5);
   });
 

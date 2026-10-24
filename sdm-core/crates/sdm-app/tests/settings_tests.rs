@@ -280,3 +280,22 @@ async fn list_themes_returns_the_bundled_themes_with_light_and_dark() {
     assert!(ids.contains(&"deep-purple"), "{ids:?}");
     assert!(themes.iter().all(|t| !t.name.is_empty()));
 }
+
+#[test]
+fn a_partial_settings_object_is_rejected() {
+    let partial = serde_json::json!({ "launchAtLogin": true });
+    assert!(
+        serde_json::from_value::<SettingsDto>(partial).is_err(),
+        "an omitted field must not silently fall back to its default"
+    );
+}
+
+#[test]
+fn a_full_object_without_download_folder_parses() {
+    let mut full = serde_json::to_value(SettingsDto::default()).expect("encodes");
+    full.as_object_mut()
+        .expect("an object")
+        .remove("downloadFolder");
+    let parsed: SettingsDto = serde_json::from_value(full).expect("parses");
+    assert_eq!(parsed.download_folder, None);
+}

@@ -17,13 +17,13 @@ describe("SettingsDraft", () => {
     expect(draft.dirty).toBe(false);
   });
 
-  it("never sends a download folder", () => {
+  it("sends a null download folder, which keeps the stored one", () => {
     const draft = new SettingsDraft({
       ...defaultSettings(),
       downloadFolder: "/somewhere",
     });
     draft.set("maxConcurrent", 2);
-    expect("downloadFolder" in draft.toDto()).toBe(false);
+    expect(draft.toDto().downloadFolder).toBeNull();
     expect(draft.toDto().maxConcurrent).toBe(2);
   });
 

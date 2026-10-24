@@ -10,12 +10,12 @@ export class SettingsDraft {
   values = $state<SettingsValues>(defaultSettings());
   #original: SettingsValues = defaultSettings();
 
-  constructor(stored: SettingsDto) {
+  constructor(stored: Partial<SettingsDto>) {
     this.reset(stored);
   }
 
   /** Takes `stored` as both the starting point and the "unchanged" reference. */
-  reset(stored: SettingsDto) {
+  reset(stored: Partial<SettingsDto>) {
     const { downloadFolder: _folder, ...rest } = stored;
     const next: SettingsValues = {
       ...defaultSettings(),
@@ -46,9 +46,9 @@ export class SettingsDraft {
     this.values[key] = value;
   }
 
-  /** What OK sends: every value, and no download folder. */
+  /** What OK sends: every value, and a null download folder (keep the stored one). */
   toDto(): SettingsDto {
-    return { ...this.values };
+    return { ...this.values, downloadFolder: null };
   }
 }
 

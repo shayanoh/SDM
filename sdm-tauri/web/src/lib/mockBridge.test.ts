@@ -1,12 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Patch, StructureItem, StructurePackage } from "../bindings";
+import type {
+  Patch,
+  SettingsDto,
+  StructureItem,
+  StructurePackage,
+} from "../bindings";
 import { BridgeError } from "./bridge";
 import { MockBridge, type MockSeed } from "./mockBridge";
+import { defaultSettings } from "./settingsModel";
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
 const MB = 1024 * 1024;
+
+/** A full settings object: every field is required on the wire. */
+function full(changes: Partial<SettingsDto>): SettingsDto {
+  return { ...defaultSettings(), downloadFolder: null, ...changes };
+}
 
 async function attached(seed?: MockSeed[]) {
   const bridge = new MockBridge(seed === undefined ? {} : { seed });
@@ -350,7 +361,7 @@ describe("the settings in the mock", () => {
 
   it("takes a valid update and keeps the folder when none is sent", async () => {
     const bridge = new MockBridge();
-    await bridge.updateSettings({ maxConcurrent: 7 });
+    await bridge.updateSettings(full({ maxConcurrent: 7 }));
     const settings = await bridge.getSettings();
     expect(settings.maxConcurrent).toBe(7);
     expect(settings.downloadFolder).toBe("/Users/mock/Downloads");
@@ -359,11 +370,11 @@ describe("the settings in the mock", () => {
   it("rejects an out-of-range value and changes nothing", async () => {
     const bridge = new MockBridge();
     const before = await bridge.getSettings();
-    await expect(bridge.updateSettings({ maxConcurrent: 99 })).rejects.toThrow(
-      BridgeError,
-    );
     await expect(
-      bridge.updateSettings({ allowOpus: false, allowAac: false }),
+      bridge.updateSettings(full({ maxConcurrent: 99 })),
+    ).rejects.toThrow(BridgeError);
+    await expect(
+      bridge.updateSettings(full({ allowOpus: false, allowAac: false })),
     ).rejects.toThrow(BridgeError);
     expect(await bridge.getSettings()).toEqual(before);
   });
