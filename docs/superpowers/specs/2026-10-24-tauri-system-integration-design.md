@@ -1,6 +1,6 @@
 # Tauri UI, spec 5: System integration
 
-Status: **DRAFT** (2026-10-24), written with Shayan. Part of [docs/tauri-roadmap.md](../../tauri-roadmap.md);
+Status: **IMPLEMENTED** on branch `tauri-ui` (2026-10-24); see the roadmap log for what was and was not verified. Written with Shayan. Part of [docs/tauri-roadmap.md](../../tauri-roadmap.md);
 builds on the [foundation](2026-10-14-tauri-foundation-design.md), the
 [main window](2026-10-23-tauri-main-window-design.md), the
 [link grabber](2026-10-24-tauri-link-grabber-design.md) and the
@@ -272,3 +272,11 @@ Not testable here: KDE, Sway and other compositors with data-control; say so in 
 
 Items marked "my call" or "my guess" above: Y9 to Y12; the five-download cap and "and N more" on the Linux menu;
 notifications showing while SDM is focused; the exact text of the "links waiting" menu entry.
+
+## 13. Deviations found while building
+
+- Package-finished is announced only when one of the package's own items completed in that step (SwiftUI also announces it when a finished item is moved into an empty package).
+- On macOS closing the window is `HideWindow` (hide only); a Dock click reopens it.
+- The Linux icon is white on GNOME whatever the app color scheme (the top bar is dark), and black elsewhere only on an explicit light scheme.
+- The popover is placed below the icon in the upper half of the work area and above it otherwise, rather than by platform.
+- The quit warning's wording is grammatical per count ("1 download is running…", "1 of them … its progress").
