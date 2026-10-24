@@ -136,34 +136,34 @@ impl SettingsDto {
     }
 
     pub fn quality_preferences(&self) -> QualityPreferences {
-        let mut preferences = QualityPreferences::default();
-        preferences.max_height = i64::from(self.yt_max_height);
-        preferences.video_codecs = [
-            (self.allow_av1, VideoCodec::Av1),
-            (self.allow_vp9, VideoCodec::Vp9),
-            (self.allow_h264, VideoCodec::H264),
-        ]
-        .into_iter()
-        .filter(|(on, _)| *on)
-        .map(|(_, codec)| codec)
-        .collect();
-        preferences.containers = [
-            (self.allow_mp4, MediaContainer::Mp4),
-            (self.allow_webm, MediaContainer::Webm),
-        ]
-        .into_iter()
-        .filter(|(on, _)| *on)
-        .map(|(_, container)| container)
-        .collect();
-        preferences.audio_codecs = [
-            (self.allow_opus, AudioCodec::Opus),
-            (self.allow_aac, AudioCodec::Aac),
-        ]
-        .into_iter()
-        .filter(|(on, _)| *on)
-        .map(|(_, codec)| codec)
-        .collect();
-        preferences
+        QualityPreferences {
+            max_height: i64::from(self.yt_max_height),
+            video_codecs: [
+                (self.allow_av1, VideoCodec::Av1),
+                (self.allow_vp9, VideoCodec::Vp9),
+                (self.allow_h264, VideoCodec::H264),
+            ]
+            .into_iter()
+            .filter(|(on, _)| *on)
+            .map(|(_, codec)| codec)
+            .collect(),
+            containers: [
+                (self.allow_mp4, MediaContainer::Mp4),
+                (self.allow_webm, MediaContainer::Webm),
+            ]
+            .into_iter()
+            .filter(|(on, _)| *on)
+            .map(|(_, container)| container)
+            .collect(),
+            audio_codecs: [
+                (self.allow_opus, AudioCodec::Opus),
+                (self.allow_aac, AudioCodec::Aac),
+            ]
+            .into_iter()
+            .filter(|(on, _)| *on)
+            .map(|(_, codec)| codec)
+            .collect(),
+        }
     }
 }
 
