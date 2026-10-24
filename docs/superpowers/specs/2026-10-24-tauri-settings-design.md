@@ -134,7 +134,8 @@ then ffmpeg, ffprobe and JS runtime ("QuickJS-ng <version>") rows.
 
 ## 5. Spec 5 controls
 
-Launch at login, the Dock / Menu Bar mode, the four notification toggles and Watch clipboard are
+Launch at login, the Dock / Menu Bar mode, the four notification toggles, Watch clipboard and
+Auto-add and start on grab are
 read and written like every other setting, and do nothing in spec 4. Spec 5 attaches behavior to the
 stored values and makes the first two live. On Windows and Linux spec 5 also owns the S9 behavior
 (an always-present tray icon; closing the main window hides it to the tray). It must handle a Linux
@@ -163,8 +164,9 @@ its toggle lives on the Linkgrabber tab.
   through a closure and the prune call reads the interval per tick, so changes take effect without a
   restart, and deep sniff reaches the prober. The resolver and wholesale downloader closures in
   `production_dependencies` that are hard-coded today (`CookieSource::None`, the playlist cap 50, the
-  yt-dlp channel `Stable`) read the stored values. Auto-add-and-start-on-grab is read by the grabber's
-  add flow as it is in SwiftUI.
+  yt-dlp channel `Stable`) read the stored values. Auto-add-and-start-on-grab is
+  read only by the clipboard flow in SwiftUI (`SDMApp.swift`), so like the clipboard toggle it is
+  stored and inert until spec 5.
 - Theme: the stored value is a theme id or "system". `theme_css` already takes an optional id; the
   frontend asks for the stored one at startup, and again when the picker changes (preview) and when
   OK or Cancel settles it. Both windows must show the change, so the preview and the revert are
