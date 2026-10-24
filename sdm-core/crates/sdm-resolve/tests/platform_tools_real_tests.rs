@@ -13,7 +13,7 @@ use sdm_resolve::{CheckReason, ManagedBinaries, ReqwestBinaryFetcher, YtDlpChann
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "downloads the real ffmpeg, ffprobe and qjs"]
-async fn real_pinned_tools_download_install_and_run() {
+async fn real_latest_tools_download_install_and_run() {
     let tmp = tempfile::tempdir().unwrap();
     let bin = tmp.path().join("bin");
     let mb = ManagedBinaries::new(

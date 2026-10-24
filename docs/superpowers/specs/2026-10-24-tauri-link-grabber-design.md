@@ -1,6 +1,6 @@
 # Tauri link grabber and platform tools (spec 3)
 
-Status: **approved 2026-10-24** (Shayan approved the design including all "my call" decisions, G5 to G10).
+Status: **built 2026-10-24** (approved the same day including all "my call" decisions; G10 was then changed by Shayan to "latest only, no pins"). What is unverified is in the roadmap log.
 Roadmap: [docs/tauri-roadmap.md](../../tauri-roadmap.md), spec 3 of 6. Builds on
 [spec 1](2026-10-14-tauri-foundation-design.md) and [spec 2](2026-10-23-tauri-main-window-design.md).
 
@@ -27,7 +27,7 @@ Two things ship together, because the first is where the second first hurts:
 | G5 | *(my call)* Grabber state travels on the **existing patch stream**: `Patch` gains an optional `grabber` field carrying the complete grabber view whenever it changed. One ordered transport, one `seq`, no second channel. A batch of links is hundreds of rows, not thousands, so a full replacement beats a diff protocol; the frontend windows the list as spec 2 does. | me |
 | G6 | *(my call)* **All grabber logic lives in `sdm-app`** (T6): the hand-off to the engine (`MediaHandoff::build`, removing the handed-off rows), the "held back" message, format-picker options (`MediaFormatMenu::options`), the "addable" rule, package grouping for a selection. The frontend renders the view and sends ids. | me |
 | G7 | *(my call)* The session is the native Rust `sdm_grabber::GrabberSession`, built in `sdm-app` with the production prober and the same resolver `production_dependencies` already builds. Not the UniFFI wrapper in `sdm-ffi` (that is SwiftUI's seam; it needs `Toolchain` and `GrabberSettings` plumbing the controller does not). | me |
-| G8 | *(my call)* Until spec 4 adds the settings, the grabber runs on the SwiftUI defaults: deep sniff on, auto-clear after 30 minutes, default quality preferences, no cookie source, 50 playlist videos, no extra yt-dlp arguments, probe limits 8 global / 4 per host (the engine's defaults) and 4 concurrent resolves. They are constants in one `GrabberDefaults` struct that spec 4 replaces with stored settings. | me |
+| G8 | *(my call)* Until spec 4 adds the settings, the grabber runs on the SwiftUI defaults: deep sniff on, auto-clear after 30 minutes, default quality preferences, no cookie source, 50 playlist videos, no extra yt-dlp arguments, probe limits 32 global / 8 per host (the engine's connection defaults, which is what the SwiftUI grabber reads) and 4 concurrent resolves. They are constants in one `GrabberDefaults` struct that spec 4 replaces with stored settings. | me |
 | G9 | *(my call)* The "known downloads" duplicate marking is wired: after every engine publish whose set of item URLs changed, the controller calls `set_known_download_urls`. | me |
 | G10 | **Latest only, no pins** (Shayan, 2026-10-24, replacing my pinned-build call: a pinned build expires when its publisher deletes it and keeping a pin fresh is upkeep the product should not need). `ffmpeg`, `ffprobe` and `qjs` come from the newest release asset, verified against the SHA-256 digest that release publishes (section 6). | Shayan |
 
