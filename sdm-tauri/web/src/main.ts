@@ -2,10 +2,11 @@ import { mount } from "svelte";
 import "./theme.css";
 import App from "./App.svelte";
 import SettingsWindow from "./components/settings/SettingsWindow.svelte";
+import TrayPopover from "./components/TrayPopover.svelte";
 import { startTheming } from "./lib/theme";
 import type { Bridge } from "./lib/bridge";
 import { createContext } from "./lib/context";
-import { MockBridge, loadSeed } from "./lib/mockBridge";
+import { MockBridge, demoTrayStatus, loadSeed } from "./lib/mockBridge";
 import { DownloadStore } from "./lib/store.svelte";
 import { TauriBridge } from "./lib/tauriBridge";
 import { UiState } from "./lib/ui.svelte";
@@ -19,7 +20,7 @@ const bridge: Bridge =
 function mockFromQuery(): Bridge {
   const query = new URLSearchParams(location.search);
   const [items, active] = (query.get("simulate") ?? "").split(":").map(Number);
-  return new MockBridge({
+  const mock = new MockBridge({
     vibrancy: query.get("vibrancy") === "on",
     grabber: {
       ...(query.get("grabber") ? { text: query.get("grabber")! } : {}),
@@ -29,6 +30,8 @@ function mockFromQuery(): Bridge {
       ? { seed: loadSeed(items), maxRunning: active }
       : {}),
   });
+  if (query.get("tray") === "running") mock.setTrayStatus(demoTrayStatus());
+  return mock;
 }
 
 const ui = new UiState();
@@ -43,15 +46,17 @@ if (!target) throw new Error("missing #app element");
 
 // The Settings window is a second window on this same bundle.
 const query = new URLSearchParams(location.search);
-const isSettings = query.get("window") === "settings";
-if (isSettings) {
-  // The main window's App starts its own theming; this window has none.
+const windowName = query.get("window");
+const isSettings = windowName === "settings";
+const isTray = windowName === "tray";
+if (isSettings || isTray) {
+  // The main window's App starts its own theming; these windows have none.
   void startTheming(bridge, query.get("theme")).catch((error) =>
     ui.report(String(error)),
   );
 }
 
-export default mount(isSettings ? SettingsWindow : App, {
+export default mount(isSettings ? SettingsWindow : isTray ? TrayPopover : App, {
   target,
   context: createContext(bridge, store, ui),
 });

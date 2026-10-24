@@ -260,6 +260,21 @@ pub async fn open_settings(handle: tauri::AppHandle) -> Result<(), AppError> {
     crate::settings_window::open(&handle)
 }
 
+/// What the tray popover shows now.
+#[tauri::command]
+#[specta::specta]
+pub async fn tray_status(app: Shared<'_>) -> Result<sdm_app::tray::TrayStatus, AppError> {
+    Ok(app.tray_status())
+}
+
+/// The popover's Quit: goes through the quit guard.
+#[tauri::command]
+#[specta::specta]
+pub async fn quit_requested(handle: tauri::AppHandle) -> Result<(), AppError> {
+    crate::lifecycle::request_quit(&handle);
+    Ok(())
+}
+
 /// Shows the main window, on the tab `route` names when it names one.
 #[tauri::command]
 #[specta::specta]

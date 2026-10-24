@@ -47,7 +47,11 @@ export function stubBridge(): StubBridge {
       if (property === "failures") return failures;
       if (property === "then") return undefined;
       // Synchronous on the real bridge: it hands back the way to stop.
-      if (property === "onThemePreview" || property === "onNavigate")
+      if (
+        property === "onThemePreview" ||
+        property === "onNavigate" ||
+        property === "onTrayStatus"
+      )
         return () => () => {};
       return async (...args: unknown[]) => {
         calls.push([String(property), ...args]);

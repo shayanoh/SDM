@@ -11,6 +11,7 @@ import type {
   Structure,
   GrabberView,
   HandoffTarget,
+  TrayStatus,
 } from "../bindings";
 import { BridgeError, type Bridge } from "./bridge";
 import { DEMO_TEXT, MockGrabber } from "./mockGrabber";
@@ -437,6 +438,35 @@ function paletteCss(p: Palette): string {
 /** An in-memory backend so the UI runs in a plain browser. It follows the
  * engine's rules (three at a time, moves refuse running items, a package that
  * loses its last item disappears) closely enough to build the UI against. */
+/** `?tray=running`: three downloads, four waiting links. */
+export function demoTrayStatus(): TrayStatus {
+  const MB = 1024 * 1024;
+  return {
+    runningCount: 3,
+    nonResumableCount: 0,
+    bytesPerSecond: 12.4 * MB,
+    history: Array.from(
+      { length: 64 },
+      (_, i) => (6 + 5 * Math.sin(i / 5)) * MB,
+    ),
+    overallFraction: 0.4,
+    items: [
+      {
+        name: "ubuntu-24.04-desktop-amd64.iso",
+        fraction: 0.62,
+        bytesPerSecond: 8.1 * MB,
+      },
+      {
+        name: "Lecture 04 - Memory.mp4",
+        fraction: 0.18,
+        bytesPerSecond: 3.9 * MB,
+      },
+      { name: "dataset-v2.tar.zst", fraction: 0.91, bytesPerSecond: 0.4 * MB },
+    ],
+    linksWaiting: 4,
+  };
+}
+
 export class MockBridge implements Bridge {
   /** Item ids `openItem` opened (finished files only). */
   readonly opened: string[] = [];
@@ -806,6 +836,38 @@ export class MockBridge implements Bridge {
 
   async broadcastTheme(themeId: string | null) {
     for (const listener of [...this.#themeListeners]) listener(themeId);
+  }
+
+  #trayStatus: TrayStatus = {
+    runningCount: 0,
+    nonResumableCount: 0,
+    bytesPerSecond: 0,
+    history: [],
+    overallFraction: 0,
+    items: [],
+    linksWaiting: 0,
+  };
+  #trayListeners = new Set<(status: TrayStatus) => void>();
+  /** How many times the popover asked to quit. */
+  quitRequests = 0;
+
+  async trayStatus() {
+    return this.#trayStatus;
+  }
+
+  onTrayStatus(handler: (status: TrayStatus) => void) {
+    this.#trayListeners.add(handler);
+    return () => void this.#trayListeners.delete(handler);
+  }
+
+  /** What the backend does on a tick while the popover is open. */
+  setTrayStatus(status: TrayStatus) {
+    this.#trayStatus = status;
+    for (const handler of this.#trayListeners) handler(status);
+  }
+
+  async requestQuit() {
+    this.quitRequests += 1;
   }
 
   #navigateListeners = new Set<(route: string) => void>();

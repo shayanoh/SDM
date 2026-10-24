@@ -78,6 +78,36 @@ pub fn menu_spec(status: &TrayStatus) -> Vec<MenuEntry> {
     entries
 }
 
+#[cfg(any(windows, target_os = "macos"))]
+fn on_tray_icon_event(tray: &tauri::tray::TrayIcon, event: tauri::tray::TrayIconEvent) {
+    use tauri::tray::{MouseButtonState, TrayIconEvent};
+    let TrayIconEvent::Click {
+        button_state: MouseButtonState::Up,
+        rect,
+        ..
+    } = event
+    else {
+        return;
+    };
+    let scale = tray
+        .app_handle()
+        .primary_monitor()
+        .ok()
+        .flatten()
+        .map_or(1.0, |monitor| monitor.scale_factor());
+    let position = rect.position.to_physical::<f64>(scale);
+    let size = rect.size.to_physical::<f64>(scale);
+    crate::popover::toggle(
+        tray.app_handle(),
+        crate::popover::Area {
+            x: position.x,
+            y: position.y,
+            width: size.width,
+            height: size.height,
+        },
+    );
+}
+
 #[cfg(all(unix, not(target_os = "macos")))]
 fn build_menu(app: &AppHandle, spec: &[MenuEntry]) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -148,6 +178,10 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
         .icon(image)
         .icon_as_template(cfg!(target_os = "macos"))
         .tooltip("Shayan's Download Manager");
+    // Windows and macOS: a click opens the popover. (Linux emits no click
+    // events; it has the menu below.)
+    #[cfg(any(windows, target_os = "macos"))]
+    let builder = builder.on_tray_icon_event(on_tray_icon_event);
     #[cfg(all(unix, not(target_os = "macos")))]
     let initial_menu = menu_spec(&TrayStatus::idle());
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -195,6 +229,8 @@ pub fn refresh(app: &AppHandle, status: &TrayStatus) {
     let Some(state) = app.try_state::<Mutex<TrayState>>() else {
         return;
     };
+    #[cfg(any(windows, target_os = "macos"))]
+    crate::popover::push_status(app, status);
     let mut state = lock(&state);
     if state.last_tint_check.elapsed() >= RETINT_EVERY {
         state.last_tint_check = Instant::now();

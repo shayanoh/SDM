@@ -22,9 +22,14 @@ const nextFrame = () =>
  * is then checked against what the page actually got (`innerHeight`):
  * platforms disagree on whether a window's size includes its titlebar, and
  * the shortfall is made up in a second step. The window is centered after
- * every fit so a tall tab stays on screen.
+ * every fit so a tall tab stays on screen (`center: false` for a window that
+ * is anchored somewhere, like the tray popover).
  */
-export function fitWindow(width: number, height: number): Promise<void> {
+export function fitWindow(
+  width: number,
+  height: number,
+  options: { center?: boolean } = {},
+): Promise<void> {
   if (!inTauri() || !(height > 0)) return Promise.resolve();
   // A failed step must not freeze every later fit, hence the catch first.
   fitting = fitting
@@ -47,7 +52,7 @@ export function fitWindow(width: number, height: number): Promise<void> {
         await nextFrame();
       }
       // A taller tab must not push the window's bottom off the screen.
-      await window.center();
+      if (options.center ?? true) await window.center();
     });
   return fitting.catch(() => {});
 }

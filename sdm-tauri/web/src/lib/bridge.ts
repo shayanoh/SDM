@@ -7,6 +7,7 @@ import type {
   DeletionTarget,
   HandoffTarget,
   ThemeInfo,
+  TrayStatus,
 } from "../bindings";
 
 /** Every call the UI makes into the backend. Two implementations exist. */
@@ -48,6 +49,12 @@ export interface Bridge {
   openSettings(): Promise<void>;
   /** Previews a theme in every window; `null` restores the stored one. */
   broadcastTheme(themeId: string | null): Promise<void>;
+  /** What the tray popover shows now. */
+  trayStatus(): Promise<TrayStatus>;
+  /** Calls `handler` with each new tray status; returns the way to stop. */
+  onTrayStatus(handler: (status: TrayStatus) => void): () => void;
+  /** Quits, after the backend asks about running downloads. */
+  requestQuit(): Promise<void>;
   /** Shows the main window, on the tab `route` names (`downloads`, `completed`, `linkgrabber`). */
   showMain(route?: string): Promise<void>;
   /** Calls `handler` with the route of each request to switch tabs; returns the way to stop. */

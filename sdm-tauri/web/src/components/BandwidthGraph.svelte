@@ -4,14 +4,18 @@
 
   /** Samples per second the engine publishes (`AppTiming::TICKS_PER_SECOND`). */
   const TICKS_PER_SECOND = 5;
-  const HEIGHT = 40;
+  const DEFAULT_HEIGHT = 40;
 
   /**
    * The sidebar's global graph: the speed history as an area at 25 % opacity
    * under a 1.5 px two-second running-average line, one sample per pixel of
    * width, as `BandwidthGraph.swift` draws it.
    */
-  let { history }: { history: number[] } = $props();
+  let {
+    history,
+    height = DEFAULT_HEIGHT,
+  }: { history: number[]; height?: number } = $props();
+  const HEIGHT = $derived(height);
 
   let canvas: HTMLCanvasElement | undefined = $state();
   let width = $state(0);

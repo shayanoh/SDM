@@ -1,6 +1,11 @@
 import { Channel } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { commands, type HandoffTarget, type Patch } from "../bindings";
+import {
+  commands,
+  type HandoffTarget,
+  type Patch,
+  type TrayStatus,
+} from "../bindings";
 import { BridgeError, type Bridge } from "./bridge";
 
 type Result<T, E> = { status: "ok"; data: T } | { status: "error"; error: E };
@@ -114,6 +119,18 @@ export class TauriBridge implements Bridge {
       handler(event.payload),
     );
     return () => void stopping.then((stop) => stop());
+  }
+  trayStatus() {
+    return unwrap(commands.trayStatus());
+  }
+  onTrayStatus(handler: (status: TrayStatus) => void) {
+    const stopping = listen<TrayStatus>("tray-status", (event) =>
+      handler(event.payload),
+    );
+    return () => void stopping.then((stop) => stop());
+  }
+  requestQuit() {
+    return unwrapVoid(commands.quitRequested());
   }
   showMain(route?: string) {
     return unwrapVoid(commands.showMain(route ?? null));

@@ -40,6 +40,10 @@ export const commands = {
 	openSettings: () => typedError<null, AppError>(__TAURI_INVOKE("open_settings")),
 	/**  Shows the main window, on the tab `route` names when it names one. */
 	showMain: (route: string | null) => typedError<null, AppError>(__TAURI_INVOKE("show_main", { route })),
+	/**  What the tray popover shows now. */
+	trayStatus: () => typedError<TrayStatus, AppError>(__TAURI_INVOKE("tray_status")),
+	/**  The popover's Quit: goes through the quit guard. */
+	quitRequested: () => typedError<null, AppError>(__TAURI_INVOKE("quit_requested")),
 	/**  Previews a theme in every window; `None` goes back to the stored theme. */
 	broadcastTheme: (themeId: string | null) => typedError<null, AppError>(__TAURI_INVOKE("broadcast_theme", { themeId })),
 	themeCss: (themeId: string | null) => typedError<string, AppError>(__TAURI_INVOKE("theme_css", { themeId })),
@@ -329,6 +333,28 @@ export type ThemeInfo = {
 export type ToolsNotice = {
 	text: string,
 	isError: boolean,
+};
+
+/**  One running download, as the tray shows it. */
+export type TrayItem = {
+	name: string,
+	/**  0 to 1. */
+	fraction: number | null,
+	bytesPerSecond: number | null,
+};
+
+/**  Everything the tray icon, menu, popover and quit guard read. */
+export type TrayStatus = {
+	runningCount: number,
+	/**  Running downloads that are known not to be resumable. */
+	nonResumableCount: number,
+	bytesPerSecond: number | null,
+	history: (number | null)[],
+	overallFraction: number | null,
+	/**  Every running download. */
+	items: TrayItem[],
+	/**  Grabbed links waiting in the Linkgrabber. */
+	linksWaiting: number,
 };
 
 export type VerdictDto = { kind: "online" } | { kind: "offline" } | { kind: "checkFailed" } | { kind: "faulty"; reason: string };

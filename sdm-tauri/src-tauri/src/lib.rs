@@ -5,6 +5,8 @@ mod lifecycle;
 mod linux_tray;
 mod main_window;
 mod notify;
+#[cfg(any(windows, target_os = "macos"))]
+mod popover;
 mod settings_window;
 mod tray;
 mod tray_icon;
@@ -78,6 +80,8 @@ fn specta_builder() -> Builder<tauri::Wry> {
         list_themes,
         open_settings,
         show_main,
+        tray_status,
+        quit_requested,
         broadcast_theme,
         theme_css,
         vibrancy_active,
@@ -202,6 +206,8 @@ pub fn run() {
             let (app, simulation) = build_app(tauri_app.handle())?;
             tauri_app.manage(Arc::clone(&app));
             clipboard::spawn(tauri_app.handle().clone(), Arc::clone(&app));
+            #[cfg(any(windows, target_os = "macos"))]
+            popover::init(tauri_app.handle());
             tray::install(tauri_app.handle())?;
             let effect = tauri_app
                 .get_webview_window("main")
