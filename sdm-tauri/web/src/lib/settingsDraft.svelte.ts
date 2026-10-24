@@ -25,6 +25,17 @@ export class SettingsDraft {
     this.values = { ...next };
   }
 
+  /** The settings as last saved; what Cancel goes back to. */
+  get saved(): SettingsValues {
+    return { ...this.#original };
+  }
+
+  /** Records `patch` as already saved (the update channel saves at once). */
+  markSaved(patch: Partial<SettingsValues>) {
+    this.#original = { ...this.#original, ...patch };
+    Object.assign(this.values, patch);
+  }
+
   get dirty(): boolean {
     return (Object.keys(this.#original) as (keyof SettingsValues)[]).some(
       (key) => this.values[key] !== this.#original[key],

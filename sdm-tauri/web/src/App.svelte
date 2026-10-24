@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import Shell from "./components/Shell.svelte";
   import { errorMessage, useBridge, useStore, useUi } from "./lib/context";
-  import { resetThemeColors } from "./lib/colors";
+  import { startTheming } from "./lib/theme";
   import { syncVibrancy } from "./lib/vibrancy";
 
   const bridge = useBridge();
@@ -23,20 +23,21 @@
     };
     document.addEventListener("visibilitychange", onVisibility);
 
+    let stopTheming: (() => void) | undefined;
     void guarded(async () => {
-      const style = document.createElement("style");
-      style.id = "theme";
-      // `?theme=deep-purple` loads another bundled theme (the screenshots use it).
-      const themeId =
-        new URLSearchParams(location.search).get("theme") ?? undefined;
-      style.textContent = await bridge.themeCss(themeId);
-      document.head.append(style);
-      resetThemeColors();
+      // `?theme=deep-purple` shows another bundled theme (the screenshots use it).
+      stopTheming = await startTheming(
+        bridge,
+        new URLSearchParams(location.search).get("theme"),
+      );
       await bridge.attach(store.apply.bind(store));
       await syncVibrancy(bridge);
     });
 
-    return () => document.removeEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      stopTheming?.();
+    };
   });
 </script>
 

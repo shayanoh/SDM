@@ -1,6 +1,7 @@
 import ArrowLeftToLine from "@lucide/svelte/icons/arrow-left-to-line";
 import Check from "@lucide/svelte/icons/check";
 import ChevronDown from "@lucide/svelte/icons/chevron-down";
+import ChevronUp from "@lucide/svelte/icons/chevron-up";
 import ChevronRight from "@lucide/svelte/icons/chevron-right";
 import CircleArrowDown from "@lucide/svelte/icons/circle-arrow-down";
 import CircleCheck from "@lucide/svelte/icons/circle-check";
@@ -29,6 +30,7 @@ export const ICONS = {
   check: Check,
   "chevron-down": ChevronDown,
   "chevron-right": ChevronRight,
+  "chevron-up": ChevronUp,
   "circle-arrow-down": CircleArrowDown,
   "circle-check": CircleCheck,
   copy: Copy,

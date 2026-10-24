@@ -767,15 +767,16 @@ export class MockBridge implements Bridge {
   }
 
   async updateSettings(settings: SettingsDto) {
-    const next = { ...this.#settings };
+    // Like the Rust store: a field that is not sent is back at its default.
+    const next: SettingsDto = {
+      ...defaultSettings(),
+      downloadFolder: this.#settings.downloadFolder,
+    };
     for (const [key, value] of Object.entries(settings)) {
       if (value !== undefined && value !== null)
         Object.assign(next, { [key]: value });
     }
-    if (
-      settings.downloadFolder !== undefined &&
-      settings.downloadFolder !== null
-    ) {
+    if (settings.downloadFolder != null) {
       const folder = settings.downloadFolder.trim();
       if (!folder) throw invalid("downloadFolder", "the folder is empty");
       next.downloadFolder = folder;
