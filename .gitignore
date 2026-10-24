@@ -37,3 +37,6 @@ sdm-tauri/src-tauri/gen/
 .playwright-mcp/
 sdm-tauri/web/test-results/
 sdm-tauri/web/playwright-report/
+
+# Brainstorming visual companion mockups
+.superpowers/
