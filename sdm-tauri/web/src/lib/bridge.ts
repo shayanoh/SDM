@@ -6,6 +6,7 @@ import type {
   DeletionInfo,
   DeletionTarget,
   HandoffTarget,
+  ThemeInfo,
 } from "../bindings";
 
 /** Every call the UI makes into the backend. Two implementations exist. */
@@ -39,6 +40,16 @@ export interface Bridge {
   getSettings(): Promise<SettingsDto>;
   updateSettings(settings: SettingsDto): Promise<void>;
   binariesStatus(): Promise<BinariesStatusDto>;
+  /** Looks for a newer yt-dlp now and waits for the check. */
+  checkBinariesNow(): Promise<void>;
+  /** The bundled themes, for the picker. */
+  listThemes(): Promise<ThemeInfo[]>;
+  /** Shows the Settings window, or focuses it if it is open. */
+  openSettings(): Promise<void>;
+  /** Previews a theme in every window; `null` restores the stored one. */
+  broadcastTheme(themeId: string | null): Promise<void>;
+  /** Calls `handler` for each theme preview; returns the way to stop. */
+  onThemePreview(handler: (themeId: string | null) => void): () => void;
   themeCss(themeId?: string): Promise<string>;
   /** Whether the window has a translucent backdrop (Mica or Acrylic). */
   vibrancyActive(): Promise<boolean>;

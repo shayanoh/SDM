@@ -26,6 +26,8 @@ export function stubBridge(): StubBridge {
     describeDeletion: { title: "Remove From List?", totalBytes: 0, names: [] },
     getSettings: { downloadFolder: "/dl" },
     binariesStatus: {
+      bundled: false,
+      downloading: false,
       ytDlpVersion: null,
       latestKnown: null,
       ffmpegVersion: null,
@@ -33,6 +35,10 @@ export function stubBridge(): StubBridge {
       lastError: null,
     },
     themeCss: "",
+    listThemes: [
+      { id: "light", name: "Light" },
+      { id: "dark", name: "Dark" },
+    ],
   };
   return new Proxy({} as StubBridge, {
     get(_target, property) {
@@ -40,6 +46,8 @@ export function stubBridge(): StubBridge {
       if (property === "answers") return answers;
       if (property === "failures") return failures;
       if (property === "then") return undefined;
+      // Synchronous on the real bridge: it hands back the way to stop.
+      if (property === "onThemePreview") return () => () => {};
       return async (...args: unknown[]) => {
         calls.push([String(property), ...args]);
         const failure = failures[String(property)];

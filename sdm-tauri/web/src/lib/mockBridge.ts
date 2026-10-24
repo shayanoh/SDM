@@ -14,6 +14,7 @@ import type {
 } from "../bindings";
 import { BridgeError, type Bridge } from "./bridge";
 import { DEMO_TEXT, MockGrabber } from "./mockGrabber";
+import { RESOLUTION_CHOICES, defaultSettings } from "./settingsModel";
 
 const TICK_MS = 200;
 /** Samples an item's row sparkline gets (matches the engine's trailing window). */
@@ -224,6 +225,32 @@ const newId = () =>
 const invalid = (argument: string, message: string) =>
   new BridgeError({ kind: "invalidArgument", argument, message });
 
+const SETTING_RANGES: [keyof SettingsDto, number, number][] = [
+  ["maxConcurrent", 1, 20],
+  ["segmentsPerItem", 1, 64],
+  ["globalMaxConnections", 1, 256],
+  ["maxConnectionsPerHost", 1, 64],
+  ["minSegmentSizeMb", 1, 100],
+  ["maxPlaylistVideos", 10, 200],
+];
+
+/** The checks `SettingsStore::update` makes in Rust. */
+function validateSettings(settings: SettingsDto) {
+  for (const [key, min, max] of SETTING_RANGES) {
+    const value = settings[key] as number;
+    if (!(value >= min && value <= max))
+      throw invalid(key, `must be between ${min} and ${max}`);
+  }
+  if (!RESOLUTION_CHOICES.includes(settings.ytMaxHeight as 1080))
+    throw invalid("ytMaxHeight", "not a resolution on offer");
+  if (!(settings.allowAv1 || settings.allowVp9 || settings.allowH264))
+    throw invalid("allowAv1", "keep at least one video codec");
+  if (!(settings.allowMp4 || settings.allowWebm))
+    throw invalid("allowMp4", "keep at least one container");
+  if (!(settings.allowOpus || settings.allowAac))
+    throw invalid("allowOpus", "keep at least one audio codec");
+}
+
 function parseIds(ids: string[], argument = "id"): string[] {
   const seen = new Set<string>();
   for (const id of ids) {
@@ -420,7 +447,24 @@ export class MockBridge implements Bridge {
   #listener: ((patch: Patch) => void) | null = null;
   #seq = 0;
   #timer: ReturnType<typeof setInterval> | null = null;
-  #settings: SettingsDto = { downloadFolder: "/Users/mock/Downloads" };
+  #settings: SettingsDto = {
+    ...defaultSettings(),
+    downloadFolder: "/Users/mock/Downloads",
+  };
+  #themeListeners = new Set<(themeId: string | null) => void>();
+  /** How often `openSettings` and `checkBinariesNow` were called. */
+  settingsOpens = 0;
+  binaryChecks = 0;
+  /** What `binariesStatus` reports; tests and the browser preview change it. */
+  binaries: BinariesStatusDto = {
+    bundled: false,
+    downloading: false,
+    ytDlpVersion: "2026.10.21",
+    latestKnown: null,
+    ffmpegVersion: null,
+    qjsVersion: null,
+    lastError: null,
+  };
   #globalHistory: number[] = [];
   #detail = new Map<string, Set<string>>();
   #vibrancy: boolean;
@@ -723,19 +767,52 @@ export class MockBridge implements Bridge {
   }
 
   async updateSettings(settings: SettingsDto) {
-    const folder = settings.downloadFolder.trim();
-    if (!folder) throw invalid("downloadFolder", "the folder is empty");
-    this.#settings = { downloadFolder: folder };
+    const next = { ...this.#settings };
+    for (const [key, value] of Object.entries(settings)) {
+      if (value !== undefined && value !== null)
+        Object.assign(next, { [key]: value });
+    }
+    if (
+      settings.downloadFolder !== undefined &&
+      settings.downloadFolder !== null
+    ) {
+      const folder = settings.downloadFolder.trim();
+      if (!folder) throw invalid("downloadFolder", "the folder is empty");
+      next.downloadFolder = folder;
+    }
+    validateSettings(next);
+    this.#settings = next;
   }
 
   async binariesStatus(): Promise<BinariesStatusDto> {
-    return {
-      ytDlpVersion: "mock",
-      latestKnown: null,
-      ffmpegVersion: null,
-      qjsVersion: null,
-      lastError: null,
-    };
+    return { ...this.binaries };
+  }
+
+  async checkBinariesNow() {
+    this.binaryChecks += 1;
+  }
+
+  async listThemes() {
+    return Object.keys(PALETTES).map((id) => ({
+      id,
+      name: id
+        .split("-")
+        .map((word) => word[0].toUpperCase() + word.slice(1))
+        .join(" "),
+    }));
+  }
+
+  async openSettings() {
+    this.settingsOpens += 1;
+  }
+
+  async broadcastTheme(themeId: string | null) {
+    for (const listener of [...this.#themeListeners]) listener(themeId);
+  }
+
+  onThemePreview(handler: (themeId: string | null) => void) {
+    this.#themeListeners.add(handler);
+    return () => void this.#themeListeners.delete(handler);
   }
 
   async vibrancyActive() {

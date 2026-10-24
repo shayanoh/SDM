@@ -20,13 +20,13 @@
       ui.report(errorMessage(error));
     }
     // Show what is actually in force (a rejected value leaves the old one).
-    folder = (await bridge.getSettings()).downloadFolder;
+    folder = (await bridge.getSettings()).downloadFolder ?? "";
   }
 
   onMount(() => {
     void bridge
       .getSettings()
-      .then((settings) => (folder = settings.downloadFolder));
+      .then((settings) => (folder = settings.downloadFolder ?? ""));
     const poll = async () => {
       try {
         binaries = await bridge.binariesStatus();

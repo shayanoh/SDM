@@ -338,3 +338,56 @@ describe("MockBridge vibrancy", () => {
     ).toBe(true);
   });
 });
+
+describe("the settings in the mock", () => {
+  it("starts from the SwiftUI defaults with a download folder", async () => {
+    const bridge = new MockBridge();
+    const settings = await bridge.getSettings();
+    expect(settings.maxConcurrent).toBe(3);
+    expect(settings.themeId).toBe("system");
+    expect(settings.downloadFolder).toBe("/Users/mock/Downloads");
+  });
+
+  it("takes a valid update and keeps the folder when none is sent", async () => {
+    const bridge = new MockBridge();
+    await bridge.updateSettings({ maxConcurrent: 7 });
+    const settings = await bridge.getSettings();
+    expect(settings.maxConcurrent).toBe(7);
+    expect(settings.downloadFolder).toBe("/Users/mock/Downloads");
+  });
+
+  it("rejects an out-of-range value and changes nothing", async () => {
+    const bridge = new MockBridge();
+    const before = await bridge.getSettings();
+    await expect(bridge.updateSettings({ maxConcurrent: 99 })).rejects.toThrow(
+      BridgeError,
+    );
+    await expect(
+      bridge.updateSettings({ allowOpus: false, allowAac: false }),
+    ).rejects.toThrow(BridgeError);
+    expect(await bridge.getSettings()).toEqual(before);
+  });
+
+  it("lists its themes and previews one to every listener", async () => {
+    const bridge = new MockBridge();
+    const ids = (await bridge.listThemes()).map((t) => t.id);
+    expect(ids).toContain("light");
+    expect(ids).toContain("dark");
+    const seen: (string | null)[] = [];
+    const stop = bridge.onThemePreview((id) => seen.push(id));
+    await bridge.broadcastTheme("deep-purple");
+    await bridge.broadcastTheme(null);
+    stop();
+    await bridge.broadcastTheme("dark");
+    expect(seen).toEqual(["deep-purple", null]);
+  });
+
+  it("counts opens and checks, and reports the tools it was given", async () => {
+    const bridge = new MockBridge();
+    await bridge.openSettings();
+    await bridge.checkBinariesNow();
+    expect(bridge.settingsOpens).toBe(1);
+    expect(bridge.binaryChecks).toBe(1);
+    expect((await bridge.binariesStatus()).bundled).toBe(false);
+  });
+});

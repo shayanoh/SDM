@@ -1,4 +1,5 @@
 import { Channel } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { commands, type HandoffTarget, type Patch } from "../bindings";
 import { BridgeError, type Bridge } from "./bridge";
 
@@ -95,6 +96,24 @@ export class TauriBridge implements Bridge {
   }
   binariesStatus() {
     return unwrap(commands.binariesStatus());
+  }
+  checkBinariesNow() {
+    return unwrapVoid(commands.checkBinariesNow());
+  }
+  listThemes() {
+    return unwrap(commands.listThemes());
+  }
+  openSettings() {
+    return unwrapVoid(commands.openSettings());
+  }
+  broadcastTheme(themeId: string | null) {
+    return unwrapVoid(commands.broadcastTheme(themeId));
+  }
+  onThemePreview(handler: (themeId: string | null) => void) {
+    const stopping = listen<string | null>("theme-preview", (event) =>
+      handler(event.payload),
+    );
+    return () => void stopping.then((stop) => stop());
   }
   vibrancyActive() {
     return unwrap(commands.vibrancyActive());
