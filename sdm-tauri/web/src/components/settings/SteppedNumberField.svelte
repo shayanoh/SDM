@@ -20,14 +20,29 @@
 
   const clamp = (n: number) => Math.min(max, Math.max(min, n));
 
+  // While typing, only a number already in range is taken: "1" on the way to
+  // "15" in a 10..200 field must not be turned into 10 under the caret.
   function onInput(event: Event & { currentTarget: HTMLInputElement }) {
     const parsed = Number.parseInt(event.currentTarget.value, 10);
-    if (Number.isFinite(parsed)) onchange(clamp(parsed));
+    if (Number.isFinite(parsed) && parsed >= min && parsed <= max)
+      onchange(parsed);
   }
 
-  // Leaving the field puts a clamped number back, even after clearing it.
-  function onBlur(event: FocusEvent & { currentTarget: HTMLInputElement }) {
-    event.currentTarget.value = String(value);
+  /** Takes what is typed, clamped, and shows the number that results. */
+  function settle(input: HTMLInputElement) {
+    const parsed = Number.parseInt(input.value, 10);
+    const next = Number.isFinite(parsed) ? clamp(parsed) : value;
+    onchange(next);
+    input.value = String(next);
+  }
+
+  // Leaving the field, or Enter (which also presses OK), settles it.
+  const onBlur = (event: FocusEvent & { currentTarget: HTMLInputElement }) =>
+    settle(event.currentTarget);
+  function onKeyDown(
+    event: KeyboardEvent & { currentTarget: HTMLInputElement },
+  ) {
+    if (event.key === "Enter") settle(event.currentTarget);
   }
 </script>
 
@@ -42,6 +57,7 @@
       value={String(value)}
       oninput={onInput}
       onblur={onBlur}
+      onkeydown={onKeyDown}
     />
     <span class="steppers">
       <button

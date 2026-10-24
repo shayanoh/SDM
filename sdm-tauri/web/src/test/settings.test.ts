@@ -30,15 +30,15 @@ const tab = (name: string) => screen.getByRole("tab", { name });
 describe("the Settings window", () => {
   it("shows the five tabs in order", async () => {
     await open();
-    expect(screen.getAllByRole("tab").map((t) => t.textContent?.trim())).toEqual(
-      [
-        "Appearance",
-        "Downloads",
-        "Linkgrabber",
-        "Media Sites",
-        "Notifications",
-      ],
-    );
+    expect(
+      screen.getAllByRole("tab").map((t) => t.textContent?.trim()),
+    ).toEqual([
+      "Appearance",
+      "Downloads",
+      "Linkgrabber",
+      "Media Sites",
+      "Notifications",
+    ]);
   });
 
   it("shows the five stepped fields on Downloads with their defaults", async () => {
@@ -133,7 +133,12 @@ describe("the Settings window", () => {
 
   it("never offers a download folder", async () => {
     await open();
-    for (const name of ["Appearance", "Downloads", "Linkgrabber", "Media Sites"]) {
+    for (const name of [
+      "Appearance",
+      "Downloads",
+      "Linkgrabber",
+      "Media Sites",
+    ]) {
       await fireEvent.click(tab(name));
       expect(screen.queryByLabelText(/folder/i)).toBeNull();
     }
@@ -141,12 +146,22 @@ describe("the Settings window", () => {
 
   it("says (bundled) for the tools when the app ships them", async () => {
     const bridge = new MockBridge();
-    bridge.binaries = { ...bridge.binaries, bundled: true, ffmpegVersion: "N-1" };
+    bridge.binaries = {
+      ...bridge.binaries,
+      bundled: true,
+      ffmpegVersion: "N-1",
+    };
     render(SettingsWindow, {
-      context: createContext(bridge, new DownloadStore(() => {}), new UiState()),
+      context: createContext(
+        bridge,
+        new DownloadStore(() => {}),
+        new UiState(),
+      ),
       props: { platform: "mac", onClose: () => {} },
     });
-    await fireEvent.click(await screen.findByRole("tab", { name: "Media Sites" }));
+    await fireEvent.click(
+      await screen.findByRole("tab", { name: "Media Sites" }),
+    );
     expect((await screen.findAllByText(/\(bundled\)/)).length).toBe(3);
   });
 
@@ -159,10 +174,16 @@ describe("the Settings window", () => {
       ffmpegVersion: null,
     };
     render(SettingsWindow, {
-      context: createContext(bridge, new DownloadStore(() => {}), new UiState()),
+      context: createContext(
+        bridge,
+        new DownloadStore(() => {}),
+        new UiState(),
+      ),
       props: { platform: "windows", onClose: () => {} },
     });
-    await fireEvent.click(await screen.findByRole("tab", { name: "Media Sites" }));
+    await fireEvent.click(
+      await screen.findByRole("tab", { name: "Media Sites" }),
+    );
     expect((await screen.findAllByText("downloading…")).length).toBe(3);
     expect(screen.queryByText(/\(bundled\)/)).toBeNull();
   });
@@ -192,5 +213,39 @@ describe("the Settings window", () => {
     expect(broadcast).toHaveBeenLastCalledWith("dark");
     await fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(broadcast).toHaveBeenLastCalledWith(null);
+  });
+
+  it("lets a number be typed digit by digit even when a prefix is out of range", async () => {
+    const { bridge } = await open();
+    await fireEvent.click(tab("Media Sites"));
+    const field = screen.getByLabelText(
+      "Maximum playlist videos",
+    ) as HTMLInputElement;
+    // "1" is below the minimum of 10; typing on to "15" must still end at 15.
+    await fireEvent.input(field, { target: { value: "1" } });
+    expect(field.value).toBe("1");
+    await fireEvent.input(field, { target: { value: "15" } });
+    expect(field.value).toBe("15");
+    await fireEvent.click(screen.getByRole("button", { name: "OK" }));
+    await waitFor(async () =>
+      expect((await bridge.getSettings()).maxPlaylistVideos).toBe(15),
+    );
+  });
+
+  it("clamps what was typed when the field is left or Enter is pressed", async () => {
+    const { bridge } = await open();
+    await fireEvent.click(tab("Media Sites"));
+    const field = screen.getByLabelText(
+      "Maximum playlist videos",
+    ) as HTMLInputElement;
+    await fireEvent.input(field, { target: { value: "1" } });
+    await fireEvent.blur(field);
+    expect(field.value).toBe("10");
+    await fireEvent.input(field, { target: { value: "999" } });
+    await fireEvent.keyDown(field, { key: "Enter" });
+    expect(field.value).toBe("200");
+    await waitFor(async () =>
+      expect((await bridge.getSettings()).maxPlaylistVideos).toBe(200),
+    );
   });
 });

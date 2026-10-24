@@ -152,6 +152,13 @@ pub fn run() {
                 .build(),
         )
         .invoke_handler(builder.invoke_handler())
+        .on_window_event(|window, event| {
+            // Settings is a second window, so closing the main one no longer
+            // ends the app by itself: take Settings down with it.
+            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
+                settings_window::close(window.app_handle());
+            }
+        })
         .on_menu_event(|app, event| {
             #[cfg(target_os = "macos")]
             if event.id() == SETTINGS_MENU_ID {

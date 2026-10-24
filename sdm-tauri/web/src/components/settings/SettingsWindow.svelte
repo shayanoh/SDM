@@ -38,7 +38,10 @@
   let tab = $state<(typeof TABS)[number][0]>("appearance");
   let error = $state<string | null>(null);
   let busy = false;
-  let contentHeight = $state(0);
+  // The page's natural height: the scrolling part plus the button bar.
+  let scrollingHeight = $state(0);
+  let barHeight = $state(0);
+  const contentHeight = $derived(scrollingHeight + barHeight);
 
   async function refreshStatus() {
     try {
@@ -138,58 +141,73 @@
 
 <svelte:window onkeydown={onKey} />
 
-<div class="window" style:width="{WIDTH}px" bind:clientHeight={contentHeight}>
-  <div class="tabs" role="tablist" aria-label="Settings">
-    {#each TABS as [id, label] (id)}
-      <button
-        type="button"
-        role="tab"
-        aria-selected={tab === id}
-        class:selected={tab === id}
-        onclick={() => (tab = id)}
-      >
-        {label}
-      </button>
-    {/each}
-  </div>
+<div class="window" style:width="{WIDTH}px">
+  <div class="scroll">
+    <div class="content" bind:clientHeight={scrollingHeight}>
+      <div class="tabs" role="tablist" aria-label="Settings">
+        {#each TABS as [id, label] (id)}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === id}
+            class:selected={tab === id}
+            onclick={() => (tab = id)}
+          >
+            {label}
+          </button>
+        {/each}
+      </div>
 
-  <div class="body">
-    {#if !draft}
-      <p data-testid="settings-loading" class="muted">Loading…</p>
-    {:else if tab === "appearance"}
-      <AppearanceTab {draft} {themes} {platform} onTheme={previewTheme} />
-    {:else if tab === "downloads"}
-      <DownloadsTab {draft} />
-    {:else if tab === "linkgrabber"}
-      <LinkgrabberTab {draft} />
-    {:else if tab === "media"}
-      <MediaSitesTab
-        {draft}
-        {platform}
-        {status}
-        onChannel={changeChannel}
-        onCheck={checkNow}
-      />
-    {:else}
-      <NotificationsTab {draft} />
-    {/if}
-  </div>
+      <div class="body">
+        {#if !draft}
+          <p data-testid="settings-loading" class="muted">Loading…</p>
+        {:else if tab === "appearance"}
+          <AppearanceTab {draft} {themes} {platform} onTheme={previewTheme} />
+        {:else if tab === "downloads"}
+          <DownloadsTab {draft} />
+        {:else if tab === "linkgrabber"}
+          <LinkgrabberTab {draft} />
+        {:else if tab === "media"}
+          <MediaSitesTab
+            {draft}
+            {platform}
+            {status}
+            onChannel={changeChannel}
+            onCheck={checkNow}
+          />
+        {:else}
+          <NotificationsTab {draft} />
+        {/if}
+      </div>
 
-  {#if error}
-    <p class="error" role="alert">{error}</p>
-  {/if}
-  <div class="bar">
+      {#if error}
+        <p class="error" role="alert">{error}</p>
+      {/if}
+    </div>
+  </div>
+  <div class="bar" bind:clientHeight={barHeight}>
     <button type="button" onclick={cancel}>Cancel</button>
     <button type="button" class="default" onclick={commit}>OK</button>
   </div>
 </div>
 
 <style>
+  /* The window is as tall as its content, unless the screen is shorter: then
+     only the part above the OK / Cancel bar scrolls. */
   .window {
     display: flex;
     flex-direction: column;
-    height: max-content;
+    height: 100vh;
     background: var(--surface-primary);
+  }
+  .scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .content {
+    display: flex;
+    flex-direction: column;
   }
   .tabs {
     display: flex;
@@ -224,6 +242,7 @@
     color: var(--status-failed);
   }
   .bar {
+    flex: none;
     display: flex;
     justify-content: flex-end;
     gap: 8px;

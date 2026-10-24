@@ -1,3 +1,5 @@
+import { cappedHeight } from "./fitting";
+
 /** What the page asks of its own native window. Every call is a no-op in a plain browser. */
 
 const inTauri = () =>
@@ -24,21 +26,29 @@ const nextFrame = () =>
  */
 export function fitWindow(width: number, height: number): Promise<void> {
   if (!inTauri() || !(height > 0)) return Promise.resolve();
-  fitting = fitting.then(async () => {
-    const { getCurrentWindow, LogicalSize } =
-      await import("@tauri-apps/api/window");
-    const window = getCurrentWindow();
-    const target = Math.ceil(height);
-    await window.setSize(new LogicalSize(width, target));
-    await nextFrame();
-    const shortfall = target - globalThis.innerHeight;
-    if (shortfall > 1) {
-      await window.setSize(new LogicalSize(width, target + shortfall));
+  // A failed step must not freeze every later fit, hence the catch first.
+  fitting = fitting
+    .catch(() => {})
+    .then(async () => {
+      const { getCurrentWindow, currentMonitor, LogicalSize } =
+        await import("@tauri-apps/api/window");
+      const window = getCurrentWindow();
+      // A tall page on a short screen scrolls instead of running off it.
+      const monitor = await currentMonitor();
+      const available = monitor
+        ? monitor.workArea.size.height / monitor.scaleFactor
+        : null;
+      const target = Math.ceil(cappedHeight(height, available));
+      await window.setSize(new LogicalSize(width, target));
       await nextFrame();
-    }
-    // A taller tab must not push the window's bottom off the screen.
-    await window.center();
-  });
+      const shortfall = target - globalThis.innerHeight;
+      if (shortfall > 1) {
+        await window.setSize(new LogicalSize(width, target + shortfall));
+        await nextFrame();
+      }
+      // A taller tab must not push the window's bottom off the screen.
+      await window.center();
+    });
   return fitting.catch(() => {});
 }
 

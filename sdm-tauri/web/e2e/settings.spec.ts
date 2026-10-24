@@ -24,6 +24,14 @@ test("each tab, next to its SwiftUI reference", async ({ page }) => {
   for (const [name, file] of TABS) {
     await page.getByRole("tab", { name }).click();
     await page.waitForTimeout(150);
+    // The window is as tall as its content, as the real one is.
+    const height = await page.evaluate(
+      () =>
+        document.querySelector(".content")!.clientHeight +
+        document.querySelector(".bar")!.clientHeight,
+    );
+    await page.setViewportSize({ width: 560, height });
+    await page.waitForTimeout(100);
     await page.locator(".window").screenshot({
       path: `test-results/settings/${file}.png`,
     });
