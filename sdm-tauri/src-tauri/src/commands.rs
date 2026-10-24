@@ -227,9 +227,25 @@ pub async fn get_settings(app: Shared<'_>) -> Result<SettingsDto, AppError> {
 
 #[tauri::command]
 #[specta::specta]
-pub async fn update_settings(app: Shared<'_>, settings: SettingsDto) -> Result<(), AppError> {
+pub async fn update_settings(
+    handle: tauri::AppHandle,
+    app: Shared<'_>,
+    settings: SettingsDto,
+) -> Result<(), AppError> {
+    let previous = app.get_settings();
+    let wanted = settings.launch_at_login;
     app.guarded(move |app| async move { app.update_settings(settings).await })
-        .await
+        .await?;
+    if let Some(enabled) = crate::autostart::login_change(previous.launch_at_login, wanted)
+        && let Err(error) = crate::autostart::apply(&handle, enabled)
+    {
+        // The OS refused: the toggle goes back to what actually took effect.
+        let mut reverted = app.get_settings();
+        reverted.launch_at_login = previous.launch_at_login;
+        let _ = app.update_settings(reverted).await;
+        return Err(error);
+    }
+    Ok(())
 }
 
 #[tauri::command]

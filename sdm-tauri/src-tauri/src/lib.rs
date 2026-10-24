@@ -1,3 +1,4 @@
+mod autostart;
 mod clipboard;
 mod commands;
 mod host;
@@ -156,6 +157,13 @@ pub fn run() {
     export_bindings(&builder);
 
     tauri::Builder::default()
+        // First, so a second launch hands over before anything else starts.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Err(error) = main_window::show(app, None) {
+                tracing::warn!("could not show the running instance: {error}");
+            }
+        }))
+        .plugin(autostart::plugin())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
@@ -209,6 +217,20 @@ pub fn run() {
             #[cfg(any(windows, target_os = "macos"))]
             popover::init(tauri_app.handle());
             tray::install(tauri_app.handle())?;
+            if simulation.is_none() {
+                let (handle, core) = (tauri_app.handle().clone(), Arc::clone(&app));
+                tauri::async_runtime::spawn(async move {
+                    autostart::reconcile_at_startup(&handle, &core).await;
+                });
+            }
+            // Started by the login entry: sit in the tray instead of opening.
+            if !cfg!(target_os = "macos")
+                && autostart::is_hidden_launch(&std::env::args().collect::<Vec<_>>())
+                && let Some(window) = tauri_app.get_webview_window(main_window::LABEL)
+            {
+                let _ = window.set_skip_taskbar(true);
+                let _ = window.hide();
+            }
             let effect = tauri_app
                 .get_webview_window("main")
                 .and_then(|window| vibrancy::apply(&window));
