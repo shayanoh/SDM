@@ -36,13 +36,13 @@ pub fn production_dependencies(host: &dyn Host) -> Dependencies {
         Arc::clone(&locator),
         cookie_source_reader(&shared),
         playlist_cap_reader(&shared),
-        Arc::new(Vec::new),
+        extra_arguments(&bin_directory),
     ));
     let wholesale: Arc<dyn WholesaleDownloader> = Arc::new(YtDlpWholesaleDownloader::new(
         Arc::clone(&runner),
         Arc::clone(&locator),
         cookie_source_reader(&shared),
-        Arc::new(Vec::new),
+        extra_arguments(&bin_directory),
     ));
     let muxer: Arc<dyn Muxer> =
         Arc::new(FfmpegMuxer::new(Arc::clone(&runner), Arc::clone(&locator)));
@@ -125,5 +125,48 @@ fn is_executable_file(path: &std::path::Path) -> bool {
     #[cfg(not(unix))]
     {
         true
+    }
+}
+
+/// The tokens every yt-dlp invocation carries: the managed `qjs` as its JS
+/// runtime (yt-dlp enables only deno by default, and without a runtime
+/// YouTube's `n` challenge fails and every format disappears) and the
+/// managed `bin/` as the ffmpeg location.
+fn extra_arguments(bin_directory: &std::path::Path) -> Arc<dyn Fn() -> Vec<String> + Send + Sync> {
+    let arguments = yt_dlp_extra_arguments(bin_directory);
+    Arc::new(move || arguments.clone())
+}
+
+fn yt_dlp_extra_arguments(bin_directory: &std::path::Path) -> Vec<String> {
+    let qjs_name = if cfg!(windows) { "qjs.exe" } else { "qjs" };
+    vec![
+        "--js-runtimes".to_owned(),
+        format!("quickjs:{}", bin_directory.join(qjs_name).display()),
+        "--ffmpeg-location".to_owned(),
+        bin_directory.display().to_string(),
+    ]
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::yt_dlp_extra_arguments;
+
+    #[test]
+    fn yt_dlp_gets_the_managed_js_runtime_and_ffmpeg_location() {
+        let bin = Path::new("bin-dir");
+        let arguments = yt_dlp_extra_arguments(bin);
+        let runtime = arguments
+            .iter()
+            .position(|a| a == "--js-runtimes")
+            .expect("--js-runtimes is passed");
+        assert!(arguments[runtime + 1].starts_with("quickjs:"));
+        assert!(arguments[runtime + 1].contains("bin-dir"));
+        let ffmpeg = arguments
+            .iter()
+            .position(|a| a == "--ffmpeg-location")
+            .expect("--ffmpeg-location is passed");
+        assert_eq!(arguments[ffmpeg + 1], "bin-dir");
     }
 }
