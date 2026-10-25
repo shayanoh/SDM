@@ -62,9 +62,14 @@ fn lock(state: &Mutex<PopoverState>) -> std::sync::MutexGuard<'_, PopoverState> 
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// Registers the popover's state. Call once at startup.
+/// Registers the popover's state and builds its hidden window. Call once at
+/// startup: a window created inside the first click loses focus while it
+/// loads, which hid it again before it was ever seen.
 pub fn init(app: &AppHandle) {
     app.manage(Mutex::new(PopoverState::default()));
+    if let Err(error) = ensure_window(app) {
+        tracing::warn!("{error}");
+    }
 }
 
 fn failed(what: &str, error: impl std::fmt::Display) -> AppError {
