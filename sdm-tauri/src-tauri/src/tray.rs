@@ -70,6 +70,7 @@ pub fn menu_spec(status: &TrayStatus) -> Vec<MenuEntry> {
             true,
         ));
     }
+    entries.push(item("about", "About SDM".to_owned(), true));
     entries.push(item("quit", "Quit".to_owned(), true));
     entries.push(MenuEntry::Separator);
     for (index, line) in status.menu_status_lines().into_iter().enumerate() {
@@ -153,6 +154,14 @@ fn on_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
     match event.id().as_ref() {
         "open" => log_failure(crate::main_window::show(app, None)),
         "review" => log_failure(crate::main_window::show(app, Some("linkgrabber"))),
+        "about" => {
+            // A window made inside a menu event handler can deadlock on some
+            // platforms; its own task is safe everywhere.
+            let handle = app.clone();
+            tauri::async_runtime::spawn(async move {
+                log_failure(crate::about_window::open(&handle));
+            });
+        }
         "quit" => crate::lifecycle::request_quit(app),
         "pause" => {
             let core = std::sync::Arc::clone(&*app.state::<std::sync::Arc<sdm_app::App>>());
@@ -347,6 +356,7 @@ mod tests {
             vec![
                 "Open SDM",
                 "Pause all",
+                "About SDM",
                 "Quit",
                 "---",
                 "No downloads running"
@@ -359,14 +369,20 @@ mod tests {
                 MenuEntry::Separator => None,
             })
             .collect();
-        assert_eq!(enabled, vec![true, true, true, false]);
+        assert_eq!(enabled, vec![true, true, true, true, false]);
     }
 
     #[test]
     fn waiting_links_add_a_review_entry_before_quit() {
         assert_eq!(
-            labels(&menu_spec(&status(0, 4)))[..4],
-            ["Open SDM", "Pause all", "Review (4 links waiting)", "Quit"]
+            labels(&menu_spec(&status(0, 4)))[..5],
+            [
+                "Open SDM",
+                "Pause all",
+                "Review (4 links waiting)",
+                "About SDM",
+                "Quit"
+            ]
         );
         assert_eq!(
             labels(&menu_spec(&status(0, 1)))[2],

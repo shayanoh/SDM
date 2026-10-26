@@ -279,6 +279,48 @@ pub async fn open_settings(handle: tauri::AppHandle) -> Result<(), AppError> {
     crate::settings_window::open(&handle)
 }
 
+/// Opens the About window, or focuses it if it is open. Async because a
+/// window created from a synchronous command deadlocks on Windows.
+#[tauri::command]
+#[specta::specta]
+pub async fn open_about(handle: tauri::AppHandle) -> Result<(), AppError> {
+    crate::about_window::open(&handle)
+}
+
+/// What the About window says about the app itself.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub struct AboutInfo {
+    pub version: String,
+    pub homepage: String,
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn about_info() -> Result<AboutInfo, AppError> {
+    Ok(AboutInfo {
+        version: env!("CARGO_PKG_VERSION").to_owned(),
+        homepage: env!("CARGO_PKG_HOMEPAGE").to_owned(),
+    })
+}
+
+/// The licenses of every library compiled into the app
+/// (`licenses.txt`, made by `scripts/generate_licenses.py`). Built into the
+/// binary, so it always matches the build, in development and installed.
+#[tauri::command]
+#[specta::specta]
+pub async fn open_source_licenses() -> Result<String, AppError> {
+    Ok(include_str!("../licenses.txt").to_owned())
+}
+
+/// Opens the project's page in the browser.
+#[tauri::command]
+#[specta::specta]
+pub async fn open_homepage() -> Result<(), AppError> {
+    tauri_plugin_opener::open_url(env!("CARGO_PKG_HOMEPAGE"), None::<&str>)
+        .map_err(|e| AppError::failed(format!("could not open the page: {e}")))
+}
+
 /// Where the Chrome extension stands: reporting in, its version, the cookie
 /// file's age and the folder to load unpacked.
 #[tauri::command]

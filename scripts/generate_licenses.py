@@ -68,7 +68,7 @@ def web_part() -> str:
                 by_text.setdefault((license_name, text), []).append(f'{package["name"]} {version}')
     out = []
     for (license_name, text), names in sorted(by_text.items()):
-        out.append("-" * 80)
+        out.append("-" * 48)
         out.append(f"{license_name} (web libraries)\n")
         out.append("Used by:")
         out.extend(f"  {name}" for name in sorted(names))

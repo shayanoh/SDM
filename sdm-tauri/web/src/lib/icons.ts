@@ -10,6 +10,7 @@ import Eraser from "@lucide/svelte/icons/eraser";
 import Eye from "@lucide/svelte/icons/eye";
 import FolderOpen from "@lucide/svelte/icons/folder-open";
 import FolderPlus from "@lucide/svelte/icons/folder-plus";
+import Info from "@lucide/svelte/icons/info";
 import Link from "@lucide/svelte/icons/link";
 import PanelBottom from "@lucide/svelte/icons/panel-bottom";
 import Pause from "@lucide/svelte/icons/pause";
@@ -39,6 +40,7 @@ export const ICONS = {
   eye: Eye,
   "folder-open": FolderOpen,
   "folder-plus": FolderPlus,
+  info: Info,
   link: Link,
   "panel-bottom": PanelBottom,
   pause: Pause,

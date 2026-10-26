@@ -111,6 +111,18 @@ export class TauriBridge implements Bridge {
   openSettings() {
     return unwrapVoid(commands.openSettings());
   }
+  openAbout() {
+    return unwrapVoid(commands.openAbout());
+  }
+  aboutInfo() {
+    return unwrap(commands.aboutInfo());
+  }
+  openSourceLicenses() {
+    return unwrap(commands.openSourceLicenses());
+  }
+  openHomepage() {
+    return unwrapVoid(commands.openHomepage());
+  }
   chromeExtensionStatus() {
     return unwrap(commands.chromeExtensionStatus());
   }

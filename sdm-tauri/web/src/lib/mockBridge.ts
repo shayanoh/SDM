@@ -1,4 +1,5 @@
 import type {
+  AboutInfo,
   BinariesStatusDto,
   ChromeExtensionDto,
   DeletionInfo,
@@ -485,6 +486,20 @@ export class MockBridge implements Bridge {
   #themeListeners = new Set<(themeId: string | null) => void>();
   /** How often `openSettings` and `checkBinariesNow` were called. */
   settingsOpens = 0;
+  /** How often the About window and the home page were opened. */
+  aboutOpens = 0;
+  homepageOpens = 0;
+  /** What `openSourceLicenses` returns. */
+  licensesText = [
+    "-".repeat(80),
+    "MIT License",
+    "",
+    "Used by:",
+    "  svelte 5.57.2",
+    "",
+    "Permission is hereby granted, free of charge, to any person obtaining a copy",
+    "of this software and associated documentation files…",
+  ].join("\n");
   binaryChecks = 0;
   /** What `chromeExtensionStatus` reports, and how often the Chrome setup calls were made. */
   chromeStatus: ChromeExtensionDto = {
@@ -846,6 +861,25 @@ export class MockBridge implements Bridge {
 
   async openSettings() {
     this.settingsOpens += 1;
+  }
+
+  async openAbout() {
+    this.aboutOpens += 1;
+  }
+
+  async aboutInfo(): Promise<AboutInfo> {
+    return {
+      version: "4.0.0",
+      homepage: "https://github.com/shayanoh/SDM",
+    };
+  }
+
+  async openSourceLicenses() {
+    return this.licensesText;
+  }
+
+  async openHomepage() {
+    this.homepageOpens += 1;
   }
 
   async chromeExtensionStatus(): Promise<ChromeExtensionDto> {

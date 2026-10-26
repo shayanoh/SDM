@@ -39,6 +39,20 @@ export const commands = {
 	 */
 	openSettings: () => typedError<null, AppError>(__TAURI_INVOKE("open_settings")),
 	/**
+	 *  Opens the About window, or focuses it if it is open. Async because a
+	 *  window created from a synchronous command deadlocks on Windows.
+	 */
+	openAbout: () => typedError<null, AppError>(__TAURI_INVOKE("open_about")),
+	aboutInfo: () => typedError<AboutInfo, AppError>(__TAURI_INVOKE("about_info")),
+	/**
+	 *  The licenses of every library compiled into the app
+	 *  (`licenses.txt`, made by `scripts/generate_licenses.py`). Built into the
+	 *  binary, so it always matches the build, in development and installed.
+	 */
+	openSourceLicenses: () => typedError<string, AppError>(__TAURI_INVOKE("open_source_licenses")),
+	/**  Opens the project's page in the browser. */
+	openHomepage: () => typedError<null, AppError>(__TAURI_INVOKE("open_homepage")),
+	/**
 	 *  Where the Chrome extension stands: reporting in, its version, the cookie
 	 *  file's age and the folder to load unpacked.
 	 */
@@ -99,6 +113,12 @@ export const commands = {
 };
 
 /* Types */
+/**  What the About window says about the app itself. */
+export type AboutInfo = {
+	version: string,
+	homepage: string,
+};
+
 /**
  *  Where the app shows itself. Only macOS offers a choice; the other
  *  platforms always store `Both`.

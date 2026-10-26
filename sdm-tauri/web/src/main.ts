@@ -1,5 +1,6 @@
 import { mount } from "svelte";
 import "./theme.css";
+import AboutWindow from "./components/AboutWindow.svelte";
 import App from "./App.svelte";
 import ChromeSetup from "./components/ChromeSetup.svelte";
 import SettingsWindow from "./components/settings/SettingsWindow.svelte";
@@ -7,6 +8,7 @@ import TrayPopover from "./components/TrayPopover.svelte";
 import { startTheming } from "./lib/theme";
 import type { Bridge } from "./lib/bridge";
 import { createContext } from "./lib/context";
+import { installNativeMenuBlock } from "./lib/nativeMenu";
 import { installPressFeedback } from "./lib/pressFeedback";
 import { MockBridge, demoTrayStatus, loadSeed } from "./lib/mockBridge";
 import { DownloadStore } from "./lib/store.svelte";
@@ -43,6 +45,7 @@ const store = new DownloadStore(() => {
 
 wireSelectionPruning(store, ui);
 installPressFeedback();
+installNativeMenuBlock();
 
 const target = document.getElementById("app");
 if (!target) throw new Error("missing #app element");
@@ -53,7 +56,8 @@ const windowName = query.get("window");
 const isSettings = windowName === "settings";
 const isTray = windowName === "tray";
 const isChromeSetup = windowName === "chrome-setup";
-if (isSettings || isTray || isChromeSetup) {
+const isAbout = windowName === "about";
+if (isSettings || isTray || isChromeSetup || isAbout) {
   // The main window's App starts its own theming; these windows have none.
   void startTheming(bridge, query.get("theme")).catch((error) =>
     ui.report(String(error)),
@@ -66,7 +70,9 @@ const root = isSettings
     ? TrayPopover
     : isChromeSetup
       ? ChromeSetup
-      : App;
+      : isAbout
+        ? AboutWindow
+        : App;
 
 export default mount(root, {
   target,

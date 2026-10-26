@@ -1,4 +1,5 @@
 #[cfg(target_os = "macos")]
+mod about_window;
 mod activation;
 mod autostart;
 mod chrome_setup;
@@ -40,9 +41,16 @@ fn window_state_flags() -> tauri_plugin_window_state::StateFlags {
     tauri_plugin_window_state::StateFlags::all() - tauri_plugin_window_state::StateFlags::VISIBLE
 }
 
-const WINDOW_STATE_DENYLIST: [&str; 3] =
-    [settings_window::LABEL, chrome_setup_window::LABEL, "tray"];
+const WINDOW_STATE_DENYLIST: [&str; 4] = [
+    settings_window::LABEL,
+    chrome_setup_window::LABEL,
+    about_window::LABEL,
+    "tray",
+];
 
+/// The id of the app menu's "About SDM" item on macOS.
+#[cfg(target_os = "macos")]
+const ABOUT_MENU_ID: &str = "about";
 /// The id of the app menu's "Settings…" item on macOS.
 #[cfg(target_os = "macos")]
 const SETTINGS_MENU_ID: &str = "settings";
@@ -57,6 +65,12 @@ fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
     use tauri::menu::{Menu, MenuItem, MenuItemKind, PredefinedMenuItem};
     let menu = Menu::default(app)?;
     if let Some(MenuItemKind::Submenu(application)) = menu.items()?.into_iter().next() {
+        // The default "About" shows a bare system panel; ours is the app's window.
+        if let Some(default_about) = application.items()?.into_iter().next() {
+            application.remove(&default_about)?;
+        }
+        let about = MenuItem::with_id(app, ABOUT_MENU_ID, "About SDM", true, None::<&str>)?;
+        application.insert(&about, 0)?;
         let settings = MenuItem::with_id(
             app,
             SETTINGS_MENU_ID,
@@ -110,6 +124,10 @@ fn specta_builder() -> Builder<tauri::Wry> {
         check_binaries_now,
         list_themes,
         open_settings,
+        open_about,
+        about_info,
+        open_source_licenses,
+        open_homepage,
         chrome_extension_status,
         prepare_chrome_extension,
         open_chrome_extensions,
@@ -247,6 +265,7 @@ pub fn run() {
                 tauri::WindowEvent::Destroyed => {
                     settings_window::close(window.app_handle());
                     chrome_setup_window::close(window.app_handle());
+                    about_window::close(window.app_handle());
                 }
                 _ => {}
             }
@@ -257,7 +276,13 @@ pub fn run() {
                 // A window made inside a menu event handler can deadlock on
                 // some platforms; its own task is safe everywhere.
                 let handle = app.clone();
-                if event.id() == SETTINGS_MENU_ID {
+                if event.id() == ABOUT_MENU_ID {
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(error) = about_window::open(&handle) {
+                            tracing::error!("could not open About: {error}");
+                        }
+                    });
+                } else if event.id() == SETTINGS_MENU_ID {
                     tauri::async_runtime::spawn(async move {
                         if let Err(error) = settings_window::open(&handle) {
                             tracing::error!("could not open Settings: {error}");

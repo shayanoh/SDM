@@ -85,6 +85,7 @@
       <button onclick={() => guarded(() => bridge.pauseAll())}>Pause all</button
       >
       <span class="spacer"></span>
+      <button onclick={() => guarded(() => bridge.openAbout())}>About</button>
       <button onclick={() => guarded(() => bridge.showMain())}>Open SDM</button>
       <button onclick={() => guarded(() => bridge.requestQuit())}>Quit</button>
     </div>

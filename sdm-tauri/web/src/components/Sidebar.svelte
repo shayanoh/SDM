@@ -77,18 +77,32 @@
     <h2 class="caption section">Overview</h2>
     <OverviewBlock />
   </section>
-  <button
-    type="button"
-    class="gear"
-    aria-label="Settings"
-    title="Settings"
-    onclick={() =>
-      void bridge
-        .openSettings()
-        .catch((error) => ui.report(errorMessage(error)))}
-  >
-    <Icon name="settings" size={16} />
-  </button>
+  <div class="footer">
+    <button
+      type="button"
+      class="gear"
+      aria-label="Settings"
+      title="Settings"
+      onclick={() =>
+        void bridge
+          .openSettings()
+          .catch((error) => ui.report(errorMessage(error)))}
+    >
+      <Icon name="settings" size={16} />
+    </button>
+    <button
+      type="button"
+      class="gear"
+      aria-label="About SDM"
+      title="About SDM"
+      onclick={() =>
+        void bridge
+          .openAbout()
+          .catch((error) => ui.report(errorMessage(error)))}
+    >
+      <Icon name="info" size={16} />
+    </button>
+  </div>
 </nav>
 
 <style>
@@ -151,13 +165,16 @@
     padding: 0 14px;
   }
   /* The one button the SwiftUI sidebar lacks: Windows and Linux have no app menu. */
+  .footer {
+    display: flex;
+    gap: 4px;
+    margin: auto 0 10px 14px;
+  }
   .gear {
     display: grid;
     place-items: center;
-    align-self: flex-start;
     width: 28px;
     height: 28px;
-    margin: auto 0 10px 14px;
     padding: 0;
     color: var(--text-secondary);
     background: none;

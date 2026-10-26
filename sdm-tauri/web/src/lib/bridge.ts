@@ -1,4 +1,5 @@
 import type {
+  AboutInfo,
   Patch,
   SettingsDto,
   BinariesStatusDto,
@@ -48,6 +49,14 @@ export interface Bridge {
   listThemes(): Promise<ThemeInfo[]>;
   /** Shows the Settings window, or focuses it if it is open. */
   openSettings(): Promise<void>;
+  /** Shows the About window, or focuses it if it is open. */
+  openAbout(): Promise<void>;
+  /** The app's own version and home page. */
+  aboutInfo(): Promise<AboutInfo>;
+  /** The licenses of every library the app is built from, as text. */
+  openSourceLicenses(): Promise<string>;
+  /** Opens the project's page in the browser. */
+  openHomepage(): Promise<void>;
   /** Whether the Chrome extension has reported in, and the cookie file's age. */
   chromeExtensionStatus(): Promise<ChromeExtensionDto>;
   /** Copies the extension to its stable folder and registers the host; returns the folder. */
