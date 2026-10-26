@@ -131,7 +131,7 @@ on macOS, use the platform's "open application with arguments" route. The builde
   user to press Reload on `chrome://extensions`), not connected (no report, or none in the last 2 hours; the extension
   reports hourly).
 
-### 4.4 Extension changes (version 1.1.0)
+### 4.4 Extension changes (version 2.0.0)
 
 - Permissions: add `cookies`; add `host_permissions: ["<all_urls>"]` (needed to read cookies of arbitrary
   listed domains). Existing users get Chrome's permission prompt or a disabled extension until they accept; the setup

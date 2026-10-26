@@ -170,10 +170,10 @@ Working hypothesis (verify first, do not patch blindly): `tauri_plugin_window_st
 - [ ] **Step 4:** `cargo test -p sdm-browser -p sdm-tauri` passes; `cargo check --target x86_64-pc-windows-msvc -p sdm-tauri` if the target is installed; regenerate `web/src/bindings.ts` by running the `export_bindings` test.
 - [ ] **Step 5: Commit** `Add the Chrome extension install status and manifest registration`.
 
-### Task 9: Extension 1.1.0
+### Task 9: Extension 2.0.0
 
 **Files:**
-- Modify: `SDMChromeExtension/manifest.json` (version `1.1.0`, permissions add `cookies`, `host_permissions: ["<all_urls>"]`), `SDMChromeExtension/background.js`
+- Modify: `SDMChromeExtension/manifest.json` (version `2.0.0`, permissions add `cookies`, `host_permissions: ["<all_urls>"]`), `SDMChromeExtension/background.js`
 - Create: `SDMChromeExtension/cookies.js` (pure functions), `SDMChromeExtension/cookie-domains.json`, `SDMChromeExtension/cookies.test.js` (`node --test`), `sdm-core/crates/sdm-browser/tests/bundled_domains_tests.rs`
 - Modify: `todo.md`-style note only if needed
 
@@ -184,7 +184,7 @@ Working hypothesis (verify first, do not patch blindly): `tauri_plugin_window_st
 - [ ] **Step 2:** Both fail.
 - [ ] **Step 3:** Implement; generate `cookie-domains.json` with `UPDATE_COOKIE_DOMAINS=1 cargo test -p sdm-browser bundled_domains`. Check `chrome.alarms` minimum delay in current Chrome docs and set `DEBOUNCE_MINUTES` to a valid value.
 - [ ] **Step 4:** `node --test` and the Rust test pass. Load the unpacked folder in Chrome (Playwright is not needed; by hand): confirm one `cookies` message arrives and `chrome-cookies.txt` appears with only listed domains.
-- [ ] **Step 5: Commit** `Extension 1.1.0: send site-filtered cookies to SDM`.
+- [ ] **Step 5: Commit** `Extension 2.0.0: send site-filtered cookies to SDM`.
 
 ### Task 10: Setup window and the Settings note
 
@@ -193,7 +193,7 @@ Working hypothesis (verify first, do not patch blindly): `tauri_plugin_window_st
 - Modify: `sdm-tauri/web/src/main.ts` (route `?window=chrome-setup`), the YouTube settings tab component under `web/src/components/settings/`, `web/src/lib/mockBridge.ts` (+ test), `web/src/bindings.ts` (regenerated)
 
 **Interfaces:**
-- `chromeSetup.ts`: `export function statusLine(dto: ChromeExtensionDto): string` ("Connected, extension 1.1.0, cookies synced 3 min ago" / "Update available: press Reload on chrome://extensions" / "Extension not connected") and `export function steps(platform): Step[]`.
+- `chromeSetup.ts`: `export function statusLine(dto: ChromeExtensionDto): string` ("Connected, extension 2.0.0, cookies synced 3 min ago" / "Update available: press Reload on chrome://extensions" / "Extension not connected") and `export function steps(platform): Step[]`.
 - The setup window polls `chrome_extension_status` once per second while open, shows the four steps (Open Chrome Extensions, enable Developer mode, Load unpacked, then **Show folder** / **Copy path** instead of the drag tile) and the "You're all set" state; calls `prepare_chrome_extension` when it opens.
 - Settings YouTube tab: when the draft `cookieSource` is `chrome`, show the note "Chrome cookies come from the SDM Chrome extension." plus the `statusLine` and a **Set up the extension** button (`open_chrome_setup`); hidden for any other source. Theme roles only.
 
@@ -208,6 +208,6 @@ Working hypothesis (verify first, do not patch blindly): `tauri_plugin_window_st
 **Files:**
 - Modify: `docs/tauri-roadmap.md` (spec 6 row, the "Open" bullets for Windows YouTube and the console window, the "unverified fix" note, a log entry), `CLAUDE.md` (Current state), `docs/superpowers/specs/2026-10-26-tauri-browser-integration-design.md` (status, and the two deviations: host is the app binary, no copied host)
 
-- [ ] **Step 1:** Update the docs with what was built and what is owed by hand: Windows (YouTube with signed-in Chrome, no console window, popover at startup, `main` branching with a GUI-subsystem exe for stdio), Fedora (manifest path, Load unpacked, sync), macOS (no password prompt), 1.0.x → 1.1.0 extension update.
+- [ ] **Step 1:** Update the docs with what was built and what is owed by hand: Windows (YouTube with signed-in Chrome, no console window, popover at startup, `main` branching with a GUI-subsystem exe for stdio), Fedora (manifest path, Load unpacked, sync), macOS (no password prompt), 1.0.x → 2.0.0 extension update.
 - [ ] **Step 2:** Run the whole suite: `cd sdm-core && cargo test --workspace`, `cargo clippy --workspace`, `cd ../sdm-tauri/web && pnpm test && pnpm check`, `node --test ../../SDMChromeExtension`.
 - [ ] **Step 3: Commit** `Close spec 6: roadmap, spec status, CLAUDE.md`.
