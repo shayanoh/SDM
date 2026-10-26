@@ -7,6 +7,7 @@ import TrayPopover from "./components/TrayPopover.svelte";
 import { startTheming } from "./lib/theme";
 import type { Bridge } from "./lib/bridge";
 import { createContext } from "./lib/context";
+import { installPressFeedback } from "./lib/pressFeedback";
 import { MockBridge, demoTrayStatus, loadSeed } from "./lib/mockBridge";
 import { DownloadStore } from "./lib/store.svelte";
 import { TauriBridge } from "./lib/tauriBridge";
@@ -41,6 +42,7 @@ const store = new DownloadStore(() => {
 });
 
 wireSelectionPruning(store, ui);
+installPressFeedback();
 
 const target = document.getElementById("app");
 if (!target) throw new Error("missing #app element");

@@ -34,11 +34,77 @@ button {
   border: 1px solid var(--border);
   border-radius: 6px;
   cursor: pointer;
+  /* The positioned, clipping box the hover/pressed tint and the click ripple
+     (see `lib/pressFeedback.ts`) are drawn in. */
+  position: relative;
+  overflow: hidden;
+  transition: transform 90ms ease-out;
+}
+
+/* The state layer: the button's own text color, laid over it at a low opacity
+   (Material's hover 8 % and pressed 16 %), so it works on any theme and any
+   button background without a color of its own. */
+button::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: currentColor;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease-out;
+}
+
+button:hover:not(:disabled)::after {
+  opacity: 0.08;
+}
+
+button:active:not(:disabled)::after {
+  opacity: 0.16;
+}
+
+button:active:not(:disabled):not([role="menuitem"]) {
+  transform: scale(0.97);
+}
+
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 button:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+.press-ripple {
+  position: absolute;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.28;
+  transform: scale(0);
+  pointer-events: none;
+  animation: press-ripple 450ms ease-out forwards;
+}
+
+@keyframes press-ripple {
+  to {
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button,
+  button::after {
+    transition: none;
+  }
+  button:active:not(:disabled) {
+    transform: none;
+  }
+  .press-ripple {
+    display: none;
+  }
 }
 
 input {
