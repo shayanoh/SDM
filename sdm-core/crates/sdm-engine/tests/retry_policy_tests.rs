@@ -68,6 +68,29 @@ fn delay_is_deterministic_for_the_same_attempt() {
 }
 
 #[test]
+fn clients_with_different_seeds_do_not_retry_in_lockstep() {
+    let delays = |seed: u64| -> Vec<Duration> {
+        let policy = RetryPolicy::new()
+            .with_base_delay(Duration::from_secs(100))
+            .with_max_delay(Duration::from_secs(1_000_000))
+            .with_jitter_seed(seed);
+        (0..8)
+            .map(|attempt| policy.delay_for_attempt(attempt))
+            .collect()
+    };
+    assert_eq!(delays(1), delays(1));
+    assert_ne!(delays(1), delays(2));
+    // Jitter only ever adds up to a quarter on top of the exponential base.
+    for (attempt, delay) in delays(7).into_iter().enumerate() {
+        let base = Duration::from_secs(100 << attempt);
+        assert!(
+            delay >= base && delay < base + base / 4,
+            "{attempt}: {delay:?}"
+        );
+    }
+}
+
+#[test]
 fn delay_is_capped_at_ceiling() {
     let policy = RetryPolicy::new()
         .with_max_attempts(20)

@@ -214,6 +214,11 @@ impl App {
     /// Loads durable state. Call once, before the first `tick`.
     pub async fn restore(&self) -> Result<(), AppError> {
         self.engine.restore().await;
+        // A window may have attached while the saved downloads were loading,
+        // leaving an empty snapshot as the baseline. What `restore` brought in
+        // happened in earlier runs, so the next snapshot starts afresh and
+        // announces nothing.
+        lock(&self.state).previous = None;
         if lock(&self.settings).get().auto_start_downloads_on_launch {
             self.engine.resume_all().await;
         }

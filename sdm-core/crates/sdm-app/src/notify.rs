@@ -136,7 +136,12 @@ pub(crate) fn notifications_between(
         let was_done = old_packages
             .get(&package.id)
             .is_some_and(|old| is_finished(old));
-        if with_a_new_completion.contains(&package.id) && is_finished(package) && !was_done {
+        // A package of one item is its item: announcing both says it twice.
+        if package.items.len() > 1
+            && with_a_new_completion.contains(&package.id)
+            && is_finished(package)
+            && !was_done
+        {
             out.push(Notification::PackageFinished {
                 name: package.name.clone(),
             });
@@ -187,7 +192,7 @@ mod tests {
     }
 
     #[test]
-    fn a_transition_to_completed_notifies_once() {
+    fn a_transition_to_completed_notifies_once_and_a_one_item_package_adds_nothing() {
         let (p, i) = (Uuid::new_v4(), Uuid::new_v4());
         let old = snapshot(
             1,
@@ -199,12 +204,9 @@ mod tests {
         );
         assert_eq!(
             notifications_between(&old, &new),
-            vec![
-                Notification::Finished {
-                    filename: "a.bin".into()
-                },
-                Notification::PackageFinished { name: "P".into() },
-            ]
+            vec![Notification::Finished {
+                filename: "a.bin".into()
+            }]
         );
         // The same transition seen again (old == new) is not a transition.
         assert!(notifications_between(&new, &new).is_empty());
@@ -419,6 +421,6 @@ mod tests {
             2,
             vec![package(p, 2, vec![item(i, "a.bin", ItemState::Completed)])],
         );
-        assert_eq!(notifications_between(&old, &new).len(), 2);
+        assert_eq!(notifications_between(&old, &new).len(), 1);
     }
 }

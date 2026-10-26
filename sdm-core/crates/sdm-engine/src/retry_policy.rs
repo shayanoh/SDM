@@ -1,4 +1,6 @@
+use std::collections::hash_map::RandomState;
 use std::error::Error;
+use std::hash::{BuildHasher, Hasher};
 use std::io;
 use std::time::Duration;
 
@@ -20,6 +22,18 @@ pub struct RetryPolicy {
     pub max_attempts: usize,
     pub base_delay: Duration,
     pub max_delay: Duration,
+    /// Decides this client's jitter. Random per policy, so concurrent clients
+    /// retrying the same failure do not wake in lockstep; tests pin it.
+    pub jitter_seed: u64,
+}
+
+/// A well-mixed 64-bit value from `x` (SplitMix64's finalizer), so nearby
+/// seeds and attempts give unrelated jitter.
+fn splitmix64(x: u64) -> u64 {
+    let mut z = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
 }
 
 impl Default for RetryPolicy {
@@ -35,7 +49,13 @@ impl RetryPolicy {
             max_attempts: 5,
             base_delay: Duration::from_secs(1),
             max_delay: Duration::from_secs(60),
+            jitter_seed: RandomState::new().build_hasher().finish(),
         }
+    }
+
+    pub fn with_jitter_seed(mut self, jitter_seed: u64) -> Self {
+        self.jitter_seed = jitter_seed;
+        self
     }
 
     /// # Panics
@@ -181,13 +201,12 @@ impl RetryPolicy {
         }
     }
 
-    /// Exponential backoff with deterministic jitter derived from the attempt
-    /// number, so retry timing is reproducible in tests.
+    /// Exponential backoff with up to 25 % jitter. The jitter is a function of
+    /// the policy's seed and the attempt: random between clients, repeatable
+    /// within one (pin the seed with `with_jitter_seed` in tests).
     pub fn delay_for_attempt(&self, attempt: usize) -> Duration {
         let factor = (1u64 << attempt.min(20)) as f64;
-        // Swift's `attempt &* 37` wraps; the remainder is taken on the
-        // wrapped value.
-        let jitter = 1.0 + (attempt.wrapping_mul(37) % 25) as f64 / 100.0;
+        let jitter = 1.0 + (splitmix64(self.jitter_seed ^ attempt as u64) % 25) as f64 / 100.0;
         let seconds = self.base_delay.as_secs_f64() * factor * jitter;
         match Duration::try_from_secs_f64(seconds) {
             Ok(delay) => delay.min(self.max_delay),
