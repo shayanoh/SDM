@@ -104,3 +104,10 @@ fn open_private(path: &Path) -> std::io::Result<std::fs::File> {
     }
     options.open(path)
 }
+
+/// The file the host keeps current and yt-dlp reads.
+pub const COOKIE_FILE_NAME: &str = "chrome-cookies.txt";
+
+pub fn cookie_file_path(data_dir: &Path) -> std::path::PathBuf {
+    data_dir.join(COOKIE_FILE_NAME)
+}

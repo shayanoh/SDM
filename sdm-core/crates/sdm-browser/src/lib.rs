@@ -3,3 +3,6 @@
 //! Spec `2026-10-26-tauri-browser-integration-design.md`.
 
 pub mod cookies;
+pub mod framing;
+pub mod host;
+pub mod status;
