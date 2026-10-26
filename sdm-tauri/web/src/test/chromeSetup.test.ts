@@ -106,11 +106,11 @@ describe("the Chrome extension setup window", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  describe("on Windows", () => {
+  describe.each(["windows", "linux"] as const)("on %s", (platform) => {
     // Chrome drops a chrome:// address handed to it by another program, so
     // the step asks the user to paste it instead of opening the page.
     it("shows the address to paste, with the instructions for it", async () => {
-      open(() => {}, "windows");
+      open(() => {}, platform);
       await screen.findByText("Install the Chrome Extension");
       const box = screen.getByLabelText(
         "Extensions page address",
@@ -126,7 +126,7 @@ describe("the Chrome extension setup window", () => {
     });
 
     it("copies the address from its own button", async () => {
-      const { bridge, clipboard } = open(() => {}, "windows");
+      const { bridge, clipboard } = open(() => {}, platform);
       await screen.findByText("Install the Chrome Extension");
       await fireEvent.click(
         screen.getByRole("button", { name: "Copy Address" }),
@@ -138,15 +138,12 @@ describe("the Chrome extension setup window", () => {
     });
   });
 
-  it.each(["mac", "linux"] as const)(
-    "keeps the Open Chrome Extensions button on %s",
-    async (platform) => {
-      open(() => {}, platform);
-      await screen.findByText("Install the Chrome Extension");
-      expect(
-        screen.getByRole("button", { name: "Open Chrome Extensions" }),
-      ).toBeTruthy();
-      expect(screen.queryByLabelText("Extensions page address")).toBeNull();
-    },
-  );
+  it("keeps the Open Chrome Extensions button on the Mac", async () => {
+    open(() => {}, "mac");
+    await screen.findByText("Install the Chrome Extension");
+    expect(
+      screen.getByRole("button", { name: "Open Chrome Extensions" }),
+    ).toBeTruthy();
+    expect(screen.queryByLabelText("Extensions page address")).toBeNull();
+  });
 });

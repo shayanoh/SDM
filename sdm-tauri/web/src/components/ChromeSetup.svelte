@@ -88,9 +88,10 @@
         <span class="n">1</span>
         <div>
           <strong>Open Chrome's Extensions page</strong>
-          {#if platform === "windows"}
-            <!-- Chrome ignores a chrome:// address another program hands it
-                 (it opens an empty window instead), so the user pastes it. -->
+          {#if platform !== "mac"}
+            <!-- On Windows and Linux Chrome ignores a chrome:// address another
+                 program hands it (it opens an empty window instead), so the
+                 user pastes it. Only the Mac's `open -a` route works. -->
             <p class="muted">
               In Chrome, open a new tab, paste this address and press Enter.
             </p>
