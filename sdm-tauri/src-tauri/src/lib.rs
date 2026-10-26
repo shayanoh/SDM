@@ -26,6 +26,12 @@ use sdm_core::AppTiming;
 use tauri::Manager;
 use tauri_specta::{Builder, collect_commands};
 
+/// Windows the window-state plugin must leave alone: Settings sizes itself to
+/// its tab, and the tray popover is positioned against the icon and must stay
+/// hidden until a click ("tray" is `popover::LABEL`, which only exists on
+/// macOS and Windows).
+const WINDOW_STATE_DENYLIST: [&str; 2] = [settings_window::LABEL, "tray"];
+
 /// The id of the app menu's "Settings…" item on macOS.
 #[cfg(target_os = "macos")]
 const SETTINGS_MENU_ID: &str = "settings";
@@ -173,7 +179,7 @@ pub fn run() {
         // Remembers the main window's size, position and maximized state.
         .plugin(
             tauri_plugin_window_state::Builder::default()
-                .with_denylist(&[settings_window::LABEL])
+                .with_denylist(&WINDOW_STATE_DENYLIST)
                 .build(),
         )
         .invoke_handler(builder.invoke_handler())
@@ -297,6 +303,18 @@ mod tests {
     /// The main window is configured like the SwiftUI one: its title, its
     /// default and minimum sizes, and no webview file drop (which on Windows
     /// would swallow the HTML5 drag and drop the list relies on).
+    /// `tauri-plugin-window-state` restores every window it manages and calls
+    /// `show()` on one whose saved (or default) state is visible. The tray
+    /// popover is built hidden at startup, so it must not be managed: it was
+    /// shown, unfocused, at every launch.
+    #[test]
+    fn window_state_skips_the_tray_and_settings_windows() {
+        assert!(super::WINDOW_STATE_DENYLIST.contains(&crate::settings_window::LABEL));
+        assert!(super::WINDOW_STATE_DENYLIST.contains(&"tray"));
+        #[cfg(any(windows, target_os = "macos"))]
+        assert!(super::WINDOW_STATE_DENYLIST.contains(&crate::popover::LABEL));
+    }
+
     #[test]
     fn the_main_window_is_configured_like_the_swiftui_one() {
         let config: serde_json::Value =
