@@ -1,10 +1,8 @@
 # SDM — Shayan's Download Manager
 
-A macOS download manager with segmented (multi-connection) transfers, robust resume, clipboard-driven link grabbing, and YouTube support.
+A download manager for macOS, Windows and Linux with segmented (multi-connection) transfers, robust resume, clipboard-driven link grabbing, a Chrome extension that captures downloads, and media-site support through yt-dlp.
 
-> **Status: implemented.** All five design phases are merged; the YouTube
-> toolchain (yt-dlp / ffmpeg / QuickJS) is now provisioned automatically. See
-> [the design spec](docs/superpowers/specs/2026-08-03-sdm-design.md).
+SDM is a Rust core (`sdm-core/`) under a Tauri v2 + Svelte 5 interface (`sdm-tauri/`). The earlier SwiftUI app is gone from the tree; it lives in git history (see [the roadmap](docs/tauri-roadmap.md) for how the Rust version came about).
 
 ## Features
 
@@ -14,7 +12,7 @@ A macOS download manager with segmented (multi-connection) transfers, robust res
 - Change the segment count mid-download — drop from 100 segments to 3 and the remaining workers pick up the fragmented gaps
 - Resume across pauses, quits, and crashes, guarded by `ETag`/`Last-Modified` validation so a changed remote file never silently corrupts a partial one
 - Files download as `name.ext.incomplete` and are renamed on completion
-- Per-package output folders under a configurable download directory (default `~/Downloads`)
+- Per-package output folders under a configurable download directory (default: your Downloads folder)
 
 **Link grabbing**
 
@@ -31,108 +29,96 @@ A macOS download manager with segmented (multi-connection) transfers, robust res
 - Drag to reorder, with immediate effect on what's running
 - Non-resumable downloads are never auto-paused, and warn before a manual pause
 
-**YouTube**
+**Media sites**
 
-- Quality, resolution, and codec preference list, applied automatically at grab time
-- Per-link override, with filesize updating instantly
-- Downloads through the same segmented engine as everything else
-- `yt-dlp`, `ffmpeg`, and a JavaScript runtime are **provisioned automatically** — no `brew install` needed (see [Vendored binaries](#vendored-binaries)); generic HTTP downloads work regardless
+- About fifty sites (YouTube, Vimeo, Twitch, TikTok, SoundCloud, Reddit and more) through yt-dlp, which only extracts metadata: SDM downloads the direct URLs itself, through the same segmented engine
+- HLS/DASH-only videos are downloaded by yt-dlp itself, resumably
+- Quality, resolution, and codec preference list, applied automatically at grab time, with a per-link override
+- `yt-dlp`, `ffmpeg`, and a JavaScript runtime are **provisioned automatically** — nothing to install (see [Vendored binaries](#vendored-binaries))
+
+**Chrome extension**
+
+- Captures Chrome's downloads and hands them to SDM (starting SDM if it is not running)
+- Shares Chrome's cookies with SDM for the media sites it supports, so signed-in and age-restricted videos work on every system, without a password prompt. Only the cookies of those sites leave Chrome.
+- Loaded unpacked from Settings → Downloads → Chrome Extension (or the macOS app menu); no store listing
 
 **Interface**
 
 - Live download speed per item, per package, and globally, with sparklines and a bandwidth graph
 - Progress bars visualize the actual byte ranges, so you can see each segment filling in
-- Menu bar item with active downloads, pending links, and quick controls
-- Notifications for finished downloads and links awaiting confirmation
+- Tray icon with a popover (macOS and Windows) or a status menu (Linux); notifications for finished downloads and links awaiting confirmation
 - Themes: system, light, dark, midnight blue, deep purple, and community palettes (Nord, Dracula, Solarized, Gruvbox, Catppuccin, Tokyo Night, One Dark, Rosé Pine)
-- Runs in the dock, the menu bar, or both — your choice
+- Closes to the tray, launches at login, and on macOS runs in the Dock, the menu bar, or both
 
 ## Requirements
 
-- macOS 15.0 or later (macOS 26 additionally gets Liquid Glass styling)
-- Nothing else — the YouTube toolchain is bundled or self-downloaded (see below)
+- macOS 10.13 or later (universal build), Windows (x64), or a recent Linux desktop (x64; `.deb`, `.rpm` and `.AppImage`)
+- Nothing else — the media toolchain is bundled or self-downloaded (see below)
 
 ## Building
 
-SDM's core (download engine, scheduler, link grabber, yt-dlp resolver) is
-written in Rust and lives in `sdm-core/`. It is exposed to the SwiftUI app
-through UniFFI as the Swift module `SDMRust`; the `SDMKit` package targets
-(`SDMCore`, `SDMEngine`, `SDMGrabber`, `SDMResolve`) are thin adapters over it.
-
 Prerequisites:
 
-- Xcode with the macOS 15 SDK
-- Rust through [rustup](https://rustup.rs), with both macOS targets:
-  `rustup target add x86_64-apple-darwin aarch64-apple-darwin`.
-  The scripts put `~/.cargo/bin` first on `PATH`, so a Homebrew `cargo`
-  (which cannot cross-compile) is not used.
-- Git LFS, for the vendored blobs below: run `git lfs install` before
-  cloning, or `git lfs pull` after.
+- Rust through [rustup](https://rustup.rs). The scripts put `~/.cargo/bin` first on `PATH`, so a Homebrew `cargo` (which cannot cross-compile) is not used. For the macOS universal build also `rustup target add x86_64-apple-darwin aarch64-apple-darwin`.
+- Node and [pnpm](https://pnpm.io) for the Svelte frontend.
+- Git LFS, for the vendored blobs below: run `git lfs install` before cloning, or `git lfs pull` after.
+- Windows builds are cross-built from a Mac with `cargo-xwin`; Linux builds run in Docker (`sdm-tauri/docker/`).
 
-`scripts/build-rust-core.sh [debug|release]` builds `sdm-ffi` with cargo
-(debug: the host triple; release: x86_64 and arm64, joined with `lipo`),
-generates the Swift bindings into `SDMKit/Sources/SDMRust/Generated/`, and
-packs the static library into `SDMKit/Artifacts/SDMRust.xcframework`. Both
-outputs are git-ignored. The script skips the work when nothing under
-`sdm-core/` has changed since the last run. A fresh clone must run it once
-before Xcode can open the package cleanly.
+Run the app while developing:
 
-To build in Xcode, open `SDM.xcodeproj` and build the `SDM` scheme. The scheme
-runs the script as a build pre-action (`debug` for Debug, `release` for
-Release), so Rust changes are picked up by `xcodebuild` as well as by the
-Xcode UI.
+```
+cd sdm-tauri && pnpm tauri dev                 # real data directory
+cd sdm-tauri/web && pnpm dev                   # the UI in a browser, against an in-memory mock
+```
 
-`./build.sh` makes a universal (arm64 + x86_64) Release build, bumps the build
-number and installs the app into `/Applications`. It runs the Rust step itself.
-Options: `-v <version>` sets the marketing version, `--no-bump` skips the
-build-number bump, and `--no-install` stops after the build and leaves the app
-in `build/Build/Products/Release/`. Use `./build.sh --no-bump --no-install` to
-check that a Release build works without touching the installed app.
+Build and package:
+
+```
+scripts/build-tauri.sh mac | windows | linux   # builds, then copies to Releases/<version>/<os>/
+scripts/build-tauri.sh mac --publish-only      # copy an existing build without building
+```
+
+The macOS app is signed ad-hoc (no Developer ID), so other Macs show the unidentified-developer prompt. `Releases/` is not in git; if `Releases/<version>/<os>` already exists the script warns and copies nothing.
+
+Versioning is one number for every crate and every package:
+
+```
+scripts/version.py            # show the version, and whether everything agrees
+scripts/version.py 1.2.3      # set it everywhere (workspace, path dependencies, Cargo.lock, tauri.conf.json)
+```
 
 ## Testing
 
-`./test.sh` runs everything: the Rust workspace tests, then the `SDMKit`
-Swift tests (the `SDMRust` bindings and the shim targets) against a Debug
-build of the Rust core.
+`./test.sh` runs everything: the Rust workspace tests, the Tauri crate's tests, the Svelte tests, the extension's tests, the version script's tests, and the Windows and Linux compile checks.
 
 To run the parts separately:
 
 ```
-cd sdm-core && cargo test --workspace      # Rust core
-scripts/build-rust-core.sh debug && (cd SDMKit && swift test)   # Swift side
+cd sdm-core && cargo test --workspace --exclude sdm-tauri   # Rust core
+cd sdm-core && cargo test -p sdm-tauri                      # the Tauri shell
+(cd sdm-tauri/web && pnpm test)                             # Svelte
+node --test SDMChromeExtension/cookies.test.js              # extension
+python3 -m unittest scripts/test_version.py                 # version script
 ```
 
-`./lint.sh` runs `swift-format lint` and `cargo clippy --workspace
---all-targets -- -D warnings`. `./format.sh` runs `swift-format`, `prettier`
-and `cargo fmt --all`.
-
-The original all-Swift core is kept as a baseline in `legacy/SDMKitSwift/`. It
-is its own package and is not linked into the app. To run its tests:
-`cd legacy/SDMKitSwift && swift test`.
+`./lint.sh` runs `cargo clippy --workspace --all-targets -- -D warnings` and the Svelte type check. `./format.sh` runs `cargo fmt --all` and `prettier`.
 
 ## Vendored binaries
 
-SDM does not ask you to `brew install` anything. Its three helper binaries
-live in `~/Library/Application Support/SDM/bin/`:
+SDM does not ask you to install anything. Its three helper binaries live in the `bin/` folder of SDM's data directory (`~/Library/Application Support/SDM/bin/` on macOS, `%APPDATA%\SDM\bin\` on Windows, `~/.local/share/SDM/bin/` on Linux):
 
 | Binary | How it gets there | Updates |
 |---|---|---|
-| `ffmpeg` | Bundled in the app as a per-arch LZFSE blob, inflated on first launch | Only when a new SDM build ships a newer pinned build |
-| `qjs` (QuickJS-ng) | Bundled universal LZFSE blob, inflated on first launch — the JavaScript runtime yt-dlp now needs for full YouTube support | Same as ffmpeg |
-| `yt-dlp` | **Downloaded** from GitHub releases on first launch, SHA-256 verified, ad-hoc signed | Self-checks every 6 h (15 min while missing); auto-updates. Stable or nightly channel, chosen in **Settings → YouTube → Components**. Never uses `yt-dlp -U`. |
+| `ffmpeg`, `ffprobe` | macOS: bundled in the app as a per-arch LZFSE blob, inflated on first launch. Windows and Linux: downloaded on first launch, checked against the release's published digest | macOS: only when a new SDM build ships a newer pinned build. Windows and Linux: when missing |
+| `qjs` (QuickJS-ng) | The JavaScript runtime yt-dlp needs for full YouTube support. Bundled on macOS, downloaded elsewhere | macOS: with the app. Elsewhere: when the release tag changes |
+| `yt-dlp` | **Downloaded** from GitHub releases on first launch, SHA-256 verified | Self-checks every 6 h (15 min while missing); auto-updates. Stable or nightly channel, chosen in **Settings → Media Sites → Components**. Never uses `yt-dlp -U`. |
 
-yt-dlp is invoked with `--extractor-args youtube:jsruntime=quickjs` so it
-uses the bundled `qjs`. All of this is implemented in
-`sdm-core/crates/sdm-resolve/src/managed_binaries.rs` (the Swift original is `legacy/SDMKitSwift/Sources/SDMResolve/ManagedBinaries.swift`) and driven by the app's
-`ManagedBinariesController`.
+All of this is implemented in `sdm-core/crates/sdm-resolve/src/managed_binaries.rs`.
 
-To refresh the pinned `ffmpeg` / `qjs` versions, edit the version pins at the
-top of `scripts/vendor-binaries.sh`, run it, and commit the regenerated
-blobs and `vendor-manifest.json`. A fresh clone that has not run the script
-carries a placeholder `vendor-manifest.json` (`"0"` versions); the app treats
-absent blobs as "nothing to inflate" and yt-dlp still self-downloads.
+To refresh the pinned `ffmpeg` / `qjs` versions that ship in the macOS bundle, edit the version pins at the top of `scripts/vendor-binaries.sh`, run it, and commit the regenerated blobs (`sdm-tauri/vendor/`, Git LFS) and `vendor-manifest.json`. A fresh clone that has not run the script carries a placeholder `vendor-manifest.json` (`"0"` versions); the app treats absent blobs as "nothing to inflate" and yt-dlp still self-downloads.
 
 ## Documentation
 
-- [Design spec](docs/superpowers/specs/2026-08-03-sdm-design.md) — architecture, data model, engine design, testing strategy, phasing
+- [Roadmap and status](docs/tauri-roadmap.md) — where the Rust/Tauri version stands, the decisions behind it, and a dated log; read this first
+- [Design spec](docs/superpowers/specs/2026-08-03-sdm-design.md) — architecture, data model, engine design, testing strategy (written for the original Swift app; the engine design carries over)
 - [CLAUDE.md](CLAUDE.md) — working notes for AI agents on this codebase

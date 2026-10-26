@@ -1,31 +1,11 @@
 .DS_Store
 
-## Xcode
-build/
-DerivedData/
-*.xcuserstate
-*.xcworkspace/xcuserdata/
-xcuserdata/
-*.moved-aside
-*.hmap
-*.ipa
-*.dSYM.zip
-*.dSYM
-
-## Swift Package Manager
-.build/
-.swiftpm/
-
 ## Misc
 *.log
 
 ## VSCode
 .vscode/
 SDMChromeExtension-Identity/
-
-## Rust core build outputs
-SDMKit/Artifacts/
-SDMKit/Sources/SDMRust/Generated/
 
 ## Brag
 brag-output/

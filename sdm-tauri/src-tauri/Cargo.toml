@@ -19,9 +19,9 @@ workspace = true
 
 [dependencies]
 dirs = "6"
-sdm-app = { version = "0.1.0", path = "../../sdm-core/crates/sdm-app" }
-sdm-browser = { version = "0.1.0", path = "../../sdm-core/crates/sdm-browser" }
-sdm-core = { version = "0.1.0", path = "../../sdm-core/crates/sdm-core" }
+sdm-app = { version = "4.0.0", path = "../../sdm-core/crates/sdm-app" }
+sdm-browser = { version = "4.0.0", path = "../../sdm-core/crates/sdm-browser" }
+sdm-core = { version = "4.0.0", path = "../../sdm-core/crates/sdm-core" }
 serde = { version = "1.0.229", features = ["derive"] }
 specta = "=2.0.0-rc.25"
 specta-typescript = "0.0.12"

@@ -5,7 +5,7 @@
       "signingIdentity": "-"
     },
     "resources": {
-      "../../SDM/Resources/vendor/*": "vendor/"
+      "../vendor/*": "vendor/"
     }
   }
 }

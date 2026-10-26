@@ -1,14 +1,14 @@
 #!/bin/bash
 #
-# Regenerates the vendored ffmpeg / QuickJS-ng binaries that ship inside
-# SDM.app and are inflated into ~/Library/Application Support/SDM/bin/ on
-# first launch. Run manually when refreshing a pinned version, then commit
+# Regenerates the vendored ffmpeg / QuickJS-ng binaries that ship inside the
+# macOS app bundle and are inflated into ~/Library/Application Support/SDM/bin/
+# on first launch (sdm-tauri/vendor/). Run manually when refreshing a pinned version, then commit
 # the new *.lzfse blobs (Git LFS) and vendor-manifest.json.
 #
 #   ./scripts/vendor-binaries.sh
 #
 # yt-dlp is NOT handled here — it is downloaded and self-updated at runtime
-# by SDMResolve/ManagedBinaries.swift.
+# by sdm-core/crates/sdm-resolve (managed_binaries.rs).
 #
 set -euo pipefail
 
@@ -22,7 +22,7 @@ QJS_TAG="${QJS_TAG:-v0.10.1}"   # github.com/quickjs-ng/quickjs
 # ------------------------------------------------------------------------
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-OUT="$ROOT/SDM/Resources/vendor"
+OUT="$ROOT/sdm-tauri/vendor"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$OUT"

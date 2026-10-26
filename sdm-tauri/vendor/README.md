@@ -1,9 +1,11 @@
 # Vendored binaries
 
 `ffmpeg-arm64.lzfse`, `ffmpeg-x86_64.lzfse`, `qjs.lzfse` are LZFSE-compressed
-binaries copied into `SDM.app/Contents/Resources/vendor/` at build time and
-inflated into `~/Library/Application Support/SDM/bin/` on first launch by
-`SDMResolve/ManagedBinaries.swift`.
+binaries copied into `SDM.app/Contents/Resources/vendor/` at build time
+(`sdm-tauri/src-tauri/tauri.macos.conf.json`) and inflated into
+`~/Library/Application Support/SDM/bin/` on first launch by
+`sdm-core/crates/sdm-resolve/src/managed_binaries.rs`. Windows and Linux ship
+no blobs; they download the tools instead.
 
 The `.lzfse` blobs are tracked with **Git LFS** (see `.gitattributes`).
 
