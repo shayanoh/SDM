@@ -74,3 +74,12 @@ fn incomplete_path_appends_suffix() {
         "a.bin.incomplete"
     );
 }
+
+#[test]
+#[should_panic(expected = "after close")]
+fn writing_after_close_is_a_bug_and_panics() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = SparseFile::open(&dir.path().join("out.bin"), 4).unwrap();
+    file.close();
+    let _ = file.write(&[1], 0);
+}

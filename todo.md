@@ -10,11 +10,7 @@ treating one as a confirmed bug.
 
 ## Todo
 
-- [ ] **Engine bookkeeping** (waiting for Shayan to pick which to do):
-  per-item counters are never pruned when an item is removed; the debounced
-  state flush clears its tick counter before the write, so a failed write is
-  not retried until an unrelated change re-arms it; `SparseFile::write` does
-  not check that the file is open.
+Nothing open.
 
 ## Parked
 

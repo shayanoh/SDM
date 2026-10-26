@@ -3,7 +3,7 @@
 
   "name": "Shayan's Download Manager",
   "description": "Capture downloads from Chrome and send them to SDM.",
-  "version": "2.0.0",
+  "version": "2.0.1",
 
   "icons": {
     "16": "images/icon-16.png",

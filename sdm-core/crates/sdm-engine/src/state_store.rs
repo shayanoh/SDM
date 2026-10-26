@@ -68,6 +68,13 @@ pub trait StateStore: Send + Sync {
     /// queued so the next `flush()` call retries it. Surfacing failures to
     /// a caller can be added later once one exists that would use it.
     async fn flush(&self);
+    /// Whether a save is still waiting to be written: after `flush()`, true
+    /// means the write failed and the save was kept. The engine uses this to
+    /// try again a debounce window later instead of waiting for an unrelated
+    /// change. A store that cannot fail to write leaves the default.
+    async fn has_pending(&self) -> bool {
+        false
+    }
 }
 
 /// Durable state as a single atomically replaced JSON file.
@@ -136,6 +143,10 @@ impl StateStore for JsonStateStore {
 
     async fn save(&self, state: PersistedState) {
         *self.pending() = Some(state);
+    }
+
+    async fn has_pending(&self) -> bool {
+        self.pending().is_some()
     }
 
     async fn flush(&self) {

@@ -96,7 +96,7 @@ To run the parts separately:
 cd sdm-core && cargo test --workspace --exclude sdm-tauri   # Rust core
 cd sdm-core && cargo test -p sdm-tauri                      # the Tauri shell
 (cd sdm-tauri/web && pnpm test)                             # Svelte
-node --test SDMChromeExtension/cookies.test.js              # extension
+node --test SDMChromeExtension/cookies.test.js SDMChromeExtension/downloads.test.js              # extension
 python3 -m unittest scripts/test_version.py scripts/test_bundle_resources.py   # version script, bundle contents
 ```
 
@@ -112,7 +112,7 @@ SDM does not ask you to install anything, and does not ship the helpers either. 
 | `qjs` (QuickJS-ng)  | The JavaScript runtime yt-dlp needs for full YouTube support, from the quickjs-ng GitHub release                                                                                                                                  | When the release tag changes                                                                                                                                      |
 | `yt-dlp`            | GitHub releases                                                                                                                                                                                                                   | Self-checks every 6 h (15 min while missing); auto-updates. Stable or nightly channel, chosen in **Settings → Media Sites → Components**. Never uses `yt-dlp -U`. |
 
-All of this is implemented in `sdm-core/crates/sdm-resolve/src/managed_binaries.rs`; the table of sources is `platform_tools.rs`. Their licenses are in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+All of this is implemented in `sdm-core/crates/sdm-resolve/src/managed_binaries.rs`; the table of sources is `platform_tools.rs`. They are separate programs with their own licenses (yt-dlp: Unlicense, FFmpeg: GPL, QuickJS-ng: MIT); SDM runs them but does not ship or link them.
 
 ## License
 

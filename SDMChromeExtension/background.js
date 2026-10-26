@@ -5,6 +5,7 @@ import {
   domainMatches,
   pickSiteList,
 } from "./cookies.js";
+import { downloadUrl, shouldCapture } from "./downloads.js";
 
 const NATIVE_HOST = "com.shayanoh.sdm.chrome_extension";
 const DUPLICATE_MS = 60000;
@@ -26,14 +27,13 @@ chrome.downloads.onCreated.addListener(async (download) => {
     return;
   }
 
-  // We only want normal HTTP(S) downloads.
-  let finalUrl = download.finalUrl;
-  if (!finalUrl) {
-    finalUrl = download.url;
-  }
-  if (!finalUrl.startsWith("http://") && !finalUrl.startsWith("https://")) {
+  // Only normal HTTP(S) downloads the user has just started. Chrome also
+  // raises this event at startup for downloads of earlier sessions, including
+  // ones this extension cancelled, and those must not be sent again.
+  if (!shouldCapture(download, Date.now())) {
     return;
   }
+  const finalUrl = downloadUrl(download);
 
   let now = Date.now();
   if (finalUrl == lastUrl) {

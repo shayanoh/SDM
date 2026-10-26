@@ -440,4 +440,65 @@ mod tests {
             );
         }
     }
+
+    /// Removing an item, or its whole package, forgets everything the engine
+    /// tracked about it, and nothing about the items that stay.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn removing_items_and_packages_leaves_no_bookkeeping_behind() {
+        use std::sync::Arc;
+
+        use crate::fake_origin::FakeOrigin;
+        use crate::state_store::InMemoryStateStore;
+        use crate::{DownloadEngine, EngineSettings, RetryPolicy};
+        use sdm_core::{DownloadItem, DownloadPackage};
+
+        let dir = tempfile::tempdir().unwrap();
+        let engine = DownloadEngine::new(
+            Arc::new(FakeOrigin::new(vec![7u8; 64])),
+            Arc::new(InMemoryStateStore::new()),
+            EngineSettings::new(1, 1, 8, dir.path().to_path_buf()),
+            RetryPolicy::new(),
+            None,
+            None,
+            None,
+        );
+        let source = SourceUrl::new("https://example.com/f.bin").unwrap();
+        let stopped = |name: &str| {
+            let mut item = DownloadItem::http(source.clone(), name);
+            item.state = ItemState::Stopped;
+            item
+        };
+        let (a, b, c) = (stopped("a.bin"), stopped("b.bin"), stopped("c.bin"));
+        let (a_id, b_id, c_id) = (a.id, b.id, c.id);
+        let first = DownloadPackage::new("One").with_items(vec![a, b]);
+        let second = DownloadPackage::new("Two").with_items(vec![c]);
+        let second_id = second.id;
+        engine.add(first).await;
+        engine.add(second).await;
+
+        {
+            let mut state = engine.inner.lock();
+            for id in [a_id, b_id, c_id] {
+                state.failed_attempts_mut().insert(id, 1);
+                state.retry_hold_ticks_mut().insert(id, 3);
+                state.last_failure_mut().insert(id, "reset".into());
+                state.samplers_mut().insert(id, SpeedSampler::new());
+                state.sampled_bytes.insert(id, 5);
+                state.checkpoint_failures_mut().insert(id, "disk".into());
+                state.segment_overrides_mut().insert(id, 2);
+                state.attempt_start_bytes.insert(id, 1);
+                state.started_at_tick.insert(id, 1);
+                state.missing_files_mut().insert(id);
+                state.assembling_mut().insert(id);
+            }
+        }
+
+        engine.remove_item(a_id, false).await;
+        assert!(!engine.inner.lock().tracks_item(a_id));
+        assert!(engine.inner.lock().tracks_item(b_id));
+
+        engine.remove_package(second_id, false).await;
+        assert!(!engine.inner.lock().tracks_item(c_id));
+        assert!(engine.inner.lock().tracks_item(b_id));
+    }
 }

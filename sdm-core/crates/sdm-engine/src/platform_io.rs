@@ -7,9 +7,6 @@ use std::io;
 /// Reported when a write returns zero bytes or an `io::Error` carries no OS
 /// code. The POSIX values on every OS: they are only ever shown to the user.
 pub(crate) const EIO: i32 = 5;
-/// Reported for a write after the file was closed.
-pub(crate) const EBADF: i32 = 9;
-
 /// One positional write (`pwrite(2)` / `WriteFile` with an offset). Returns the
 /// number of bytes written; the caller loops over short writes.
 pub(crate) fn write_at(file: &File, buf: &[u8], offset: u64) -> io::Result<usize> {
@@ -89,6 +86,5 @@ mod tests {
     #[test]
     fn error_codes_are_posix_numbers_on_every_os() {
         assert_eq!(EIO, 5);
-        assert_eq!(EBADF, 9);
     }
 }

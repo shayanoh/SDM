@@ -7,7 +7,7 @@ use std::sync::Mutex;
 use thiserror::Error;
 
 pub(crate) use crate::platform_io::fsync;
-use crate::platform_io::{self, EBADF, EIO};
+use crate::platform_io::{self, EIO};
 
 /// Swift's `SparseFile.FileError`. `errno` values are the raw OS error codes.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -106,12 +106,14 @@ impl SparseFile {
     }
 
     /// Writes all of `data` at the absolute `offset`, looping over short
-    /// writes. Writing after `close()` fails with `EBADF`, as `pwrite` on a
-    /// closed descriptor does.
+    /// writes.
     ///
     /// # Panics
     ///
-    /// Panics if `offset` is negative ("offset must be non-negative").
+    /// Panics if `offset` is negative ("offset must be non-negative"), and if
+    /// the file has been closed: the engine writes only while its task still
+    /// holds the file open (the check and the write share one lock), so a
+    /// write after `close()` is a bug in the caller, not an I/O failure.
     pub fn write(&self, data: &[u8], offset: i64) -> Result<(), SparseFileError> {
         assert!(offset >= 0, "offset must be non-negative");
         if data.is_empty() {
@@ -119,9 +121,9 @@ impl SparseFile {
         }
 
         let guard = self.lock();
-        let Some(file) = guard.as_ref() else {
-            return Err(SparseFileError::WriteFailed { errno: EBADF });
-        };
+        let file = guard
+            .as_ref()
+            .expect("SparseFile::write called after close()");
 
         let mut written = 0usize;
         while written < data.len() {

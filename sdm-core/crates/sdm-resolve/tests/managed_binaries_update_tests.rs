@@ -35,6 +35,8 @@ fn make_managed(bin: &Path, fetcher: &Arc<FakeBinaryFetcher>) -> ManagedBinaries
         Arc::new(FakeProcessRunner::new()),
         || YtDlpChannel::Stable,
     )
+    // These tests are about yt-dlp; the platform's tools would add requests.
+    .with_platform_tools(Vec::new())
 }
 
 fn is_executable(path: &Path) -> bool {

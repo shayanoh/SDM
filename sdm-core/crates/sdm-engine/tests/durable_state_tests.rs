@@ -287,3 +287,29 @@ async fn engine_restores_a_v2_model_item_and_reports_it_complete() {
     assert_eq!(reread.format_version, 2);
     assert_eq!(reread.packages[0].items[0].components.len(), 1);
 }
+
+/// A state write that fails (here: the folder cannot be created) is tried
+/// again a debounce window later, without any further change to the list.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_failed_state_write_is_retried_without_another_change() {
+    let dir = make_scratch_directory();
+    let blocker = dir.path().join("blocker");
+    std::fs::write(&blocker, b"a file where a folder is needed").unwrap();
+    let state_url = blocker.join("state.json");
+    let engine = json_engine(dir.path(), &state_url, 2);
+
+    engine.add(stopped_package("a.bin")).await;
+    for _ in 0..4 {
+        engine.tick().await;
+    }
+    assert!(!state_url.exists(), "the write cannot succeed yet");
+
+    std::fs::remove_file(&blocker).unwrap();
+    for _ in 0..4 {
+        engine.tick().await;
+    }
+    assert!(
+        state_url.exists(),
+        "the kept save was written on a later window"
+    );
+}

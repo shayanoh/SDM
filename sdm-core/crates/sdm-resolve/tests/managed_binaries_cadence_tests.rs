@@ -19,6 +19,8 @@ fn managed(bin: std::path::PathBuf, fetcher: &Arc<FakeBinaryFetcher>) -> Managed
         Arc::new(FakeProcessRunner::new()),
         || YtDlpChannel::Stable,
     )
+    // These tests are about yt-dlp; the platform's tools would add requests.
+    .with_platform_tools(Vec::new())
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

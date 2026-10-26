@@ -160,7 +160,7 @@ impl Inner {
     /// download that changes something every tick still gets written every two
     /// seconds instead of being starved forever. Cheap when nothing is dirty:
     /// `ticks_since_pending_change` is `None` and this returns without
-    /// touching the store.
+    /// touching the store. If the write fails, the window starts again.
     async fn flush_if_debounce_elapsed(&self) {
         let should_flush = {
             let mut state = self.lock();
@@ -178,6 +178,15 @@ impl Inner {
         };
         if should_flush {
             self.state_store.flush().await;
+            // A write that failed (disk full, a locked file) leaves the save
+            // queued in the store. Re-arm the window so it is tried again a
+            // debounce later, not only when something else happens to change.
+            if self.state_store.has_pending().await {
+                let mut state = self.lock();
+                if state.ticks_since_pending_change.is_none() {
+                    state.ticks_since_pending_change = Some(0);
+                }
+            }
         }
     }
 }

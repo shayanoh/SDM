@@ -33,12 +33,12 @@
       "../../SDMChromeExtension/manifest.json": "chrome-extension/manifest.json",
       "../../SDMChromeExtension/background.js": "chrome-extension/background.js",
       "../../SDMChromeExtension/cookies.js": "chrome-extension/cookies.js",
+      "../../SDMChromeExtension/downloads.js": "chrome-extension/downloads.js",
       "../../SDMChromeExtension/cookie-domains.json": "chrome-extension/cookie-domains.json",
       "../../SDMChromeExtension/options.html": "chrome-extension/options.html",
       "../../SDMChromeExtension/options.js": "chrome-extension/options.js",
       "../../SDMChromeExtension/images/*.png": "chrome-extension/images/",
-      "../../LICENSE": "LICENSE",
-      "../../THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.md"
+      "../../LICENSE": "LICENSE"
     },
     "icon": [
       "icons/32x32.png",

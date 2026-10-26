@@ -47,7 +47,7 @@ Everything else falls out of this: changing the segment count mid-flight, resumi
 
 ## Testing
 
-Rust: `cargo test` in `sdm-core/` (per crate, or `--workspace --exclude sdm-tauri`; the whole workspace is slow). Frontend: `pnpm test` (vitest) and `pnpm check` (the real type check), run inside `sdm-tauri/web/` (pnpm only switches to the project's pinned version from inside the project). Extension: `node --test SDMChromeExtension/cookies.test.js`. Version script and bundle contents: `python3 -m unittest scripts/test_version.py scripts/test_bundle_resources.py`. `./test.sh` runs all of it plus the Windows and Linux compile checks.
+Rust: `cargo test` in `sdm-core/` (per crate, or `--workspace --exclude sdm-tauri`; the whole workspace is slow). Frontend: `pnpm test` (vitest) and `pnpm check` (the real type check), run inside `sdm-tauri/web/` (pnpm only switches to the project's pinned version from inside the project). Extension: `node --test SDMChromeExtension/cookies.test.js SDMChromeExtension/downloads.test.js`. Version script and bundle contents: `python3 -m unittest scripts/test_version.py scripts/test_bundle_resources.py`. `./test.sh` runs all of it plus the Windows and Linux compile checks.
 
 The engine takes `HTTPTransport` as an injected trait — tests run against `FakeOrigin`, an in-process fake server programmable to misbehave (ignores `Range`, lies about `Content-Length`, drops or truncates the body, changes its `ETag`). **No test may touch the network or sleep on a real clock.**
 
@@ -64,7 +64,7 @@ The two properties that must never regress:
 - Add packages with the package manager (`cargo add`, `pnpm add`), never by hand-editing manifests or lockfiles. Versions only through `scripts/version.py`.
 - A change to the Chrome extension that is incompatible with older copies gets a major version bump in its `manifest.json` (2.0.0 was the cookie sync); the app's launch prompt compares it with the version the extension reports.
 - `ffmpeg`/`ffprobe`/`qjs` are downloaded at run time on every platform and never bundled (`platform_tools.rs`); a Chrome extension file that is not listed in `bundle.resources` of `tauri.conf.json` is not shipped (`scripts/test_bundle_resources.py` checks).
-- The project is MIT-licensed; keep `LICENSE`, `THIRD-PARTY-NOTICES.md` and the metadata in `tauri.conf.json` in step when anything about the licence or the downloaded tools changes.
+- The project is MIT-licensed; keep `LICENSE` and the metadata in `tauri.conf.json` in step when anything about the licence or the downloaded tools changes.
 - Verify library APIs against current documentation (Context7) rather than from memory.
 
 ## Git

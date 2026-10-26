@@ -367,6 +367,27 @@ impl EngineState {
         self.segment_overrides_mut().remove(&item_id);
         self.attempt_start_bytes.remove(&item_id);
         self.started_at_tick.remove(&item_id);
+        self.missing_files_mut().remove(&item_id);
+        self.assembling_mut().remove(&item_id);
+    }
+
+    /// Whether any per-item map or set still holds `item_id`. For the test
+    /// that proves removal leaves nothing behind: a new per-item field must
+    /// be added here and to `clear_item_bookkeeping`.
+    #[cfg(test)]
+    pub(super) fn tracks_item(&self, item_id: Uuid) -> bool {
+        self.failed_attempts.contains_key(&item_id)
+            || self.retry_hold_ticks.contains_key(&item_id)
+            || self.last_failure.contains_key(&item_id)
+            || self.samplers.contains_key(&item_id)
+            || self.sampled_bytes.contains_key(&item_id)
+            || self.checkpoint_failures.contains_key(&item_id)
+            || self.segment_overrides.contains_key(&item_id)
+            || self.attempt_start_bytes.contains_key(&item_id)
+            || self.started_at_tick.contains_key(&item_id)
+            || self.missing_files.contains(&item_id)
+            || self.assembling.contains(&item_id)
+            || self.runners.contains_key(&item_id)
     }
 
     /// Renumbers every package's position, and every item's position within
@@ -541,6 +562,34 @@ mod tests {
 
     /// The flip side: reads and an unchanged `refresh_missing_files` leave the
     /// generation alone, so an idle tick does not invalidate the snapshot.
+    /// Fills every per-item map and set the engine keeps, as a stopped and
+    /// retried item would have them.
+    fn track_everything_about(state: &mut EngineState, id: Uuid) {
+        state.failed_attempts_mut().insert(id, 2);
+        state.retry_hold_ticks_mut().insert(id, 5);
+        state.last_failure_mut().insert(id, "reset".into());
+        state.samplers_mut().insert(id, SpeedSampler::new());
+        state.sampled_bytes.insert(id, 10);
+        state.checkpoint_failures_mut().insert(id, "disk".into());
+        state.segment_overrides_mut().insert(id, 4);
+        state.attempt_start_bytes.insert(id, 3);
+        state.started_at_tick.insert(id, 1);
+        state.missing_files_mut().insert(id);
+        state.assembling_mut().insert(id);
+        assert!(state.tracks_item(id));
+    }
+
+    #[test]
+    fn clearing_an_item_leaves_nothing_tracked_and_other_items_alone() {
+        let mut state = state();
+        let (gone, kept) = (Uuid::new_v4(), Uuid::new_v4());
+        track_everything_about(&mut state, gone);
+        track_everything_about(&mut state, kept);
+        state.clear_item_bookkeeping(gone);
+        assert!(!state.tracks_item(gone));
+        assert!(state.tracks_item(kept));
+    }
+
     #[test]
     fn reads_and_an_unchanged_file_check_do_not_bump_the_generation() {
         let mut state = state();
