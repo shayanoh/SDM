@@ -118,7 +118,12 @@ fn visible_entries(folder: &Path) -> Vec<std::fs::DirEntry> {
     let mut entries: Vec<_> = std::fs::read_dir(folder)
         .map(|read| read.flatten().collect())
         .unwrap_or_default();
-    entries.retain(|e| !e.file_name().to_string_lossy().starts_with('.'));
+    // Hidden files, and the extension's own unit tests, are not part of what
+    // Chrome loads.
+    entries.retain(|e| {
+        let name = e.file_name().to_string_lossy().into_owned();
+        !name.starts_with('.') && !name.ends_with(".test.js")
+    });
     entries.sort_by_key(|e| e.file_name());
     entries
 }

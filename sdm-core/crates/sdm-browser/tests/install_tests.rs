@@ -104,6 +104,33 @@ fn preparing_copies_the_extension_to_a_stable_folder_and_replaces_a_changed_one(
 }
 
 #[test]
+fn preparing_leaves_out_hidden_files_and_the_extensions_own_tests() {
+    let root = tempfile::tempdir().unwrap();
+    let bundled = root.path().join("bundle");
+    let data = root.path().join("data");
+    write_extension(&bundled, "2.0.0", "v1");
+    std::fs::write(bundled.join("cookies.test.js"), "test").unwrap();
+    std::fs::write(bundled.join(".DS_Store"), "junk").unwrap();
+    let folder = prepare_extension_folder(&bundled, &data).unwrap();
+    assert!(folder.join("background.js").exists());
+    assert!(!folder.join("cookies.test.js").exists());
+    assert!(!folder.join(".DS_Store").exists());
+    // And an unchanged bundle is still recognised as unchanged.
+    let before = std::fs::metadata(folder.join("background.js"))
+        .unwrap()
+        .modified()
+        .unwrap();
+    prepare_extension_folder(&bundled, &data).unwrap();
+    assert_eq!(
+        std::fs::metadata(folder.join("background.js"))
+            .unwrap()
+            .modified()
+            .unwrap(),
+        before
+    );
+}
+
+#[test]
 fn preparing_a_missing_bundle_is_an_error_not_an_empty_folder() {
     let root = tempfile::tempdir().unwrap();
     assert!(
