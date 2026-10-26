@@ -1,6 +1,6 @@
 # Tauri UI, spec 6: Browser integration
 
-Status: **APPROVED** by Shayan (2026-10-26); implemented inline on branch `tauri-ui`. Written with Shayan. Part of
+Status: **IMPLEMENTED** on branch `tauri-ui` (2026-10-26); see the roadmap log for what was and was not verified. Approved by Shayan the same day. Written with Shayan. Part of
 [docs/tauri-roadmap.md](../../tauri-roadmap.md); builds on the [foundation](2026-10-14-tauri-foundation-design.md),
 the [settings window](2026-10-24-tauri-settings-design.md) and
 [system integration](2026-10-24-tauri-system-integration-design.md).
