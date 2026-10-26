@@ -78,9 +78,27 @@ pub fn menu_spec(status: &TrayStatus) -> Vec<MenuEntry> {
     entries
 }
 
+/// When the icon was last double-clicked. The click that ends a double-click
+/// arrives after it and must not reopen the popover just closed.
+#[cfg(any(windows, target_os = "macos"))]
+static LAST_DOUBLE_CLICK: Mutex<Option<Instant>> = Mutex::new(None);
+
+#[cfg(any(windows, target_os = "macos"))]
+const DOUBLE_CLICK_SETTLE: Duration = Duration::from_millis(600);
+
 #[cfg(any(windows, target_os = "macos"))]
 fn on_tray_icon_event(tray: &tauri::tray::TrayIcon, event: tauri::tray::TrayIconEvent) {
-    use tauri::tray::{MouseButtonState, TrayIconEvent};
+    use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
+    if let TrayIconEvent::DoubleClick {
+        button: MouseButton::Left,
+        ..
+    } = event
+    {
+        *LAST_DOUBLE_CLICK.lock().unwrap_or_else(|e| e.into_inner()) = Some(Instant::now());
+        crate::popover::hide(tray.app_handle());
+        log_failure(crate::main_window::show(tray.app_handle(), None));
+        return;
+    }
     let TrayIconEvent::Click {
         button_state: MouseButtonState::Up,
         rect,
@@ -89,6 +107,13 @@ fn on_tray_icon_event(tray: &tauri::tray::TrayIcon, event: tauri::tray::TrayIcon
     else {
         return;
     };
+    let settling = LAST_DOUBLE_CLICK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .is_some_and(|at| at.elapsed() < DOUBLE_CLICK_SETTLE);
+    if settling {
+        return;
+    }
     let scale = tray
         .app_handle()
         .primary_monitor()
@@ -141,7 +166,6 @@ fn on_menu_event(app: &AppHandle, event: tauri::menu::MenuEvent) {
     }
 }
 
-#[cfg(all(unix, not(target_os = "macos")))]
 fn log_failure(result: Result<(), sdm_app::AppError>) {
     if let Err(error) = result {
         tracing::warn!("tray menu action failed: {error}");

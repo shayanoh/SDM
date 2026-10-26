@@ -101,26 +101,37 @@ fn idle_appends_a_zero_sample_to_history() {
     assert_eq!(sampler.history(), [100.0, 0.0]);
 }
 
-/// Regression: a heartbeat tick keeps calling `idle()` on every sampler for
-/// every non-running item, every tick, indefinitely — the caller has no way
-/// to know it already went idle and stop calling. Without this, `history`
-/// (and therefore the whole `SpeedSampler` value) kept changing shape for a
-/// full `historyLength` worth of ticks after any item went idle, purely from
-/// harmless-looking repeated `idle()` calls, which defeated equality-based
-/// change detection one layer up (`EngineController` comparing telemetry
-/// snapshots to decide whether to republish).
+/// A stopped or finished item's graph slides back in time: each idle tick
+/// brings in one more zero until the history holds nothing but zeros, and then
+/// the sampler stops changing (so a long-idle item costs nothing to publish).
 #[test]
-fn idle_called_again_while_already_idle_does_not_mutate_history_further() {
-    let mut sampler = sampler_1hz();
+fn an_idle_sampler_slides_zeros_in_until_its_history_is_empty() {
+    let mut sampler = SpeedSampler::new()
+        .with_history_length(3)
+        .with_averaging_window_seconds(2.0)
+        .with_ticks_per_second(1);
     sampler.record(100);
     sampler.tick();
+    sampler.record(200);
+    sampler.tick();
+    assert!(sampler.is_decaying());
     sampler.idle();
-    let after_first_idle = sampler.clone();
+    assert_eq!(sampler.history(), [100.0, 200.0, 0.0]);
     sampler.idle();
+    assert_eq!(sampler.history(), [200.0, 0.0, 0.0]);
     sampler.idle();
+    assert_eq!(sampler.history(), [0.0, 0.0, 0.0]);
+    assert!(!sampler.is_decaying());
     sampler.idle();
-    assert_eq!(sampler.history(), after_first_idle.history());
-    assert_eq!(sampler.history(), [100.0, 0.0]);
+    assert_eq!(sampler.history(), [0.0, 0.0, 0.0]);
+}
+
+#[test]
+fn a_sampler_that_never_saw_bytes_is_not_decaying() {
+    let mut sampler = sampler_1hz();
+    assert!(!sampler.is_decaying());
+    sampler.idle();
+    assert!(sampler.history().is_empty());
 }
 
 #[test]
@@ -171,7 +182,6 @@ fn recent_history_records_the_drop_to_idle_like_the_full_history() {
         .with_recent_length(3);
     sampler.record(100);
     sampler.tick();
-    sampler.idle();
     sampler.idle();
     assert_eq!(sampler.recent_history(), [100.0, 0.0]);
     assert_eq!(sampler.recent_history(), sampler.history());

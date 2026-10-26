@@ -336,7 +336,9 @@ async fn an_idle_engine_serves_the_same_generation() {
         snapshot_item(finished_id, &engine).await.unwrap().state,
         ItemState::Completed
     );
-    for _ in 0..5 {
+    // Long enough for the finished item's short history window to slide down
+    // to zeros, which is the last thing a snapshot reads that changes.
+    for _ in 0..(LiveWindow::ITEM_HISTORY_SAMPLES + 5) {
         engine.tick().await;
     }
 

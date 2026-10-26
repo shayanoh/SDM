@@ -200,6 +200,14 @@ impl EngineState {
         &mut self.samplers
     }
 
+    /// Like `samplers_mut`, without bumping the snapshot generation: for a
+    /// change only the detail graph reads (the full history of an idle item
+    /// sliding toward empty), which is fetched by `speed_histories`, not by
+    /// generation.
+    pub(super) fn samplers_mut_unbumped(&mut self) -> &mut HashMap<Uuid, SpeedSampler> {
+        &mut self.samplers
+    }
+
     pub(super) fn global_sampler(&self) -> &SpeedSampler {
         &self.global_sampler
     }

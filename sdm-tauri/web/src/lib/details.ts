@@ -51,8 +51,10 @@ function addHistories(a: number[], b: number[]): number[] {
 /**
  * Port of `BottomPanel.multipleItemData`: the totals shown for several selected
  * items. An item with no known size is left out of the sums (but counted in the
- * average, as the SwiftUI app divides by the selection size); the first history
- * seeds the speed graph and only running items' histories are added to it.
+ * average, as the SwiftUI app divides by the selection size); every item's
+ * history is added to the speed graph. A stopped or finished item's history
+ * keeps sliding back in time in the engine until it is empty, so adding it
+ * never freezes or overlaps the graphs of the items still running.
  */
 export function summarize(items: DetailItem[]): Summary {
   let speedHistory: number[] = [];
@@ -75,10 +77,7 @@ export function summarize(items: DetailItem[]): Summary {
     activeSegments += item.activeSegments;
     configuredSegments += item.configuredSegments;
     const history = item.detailHistory ?? item.speedHistory;
-    if (speedHistory.length === 0 && history.length > 0)
-      speedHistory = [...history];
-    else if (history.length > 0 && item.state.kind === "running")
-      speedHistory = addHistories(speedHistory, history);
+    if (history.length > 0) speedHistory = addHistories(speedHistory, history);
   }
 
   const states: StateCounts = {

@@ -77,17 +77,33 @@ impl DownloadEngine {
             for (item_id, sampler) in state.samplers() {
                 if running_ids.contains(item_id) || sampler.has_pending_bytes() {
                     to_tick.push(*item_id);
-                } else if sampler.is_active() {
+                } else if sampler.is_active() || sampler.is_decaying() {
                     to_idle.push(*item_id);
                 }
             }
-            if !to_tick.is_empty() || !to_idle.is_empty() {
+            // Sliding zeros into an idle item's full history only matters to
+            // the detail graph; the snapshot generation moves only while the
+            // short window a snapshot reads is still changing.
+            let snapshot_sees_idle = to_idle.iter().any(|item_id| {
+                state
+                    .samplers()
+                    .get(item_id)
+                    .is_some_and(|sampler| sampler.is_active() || sampler.recent_is_decaying())
+            });
+            if !to_tick.is_empty() || snapshot_sees_idle {
                 let samplers = state.samplers_mut();
                 for item_id in &to_tick {
                     if let Some(sampler) = samplers.get_mut(item_id) {
                         sampler.tick();
                     }
                 }
+                for item_id in &to_idle {
+                    if let Some(sampler) = samplers.get_mut(item_id) {
+                        sampler.idle();
+                    }
+                }
+            } else if !to_idle.is_empty() {
+                let samplers = state.samplers_mut_unbumped();
                 for item_id in &to_idle {
                     if let Some(sampler) = samplers.get_mut(item_id) {
                         sampler.idle();

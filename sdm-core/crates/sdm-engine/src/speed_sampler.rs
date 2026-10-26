@@ -33,6 +33,11 @@ pub struct SpeedSampler {
     /// Readable so `DownloadEngine::tick()` can leave an already-idle sampler
     /// untouched instead of calling a no-op `idle()` on it.
     is_active: bool,
+    /// How many of the newest `samples` are zero in a row. An idle sampler
+    /// keeps appending zeros until this covers the whole history, so a
+    /// stopped item's graph slides back in time and empties instead of
+    /// freezing (and overlapping the live graphs it is summed with).
+    trailing_zeros: usize,
 }
 
 impl Default for SpeedSampler {
@@ -61,6 +66,7 @@ impl SpeedSampler {
             recent_length: LiveWindow::ITEM_HISTORY_SAMPLES,
             active_samples: Vec::new(),
             is_active: false,
+            trailing_zeros: 0,
         }
     }
 
@@ -126,6 +132,19 @@ impl SpeedSampler {
         self.is_active
     }
 
+    /// Whether an idle sampler still has non-zero samples in its history, so
+    /// `idle()` still has zeros to slide in. False once the graph is empty.
+    pub fn is_decaying(&self) -> bool {
+        self.trailing_zeros < self.samples.len()
+    }
+
+    /// Whether the window a snapshot reads (`recent_history`) still holds a
+    /// non-zero sample. The full history can keep decaying after this is
+    /// false without any snapshot input changing.
+    pub fn recent_is_decaying(&self) -> bool {
+        self.recent.iter().any(|value| *value != 0.0)
+    }
+
     /// Adds bytes transferred since the last tick.
     ///
     /// # Panics
@@ -167,16 +186,13 @@ impl SpeedSampler {
     /// read — no decay — and appends a zero sample to history so the
     /// sparkline visibly drops rather than freezing at its last value.
     ///
-    /// A no-op if the sampler is already idle. The caller (`DownloadEngine
-    /// ::tick()`) has no way to know it already reported the drop, so it
-    /// calls this every heartbeat for every non-running item indefinitely —
-    /// without this guard, `history` (and therefore this whole value) kept
-    /// changing shape for a full `history_length` worth of ticks after any
-    /// item went idle, which defeated equality-based change detection one
-    /// layer up (comparing telemetry snapshots to decide whether to
-    /// republish, and hence whether a list row needs to re-render at all).
+    /// While the history still holds a non-zero sample, every call slides
+    /// one more zero in, so the graph of a stopped or finished item moves
+    /// back in time until it is empty. A no-op after that. The caller
+    /// (`DownloadEngine::tick()`) skips samplers that are neither active nor
+    /// decaying, so a long-idle item changes nothing a snapshot reads.
     pub fn idle(&mut self) {
-        if !self.is_active {
+        if !self.is_active && !self.is_decaying() {
             return;
         }
         self.is_active = false;
@@ -187,9 +203,15 @@ impl SpeedSampler {
 
     fn append(&mut self, value: f64) {
         self.samples.push(value);
+        if value == 0.0 {
+            self.trailing_zeros += 1;
+        } else {
+            self.trailing_zeros = 0;
+        }
         if self.samples.len() > self.history_length {
             let excess = self.samples.len() - self.history_length;
             self.samples.drain(..excess);
+            self.trailing_zeros = self.trailing_zeros.min(self.samples.len());
         }
         self.recent.push(value);
         if self.recent.len() > self.recent_length {

@@ -423,7 +423,9 @@ mod tests {
             .collect();
         assert_eq!(states, [ItemState::Completed, ItemState::Stopped]);
 
-        for _ in 0..10 {
+        // Long enough for a finished item's short history window to slide
+        // down to zeros; after that nothing a snapshot reads may change.
+        for _ in 0..(crate::snapshot_aggregates::LiveWindow::ITEM_HISTORY_SAMPLES + 10) {
             engine.tick().await;
             engine.snapshot().await;
         }

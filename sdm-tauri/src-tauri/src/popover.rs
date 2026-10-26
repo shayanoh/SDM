@@ -185,6 +185,13 @@ pub fn toggle(app: &AppHandle, anchor: Area) {
     }
 }
 
+/// Closes the popover if it is open.
+pub fn hide(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(LABEL) {
+        let _ = window.hide();
+    }
+}
+
 /// Sends `status` to the popover when it changed and the popover is open;
 /// remembers it either way so the next opening starts with it.
 pub fn push_status(app: &AppHandle, status: &TrayStatus) {

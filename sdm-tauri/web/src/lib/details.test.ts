@@ -75,13 +75,13 @@ describe("summarize (multipleItemData)", () => {
     expect(s.averageFraction).toBeCloseTo(0.5 / 3);
   });
 
-  it("takes the first history as is and adds only running items' histories, aligned at the end", () => {
+  it("adds every item's history, stopped ones included, aligned at the end", () => {
     const s = summarize([
       item({ state: { kind: "stopped" }, speedHistory: [1, 2, 3] }),
       item({ speedHistory: [10, 10] }),
-      item({ state: { kind: "stopped" }, speedHistory: [100, 100, 100] }),
+      item({ state: { kind: "completed" }, speedHistory: [100, 0, 0] }),
     ]);
-    expect(s.speedHistory).toEqual([1, 12, 13]);
+    expect(s.speedHistory).toEqual([101, 12, 13]);
   });
 
   it("prefers the full history the panel asked for", () => {
