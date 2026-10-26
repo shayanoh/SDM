@@ -1,8 +1,7 @@
-//! Benchmark program for the Rust core. It is the twin of
-//! `legacy/SDMKitSwift/Sources/SDMBench/main.swift`: the same two scenarios
-//! with the same parameters, each against the core's own public
-//! [`FakeOrigin`], an in-memory state store and identical [`EngineSettings`].
-//! Run it from `scripts/bench.sh`.
+//! Benchmark program for the Rust core: two scenarios, each against the core's
+//! own public [`FakeOrigin`], an in-memory state store and fixed
+//! [`EngineSettings`]. Run it with
+//! `cargo run --release -p sdm-bench -- transfer|ticks`.
 //!
 //! ```text
 //! sdm-bench transfer   8 items x 256 MB in one package, run to completion
@@ -20,8 +19,8 @@
 //! of one tick.
 //!
 //! `SDM_BENCH_SCALE` (a positive integer, default 1) divides the transfer item
-//! size and the tick count for quick debugging; both programs read it
-//! identically and the recorded run leaves it unset.
+//! size and the tick count for quick debugging; the recorded run leaves it
+//! unset.
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -43,8 +42,8 @@ const CHUNK_SIZE: usize = 64 * 1024;
 /// How often `transfer` looks for completion between ticks.
 const COMPLETION_POLL: Duration = Duration::from_millis(20);
 
-/// Same bytes as the Swift side's `makePayload`: index-derived, so the origin
-/// costs the same to build and any byte can be checked independently.
+/// Index-derived bytes, so the origin costs the same to build every run and any
+/// byte can be checked independently.
 fn make_payload(count: usize) -> Bytes {
     let bytes: Vec<u8> = (0..count)
         .map(|i| (i.wrapping_mul(31).wrapping_add(7) % 251) as u8)

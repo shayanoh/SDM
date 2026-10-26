@@ -206,7 +206,6 @@ fn read_boot_session_id() -> Option<String> {
 /// temporary file and leaves any existing destination untouched.
 pub(crate) fn write_atomically(path: &Path, data: &[u8]) -> io::Result<()> {
     use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
 
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let file_name = path
@@ -222,11 +221,10 @@ pub(crate) fn write_atomically(path: &Path, data: &[u8]) -> io::Result<()> {
     let temp_path = path.with_file_name(temp_name);
 
     let result = (|| {
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o666) // the umask reduces this to the usual 0644
-            .open(&temp_path)?;
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        crate::platform_io::apply_mode(&mut options, 0o666); // the umask reduces this to the usual 0644
+        let mut file = options.open(&temp_path)?;
         file.write_all(data)?;
         crate::sparse_file::fsync(&file)?;
         drop(file);

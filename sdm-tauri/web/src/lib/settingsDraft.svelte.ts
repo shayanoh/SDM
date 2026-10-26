@@ -1,0 +1,59 @@
+import type { SettingsDto } from "../bindings";
+import { defaultSettings, type SettingsValues } from "./settingsModel";
+
+/**
+ * The Settings window's buffered edits: a copy of the stored settings that
+ * nothing writes back until OK. The download folder is deliberately not part
+ * of it, so the window can never send one.
+ */
+export class SettingsDraft {
+  values = $state<SettingsValues>(defaultSettings());
+  #original: SettingsValues = defaultSettings();
+
+  constructor(stored: Partial<SettingsDto>) {
+    this.reset(stored);
+  }
+
+  /** Takes `stored` as both the starting point and the "unchanged" reference. */
+  reset(stored: Partial<SettingsDto>) {
+    const { downloadFolder: _folder, ...rest } = stored;
+    const next: SettingsValues = {
+      ...defaultSettings(),
+      ...stripUndefined(rest),
+    };
+    this.#original = next;
+    this.values = { ...next };
+  }
+
+  /** The settings as last saved; what Cancel goes back to. */
+  get saved(): SettingsValues {
+    return { ...this.#original };
+  }
+
+  /** Records `patch` as already saved (the update channel saves at once). */
+  markSaved(patch: Partial<SettingsValues>) {
+    this.#original = { ...this.#original, ...patch };
+    Object.assign(this.values, patch);
+  }
+
+  get dirty(): boolean {
+    return (Object.keys(this.#original) as (keyof SettingsValues)[]).some(
+      (key) => this.values[key] !== this.#original[key],
+    );
+  }
+
+  set<K extends keyof SettingsValues>(key: K, value: SettingsValues[K]) {
+    this.values[key] = value;
+  }
+
+  /** What OK sends: every value, and a null download folder (keep the stored one). */
+  toDto(): SettingsDto {
+    return { ...this.values, downloadFolder: null };
+  }
+}
+
+function stripUndefined<T extends object>(value: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, v]) => v !== undefined),
+  ) as Partial<T>;
+}

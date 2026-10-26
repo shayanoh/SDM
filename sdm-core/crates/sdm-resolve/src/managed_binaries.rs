@@ -6,21 +6,25 @@ use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+#[cfg(target_os = "macos")]
 use std::time::Duration;
 
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use tokio::sync::watch;
+#[cfg(target_os = "macos")]
 use tokio_util::sync::CancellationToken;
 
 use crate::binary_fetching::{BinaryFetchError, BinaryFetching};
 use crate::binary_locator::is_executable_file;
 use crate::lzfse;
 use crate::managed_binaries_types::{
-    BinariesManifest, CheckOutcome, CheckReason, ManagedBinariesStatus, VendorAsset, YtDlpChannel,
-    YtDlpVersion,
+    BinariesManifest, CheckOutcome, CheckReason, ManagedBinariesStatus, ToolsActivity, VendorAsset,
+    YtDlpChannel, YtDlpVersion, yt_dlp_asset_name,
 };
+use crate::platform_tools::{PlatformTool, UpdatePolicy, VersionSource, platform_tools};
 use crate::process_runner::ProcessRunner;
+use crate::tool_install::install_tool;
 
 /// The future `on_binaries_changed` returns (Swift's `async` closure).
 pub type BinariesChangedFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
@@ -47,11 +51,14 @@ pub struct ManagedBinaries {
 struct Inner {
     bin_directory: PathBuf,
     fetcher: Arc<dyn BinaryFetching>,
+    /// Only the macOS ad-hoc re-signing step runs a process.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     runner: Arc<dyn ProcessRunner>,
     vendor_assets: VendorAssets,
     channel: ChannelSource,
     on_binaries_changed: OnBinariesChanged,
     notify: Notify,
+    platform_tools: Vec<PlatformTool>,
     state: Mutex<State>,
 }
 
@@ -62,6 +69,7 @@ struct State {
     latest_known: Option<String>,
     /// The running check, if any; waiters coalesce onto its result.
     in_flight: Option<watch::Receiver<Option<CheckOutcome>>>,
+    tools_activity: ToolsActivity,
 }
 
 /// Twin of Swift `ManagedBinariesError`. `Display` is the case name because
@@ -91,6 +99,23 @@ struct GitHubRelease {
     tag_name: String,
 }
 
+/// The parts of a GitHub release a platform tool needs.
+#[derive(Deserialize)]
+struct ToolRelease {
+    tag_name: String,
+    published_at: Option<String>,
+    #[serde(default)]
+    assets: Vec<ToolAsset>,
+}
+
+#[derive(Deserialize)]
+struct ToolAsset {
+    name: String,
+    browser_download_url: String,
+    /// `sha256:<hex>`, which GitHub computes for every asset.
+    digest: Option<String>,
+}
+
 impl ManagedBinaries {
     /// 6 h at 1 Hz.
     pub const PRESENT_INTERVAL: i64 = 21_600;
@@ -113,6 +138,7 @@ impl ManagedBinaries {
                 channel: Arc::new(channel),
                 on_binaries_changed: Arc::new(|| Box::pin(async {})),
                 notify: Arc::new(|_| {}),
+                platform_tools: platform_tools(),
                 state: Mutex::new(State::default()),
             }),
         }
@@ -141,6 +167,19 @@ impl ManagedBinaries {
         apply(inner);
     }
 
+    /// Replaces the downloads the platform-tool step keeps installed (the
+    /// default is the pinned table for this OS). For tests.
+    /// Builder-style: call before the first use.
+    pub fn with_platform_tools(mut self, tools: Vec<PlatformTool>) -> Self {
+        self.configure(|inner| inner.platform_tools = tools);
+        self
+    }
+
+    /// What the platform-tool step is doing right now.
+    pub fn tools_activity(&self) -> ToolsActivity {
+        self.inner.state.lock().unwrap().tools_activity.clone()
+    }
+
     // MARK: - Bundled inflation
 
     /// Decode any bundled blob whose version differs from what the manifest
@@ -165,7 +204,12 @@ impl ManagedBinaries {
     /// elapsed and none is running. Called ~1 Hz by the app.
     pub async fn tick(&self) {
         let inner = &self.inner;
-        let present = is_executable_file(&inner.yt_dlp_path());
+        // A failed tool download retries on the short cadence too.
+        let tools_failed = matches!(
+            inner.state.lock().unwrap().tools_activity,
+            ToolsActivity::Failed(_)
+        );
+        let present = is_executable_file(&inner.yt_dlp_path()) && !tools_failed;
         let interval = if present {
             Self::PRESENT_INTERVAL
         } else {
@@ -247,7 +291,8 @@ impl Drop for ClearInFlight {
 
 impl Inner {
     fn yt_dlp_path(&self) -> PathBuf {
-        self.bin_directory.join("yt-dlp")
+        self.bin_directory
+            .join(crate::binary_locator::executable_name("yt-dlp"))
     }
 
     fn manifest_path(&self) -> PathBuf {
@@ -285,7 +330,111 @@ impl Inner {
         }
     }
 
+    /// The yt-dlp check, then the platform tools (a yt-dlp failure must not
+    /// skip them, and a tool failure must not hide yt-dlp's outcome).
     async fn perform_check(&self, reason: CheckReason) -> CheckOutcome {
+        let outcome = self.perform_yt_dlp_check(reason).await;
+        self.ensure_platform_tools().await;
+        outcome
+    }
+
+    /// Installs each platform tool that is missing or out of date from its
+    /// release's newest asset, checked against the digest the release
+    /// publishes. A failure is recorded and retried by the next check.
+    async fn ensure_platform_tools(&self) {
+        let mut changed = false;
+        let mut failure: Option<String> = None;
+        for tool in &self.platform_tools {
+            let manifest = self.load_manifest();
+            let present = tool
+                .members
+                .iter()
+                .all(|m| is_executable_file(&self.bin_directory.join(&m.file_name)));
+            let recorded = manifest.version_for(&tool.name).map(str::to_owned);
+            // Nothing to ask the network when the file is there and never replaced.
+            if present && tool.policy == UpdatePolicy::IfMissing {
+                continue;
+            }
+            self.state.lock().unwrap().tools_activity = ToolsActivity::Fetching(tool.name.clone());
+            match self.fetch_and_install(tool, present, recorded).await {
+                Ok(Some(version)) => {
+                    let mut manifest = self.load_manifest();
+                    match tool.name.as_str() {
+                        "ffmpeg" => manifest.ffmpeg_version = Some(version),
+                        "qjs" => manifest.qjs_version = Some(version),
+                        _ => {}
+                    }
+                    manifest.last_error = None;
+                    let _ = self.save_manifest(&manifest);
+                    changed = true;
+                }
+                Ok(None) => {}
+                Err(message) => {
+                    let message = format!("fetch {}: {message}", tool.name);
+                    let mut manifest = self.load_manifest();
+                    manifest.last_error = Some(message.clone());
+                    let _ = self.save_manifest(&manifest);
+                    failure = Some(message);
+                }
+            }
+        }
+        self.state.lock().unwrap().tools_activity = match failure {
+            Some(message) => ToolsActivity::Failed(message),
+            None => ToolsActivity::Idle,
+        };
+        if changed {
+            (self.on_binaries_changed)().await;
+        }
+    }
+
+    /// Reads the release, and installs its asset unless the tool is present at
+    /// that version. Returns the installed version, or `None` if already current.
+    async fn fetch_and_install(
+        &self,
+        tool: &PlatformTool,
+        present: bool,
+        recorded: Option<String>,
+    ) -> Result<Option<String>, String> {
+        let api = url::Url::parse(&tool.release_api).map_err(|e| e.to_string())?;
+        let info = self.fetcher.data(&api).await.map_err(|e| e.to_string())?;
+        let release: ToolRelease =
+            serde_json::from_slice(&info).map_err(|e| format!("release info: {e}"))?;
+        let version = match tool.version_source {
+            VersionSource::Tag => release.tag_name.clone(),
+            VersionSource::PublishedDate => release
+                .published_at
+                .as_deref()
+                .and_then(|at| at.get(..10))
+                .unwrap_or(&release.tag_name)
+                .to_owned(),
+        };
+        if present && recorded.as_deref() == Some(version.as_str()) {
+            return Ok(None);
+        }
+        let asset = release
+            .assets
+            .iter()
+            .find(|a| a.name == tool.asset_name)
+            .ok_or_else(|| format!("the release has no {}", tool.asset_name))?;
+        let sha256 = asset
+            .digest
+            .as_deref()
+            .and_then(|d| d.strip_prefix("sha256:"))
+            .ok_or_else(|| format!("the release has no checksum for {}", tool.asset_name))?
+            .to_owned();
+        let url = url::Url::parse(&asset.browser_download_url).map_err(|e| e.to_string())?;
+        let bytes = self.fetcher.data(&url).await.map_err(|e| e.to_string())?;
+        let tool = tool.clone();
+        let bin = self.bin_directory.clone();
+        // Hashing and unpacking a 200 MB archive must not block an async worker.
+        tokio::task::spawn_blocking(move || install_tool(&tool, &sha256, &bytes, &bin))
+            .await
+            .map_err(|e| e.to_string())?
+            .map_err(|e| e.to_string())?;
+        Ok(Some(version))
+    }
+
+    async fn perform_yt_dlp_check(&self, reason: CheckReason) -> CheckOutcome {
         let _ = reason; // Swift only logs it.
         let channel = (self.channel)();
         let mut manifest = self.load_manifest();
@@ -372,38 +521,41 @@ impl Inner {
         let bytes = self.fetcher.data(&channel.asset_url(tag)).await?;
         let sums_bytes = self.fetcher.data(&channel.sums_url(tag)).await?;
         let sums = String::from_utf8_lossy(&sums_bytes);
-        verify(&bytes, &sums, "yt-dlp_macos")?;
+        verify(&bytes, &sums, yt_dlp_asset_name())?;
 
         let yt_dlp = self.yt_dlp_path();
         let mut staging_name = OsString::from(yt_dlp.as_os_str());
         staging_name.push(".new");
         let staging = PathBuf::from(staging_name);
         self.write_executable(&bytes, &staging)?;
-        // Swift `try?`: a failed or missing xattr/codesign is not fatal.
-        let cancel = CancellationToken::new();
-        let _ = self
-            .runner
-            .run(
-                Path::new("/usr/bin/xattr"),
-                &["-c".to_owned(), staging.to_string_lossy().into_owned()],
-                Duration::from_secs(20),
-                &cancel,
-            )
-            .await;
-        let _ = self
-            .runner
-            .run(
-                Path::new("/usr/bin/codesign"),
-                &[
-                    "-s".to_owned(),
-                    "-".to_owned(),
-                    "--force".to_owned(),
-                    staging.to_string_lossy().into_owned(),
-                ],
-                Duration::from_secs(30),
-                &cancel,
-            )
-            .await;
+        #[cfg(target_os = "macos")]
+        {
+            // Swift `try?`: a failed or missing xattr/codesign is not fatal.
+            let cancel = CancellationToken::new();
+            let _ = self
+                .runner
+                .run(
+                    Path::new("/usr/bin/xattr"),
+                    &["-c".to_owned(), staging.to_string_lossy().into_owned()],
+                    Duration::from_secs(20),
+                    &cancel,
+                )
+                .await;
+            let _ = self
+                .runner
+                .run(
+                    Path::new("/usr/bin/codesign"),
+                    &[
+                        "-s".to_owned(),
+                        "-".to_owned(),
+                        "--force".to_owned(),
+                        staging.to_string_lossy().into_owned(),
+                    ],
+                    Duration::from_secs(30),
+                    &cancel,
+                )
+                .await;
+        }
         promote(&staging, &yt_dlp)?;
 
         manifest.yt_dlp_version = Some(tag.to_owned());
@@ -414,13 +566,17 @@ impl Inner {
     }
 
     fn write_executable(&self, data: &[u8], path: &Path) -> std::io::Result<()> {
-        use std::os::unix::fs::PermissionsExt;
         fs::create_dir_all(&self.bin_directory)?;
         if path.exists() {
             fs::remove_file(path)?;
         }
         write_atomically(path, data)?;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o755))
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(path, fs::Permissions::from_mode(0o755))?;
+        }
+        Ok(())
     }
 
     fn load_manifest(&self) -> BinariesManifest {
@@ -467,9 +623,12 @@ fn verify(bytes: &[u8], sums: &str, filename: &str) -> Result<(), ManagedBinarie
 /// Swift `replaceItemAt` / `moveItem`: on POSIX, `rename(2)` replaces an
 /// existing destination atomically, so one call covers both branches.
 fn promote(staging: &Path, destination: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
     fs::rename(staging, destination)?;
-    let _ = fs::set_permissions(destination, fs::Permissions::from_mode(0o755));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(destination, fs::Permissions::from_mode(0o755));
+    }
     Ok(())
 }
 

@@ -1,0 +1,17 @@
+[package]
+name = "sdm-browser"
+edition.workspace = true
+version.workspace = true
+publish.workspace = true
+
+[dependencies]
+sdm-resolve = { version = "4.0.0", path = "../sdm-resolve" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+url = "2.5.8"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tempfile = "3.27.0"

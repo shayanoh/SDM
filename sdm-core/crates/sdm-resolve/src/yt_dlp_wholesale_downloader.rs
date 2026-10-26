@@ -8,8 +8,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::yt_dlp_resolver::suffix_chars;
 use crate::{
-    BinaryLocator, Classifier, CookieSource, ProcessRunError, ProcessRunner, SiteRegistry,
-    WholesaleProgressParser,
+    BinaryLocator, Classifier, CookieLease, CookieProvider, CookieSource, ProcessRunError,
+    ProcessRunner, SiteRegistry, WholesaleProgressParser,
 };
 
 type CookieSourceFn = Arc<dyn Fn() -> CookieSource + Send + Sync>;
@@ -24,6 +24,7 @@ pub struct YtDlpWholesaleDownloader {
     runner: Arc<dyn ProcessRunner>,
     locator: Arc<BinaryLocator>,
     cookie_source: CookieSourceFn,
+    cookie_provider: Option<CookieProvider>,
     extra_arguments: ExtraArgumentsFn,
     timeout: Duration,
 }
@@ -41,9 +42,17 @@ impl YtDlpWholesaleDownloader {
             runner,
             locator,
             cookie_source,
+            cookie_provider: None,
             extra_arguments,
             timeout: Duration::from_secs(7200),
         }
+    }
+
+    /// Use `provider`'s arguments in place of the cookie source's; the lease
+    /// is held until the yt-dlp run ends.
+    pub fn with_cookie_provider(mut self, provider: CookieProvider) -> Self {
+        self.cookie_provider = Some(provider);
+        self
     }
 
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
@@ -107,7 +116,11 @@ impl WholesaleDownloader for YtDlpWholesaleDownloader {
         if let Some(pattern) = page_url.as_url().and_then(SiteRegistry::match_url) {
             arguments.extend(pattern.extra_args.iter().cloned());
         }
-        arguments.extend((self.cookie_source)().yt_dlp_arguments());
+        let lease = match &self.cookie_provider {
+            Some(provider) => provider(),
+            None => CookieLease::plain((self.cookie_source)().yt_dlp_arguments()),
+        };
+        arguments.extend(lease.arguments().iter().cloned());
         arguments.extend((self.extra_arguments)());
         arguments.push(page_url.as_str().to_string());
 

@@ -7,6 +7,7 @@ mod contrast_ratio;
 mod download_item;
 mod download_package;
 mod file_component;
+pub mod filename_rules;
 mod link_resolver;
 mod media_format;
 mod priority;
@@ -27,6 +28,7 @@ pub use contrast_ratio::ContrastRatio;
 pub use download_item::DownloadItem;
 pub use download_package::DownloadPackage;
 pub use file_component::{Assembly, ComponentError, ComponentOrigin, FileComponent};
+pub use filename_rules::windows_safe_name;
 pub use link_resolver::{LinkResolver, RefreshedFormat, ResolveError};
 pub use media_format::{
     AudioCodec, MediaContainer, MediaDelivery, MediaFormat, MediaKind, VideoCodec,

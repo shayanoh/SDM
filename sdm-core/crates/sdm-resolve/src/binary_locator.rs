@@ -1,6 +1,4 @@
 use std::collections::HashMap;
-use std::ffi::CString;
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -28,16 +26,22 @@ pub struct BinaryLocator {
 
 impl BinaryLocator {
     pub fn default_search_paths() -> Vec<PathBuf> {
-        let home_bin = match std::env::home_dir() {
-            Some(home) => home.join(".local/bin"),
-            None => PathBuf::from("~/.local/bin"),
-        };
-        vec![
-            PathBuf::from("/opt/homebrew/bin"),
-            PathBuf::from("/usr/local/bin"),
-            PathBuf::from("/usr/bin"),
-            home_bin,
-        ]
+        #[cfg_attr(windows, allow(unused_mut))]
+        let mut paths = Vec::new();
+        #[cfg(unix)]
+        {
+            paths.push(PathBuf::from("/opt/homebrew/bin"));
+            paths.push(PathBuf::from("/usr/local/bin"));
+            paths.push(PathBuf::from("/usr/bin"));
+            paths.push(match std::env::home_dir() {
+                Some(home) => home.join(".local/bin"),
+                None => PathBuf::from("~/.local/bin"),
+            });
+        }
+        // On Windows nothing is searched by default: the managed `bin/` and
+        // the Settings overrides are the sources (tools are not installed in
+        // fixed system locations there).
+        paths
     }
 
     /// Default search paths and the real file-system executable check; use
@@ -101,7 +105,7 @@ impl BinaryLocator {
             return Some(path.clone());
         }
         for directory in &self.search_paths {
-            let candidate = directory.join(name);
+            let candidate = directory.join(executable_name(name));
             if (self.is_executable)(&candidate) {
                 return Some(candidate);
             }
@@ -116,12 +120,73 @@ impl Default for BinaryLocator {
     }
 }
 
-/// Swift `FileManager.isExecutableFile(atPath:)`: the path exists and the
-/// current user may execute it (`access(2)` with `X_OK`).
+/// The on-disk file name for the tool `name`: `name` on Unix, `name.exe` on
+/// Windows (unless it already has the suffix).
+pub(crate) fn executable_name(name: &str) -> String {
+    if cfg!(windows) && !name.to_ascii_lowercase().ends_with(".exe") {
+        format!("{name}.exe")
+    } else {
+        name.to_owned()
+    }
+}
+
+/// The path is a file and the current user may execute it: the exec bits on
+/// Unix (`access(2)` with `X_OK`, as `FileManager.isExecutableFile` does), the
+/// `.exe`/`.bat`/`.cmd` suffix on Windows.
 pub(crate) fn is_executable_file(path: &Path) -> bool {
-    let Ok(c_path) = CString::new(path.as_os_str().as_bytes()) else {
+    let Ok(metadata) = std::fs::metadata(path) else {
         return false;
     };
-    // SAFETY: `c_path` is a valid NUL-terminated string that outlives the call.
-    unsafe { libc::access(c_path.as_ptr(), libc::X_OK) == 0 }
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let Ok(c_path) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+            return false;
+        };
+        // SAFETY: `c_path` is a valid NUL-terminated string that outlives the call.
+        unsafe { libc::access(c_path.as_ptr(), libc::X_OK) == 0 }
+    }
+    #[cfg(windows)]
+    {
+        path.extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| matches!(e.to_ascii_lowercase().as_str(), "exe" | "bat" | "cmd"))
+    }
+}
+
+#[cfg(test)]
+mod portability_tests {
+    use super::*;
+
+    #[test]
+    fn executable_name_adds_exe_only_on_windows() {
+        if cfg!(windows) {
+            assert_eq!(executable_name("yt-dlp"), "yt-dlp.exe");
+            assert_eq!(executable_name("ffmpeg.exe"), "ffmpeg.exe");
+        } else {
+            assert_eq!(executable_name("yt-dlp"), "yt-dlp");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_without_the_exec_bit_is_not_executable() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tool");
+        std::fs::write(&path, b"#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(!is_executable_file(&path));
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(is_executable_file(&path));
+    }
+
+    #[test]
+    fn a_directory_is_never_executable() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!is_executable_file(dir.path()));
+    }
 }

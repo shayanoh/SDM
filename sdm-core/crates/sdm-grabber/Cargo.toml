@@ -11,8 +11,8 @@ linkify = "0.11.0"
 percent-encoding = "2.3.2"
 regex = "1.13.1"
 reqwest = { version = "0.13.5", default-features = false, features = ["rustls", "http2", "system-proxy", "stream", "cookies"] }
-sdm-core = { version = "0.1.0", path = "../sdm-core" }
-sdm-resolve = { version = "0.1.0", path = "../sdm-resolve" }
+sdm-core = { version = "4.0.0", path = "../sdm-core" }
+sdm-resolve = { version = "4.0.0", path = "../sdm-resolve" }
 thiserror = "2.0.21"
 tokio = { version = "1.53.2", features = ["rt", "sync"] }
 tracing = "0.1.44"

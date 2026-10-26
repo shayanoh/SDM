@@ -1,109 +1,61 @@
 # SDM — Todo
 
-The downloads-UI overhaul and all five phases of the design
-(`docs/superpowers/specs/2026-08-03-sdm-design.md` + the Phase 5 spec
-`docs/superpowers/specs/2026-09-02-phase-5-youtube-resolver-design.md`)
-are implemented and merged to `main`. 401 tests, both targets build.
+What is still open. The status of everything built, and a dated log, is in
+[docs/tauri-roadmap.md](docs/tauri-roadmap.md); its "small ones" list (spec 5
+leftovers: the tray icon on a second monitor with another DPI, a vertical
+taskbar edge, `Info` banners such as "yt-dlp updated to …" that are never
+posted, a stored theme id that no longer exists, hand-edited out-of-range
+numbers that reset instead of clamping) is open too.
 
-The deferred items below were **all read and reviewed on 2026-09-02** —
-sourced from the Phase 5 spec §2 "Deferred" and the Part 1–5 plan
-self-reviews under `docs/superpowers/plans/`. Each was either kept as-is
-(see "Decided — no change") or turned into a todo item here.
+The items below came from the Swift app's backlog (read and reviewed
+2026-09-02) and were carried over when the Rust version replaced it. Items
+that only made sense for the Swift code (`URLSessionTransport`, AppKit hooks)
+were dropped; the rest were **not re-checked against the Rust port**, so look
+at the Rust code before treating one as a confirmed bug.
 
----
+## Todo
 
-## Todo (priority order)
+- [ ] **Per-component details breakout.** Report per-component url / part-file
+  path / size / progress / error in the engine snapshot, and render the details
+  panel of a muxed item as two rows (video, audio) instead of the single "Video
+  + audio, muxed with ffmpeg" line. *(Spec §5.3 / §9.3.)*
 
-- [ ] **1. Per-component details breakout.** Add `ItemSnapshot.components:
-  [ComponentSnapshot]` (per-component url / part-file path / size / progress /
-  error) and render the bottom details panel of a muxed item as two rows
-  (video, audio) instead of the single "Video + audio, muxed with ffmpeg"
-  line. Needs an engine `snapshot()` addition. *(Spec §5.3 / §9.3; deferred
-  through Parts 3–5.)*
+- [ ] **Proactive URL refresh.** `googlevideo` URLs expire after a few hours.
+  Refresh-on-403 already works. Add: when resuming a resolved item whose stored
+  URL is older than about 5 h, refresh it *before* spawning workers rather than
+  eating one wasted `403`. *(Spec §2 / §7.3(c).)*
 
-- [x] **2. HLS/DASH wholesale fallback.** DONE 2026-09-03 — see
-  `docs/superpowers/specs/2026-09-03-multi-site-resolver-design.md` §6 and its
-  plan. `FormatSelector` returns a wholesale `FormatChoice` when no direct
-  format fits; `WholesaleComponentTask` (engine) drives an injected
-  `YtDlpWholesaleDownloader` (resolve) with progress parsed from yt-dlp
-  stdout, progress kept as a synthesized contiguous `RangeSet`. Delivered
-  alongside the multi-site registry (`SiteRegistry`, ~50 sites) and
-  generalized playlist handling. **Update 2026-09-03:** wholesale downloads
-  are now resumable via yt-dlp's fragment-level `--continue` and become
-  preemptible once fragmented progress confirms the native downloader is in
-  use — see `docs/superpowers/specs/2026-09-03-wholesale-resume-design.md`.
+- [ ] **Retry policy** (`sdm-engine/src/retry_policy.rs`):
+  - An error type the classifier does not know falls through to "transient"
+    with no reason, so an unrecognized *permanent* failure retries to the
+    attempt cap. Decide the classification and the reason text.
+  - Retry backoff "jitter" was not jitter in the Swift code: the delay was
+    deterministic per attempt number, so concurrent retries stayed in lockstep
+    (the thundering herd spec §6.4 asks jitter to prevent). Check the Rust
+    port; the likely fix is per-client seeded randomness with a test-injected
+    seed.
+- [ ] **Engine bookkeeping:** per-item counters (failed attempts, retry hold
+  ticks, attempt start bytes, checkpoint failures) were never pruned when an
+  item is removed; the debounced state flush clears its tick counter before the
+  write, so a failed write is not retried until an unrelated change re-arms it;
+  `SparseFile::write` does not check that the file is open.
 
-- [ ] **3. Proactive URL refresh.** `googlevideo` URLs expire after a few
-  hours. Refresh reactively-on-403 already works (`URLRefreshTests`). Add:
-  when resuming a `.resolved` item whose stored URL is older than ~5h,
-  refresh it *before* spawning workers rather than eating one wasted `403`.
-  *(Spec §2 / §7.3(c).)*
+## Decided — no change needed
 
-- [x] **4. yt-dlp version surfacing / self-update.** DONE 2026-09-03 — see
-  `docs/superpowers/specs/2026-09-03-managed-binaries-design.md`. Settings →
-  YouTube → Components shows installed + latest version, channel picker, and
-  a "Check now" button. Self-update is our own version check + SHA-256
-  download (not `yt-dlp -U`).
-
-- [x] **5. Bundle yt-dlp / ffmpeg + self-updating.** DONE 2026-09-03 —
-  `SDMResolve/ManagedBinaries.swift` + `ManagedBinariesController`. ffmpeg and
-  QuickJS-ng ship as LZFSE blobs (`scripts/vendor-binaries.sh`, Git LFS) and
-  inflate on launch; yt-dlp is downloaded and self-updated. One shared
-  `BinaryLocator` (managed-dir only) is plumbed through `EngineController` and
-  `GrabberController`. The deferred "yt-dlp path / ffmpeg path" Settings
-  file-pickers (spec §4.5 / §9.4) are **superseded** — resolution is
-  managed-only by design.
-
-- [ ] **6. Overdue Phase 1 decisions** (from
-  `memory/sdm-phase-1-followups.md`, owed since before Phase 3):
-  - [ ] `RetryPolicy.classify(any Error)` falls through to `.transient` for
-    any type outside `TransportError`/`DownloadError`, with no reason string —
-    an unrecognized *permanent* failure retries to the attempt cap. Decide the
-    classification + reason.
-  - [ ] Retry backoff "jitter" is not jitter: the delay is deterministic per
-    attempt number, so concurrent retries stay in lockstep — the thundering
-    herd spec §6.4 asks jitter to prevent. Likely fix: per-client seeded
-    randomness with a test-injected seed.
-  - [ ] `URLSessionTransport` continuation race: `setResponseContinuation`
-    can re-insert an entry nothing will resume if `didCompleteWithError` wins
-    the race against `withCheckedThrowingContinuation`; `fetch()` then never
-    returns (bounded only by the 5 s `shutdownBlocking` backstop). Fix with a
-    terminal marker on the entry.
-  - [ ] `DownloadEngine.flushIfDebounceElapsed` clears
-    `ticksSincePendingChange` before awaiting `flush()`; `JSONStateStore`
-    keeps `pending` on a failed write, but nothing re-arms the debounce
-    window until an unrelated change occurs.
-  - [ ] Per-item bookkeeping (`failedAttempts`, `retryHoldTicks`,
-    `attemptStartBytes`, `checkpointFailures`) is never pruned — now matters,
-    an item-removal API exists.
-  - [ ] `URLSessionTransport` uses one serialized delegate `OperationQueue`
-    for every transfer (up to maxConcurrent × segments).
-  - [ ] `SparseFile.write()` does not check `isClosed` (pre-existing).
-  - [ ] `applicationWillTerminate` hook has no automated coverage (AppKit
-    offers no test seam) — needs one manual ⌘Q-mid-download check against the
-    resume criterion.
-
----
-
-## Decided — read, reviewed, no change needed (2026-09-02)
-
-- **Distinct `ItemState.assembling` case.** The spec (§7.2) wanted a real
-  enum case for the mux step; it is instead represented as `state == .running`
-  plus `ItemSnapshot.isAssembling == true`. Functionally identical — the item
-  holds its scheduler slot, is never rescheduled during the mux, and the UI
-  shows "Assembling…" and a `wand.and.stars` icon. A real enum case would
-  touch ~8 exhaustive `switch` statements for zero behavior change.
-  **Approved as-is.**
-
-- **Per-component connection-demand precision.** A 2-component muxed YouTube
-  item reports connection demand keyed by item (one demand, host from
-  component 0), so it counts as one download against the 8-per-host cap
-  rather than two. The per-host cap is politeness / rate-limit avoidance, not
-  correctness. **Approved as-is.**
-
----
+- **A distinct `assembling` item state.** The mux step is `running` plus an
+  `is_assembling` flag instead of its own enum case. Functionally identical
+  (the item keeps its scheduler slot, is not rescheduled during the mux, and
+  the UI shows "Assembling…"). Approved as is.
+- **Per-component connection demand.** A two-component muxed item reports one
+  connection demand (host from component 0), so it counts as one download
+  against the per-host cap. The cap is politeness, not correctness. Approved
+  as is.
 
 ## Wishlist (not planned)
 
 - SponsorBlock, chapter markers, subtitle download, thumbnail embedding,
   re-encoding — yt-dlp post-processing features, never in scope. *(Spec §2.)*
+- Developer ID signing and notarization for the macOS build, and Windows code
+  signing (decide before the first distributed release).
+- Cookies for Edge and Brave (they still go through yt-dlp's own reader, which
+  has the same encrypted-database problem on Windows).

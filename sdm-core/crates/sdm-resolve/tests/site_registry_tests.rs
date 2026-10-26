@@ -75,3 +75,80 @@ fn extra_args_are_empty_by_default() {
             .is_empty()
     );
 }
+
+#[test]
+fn cookie_domain_matching_covers_subdomains_and_parents_but_not_lookalikes() {
+    let table = [
+        (".youtube.com", true),
+        ("music.youtube.com", true),
+        ("YOUTUBE.COM", true),
+        ("accounts.google.com", true),
+        (".google.com", true),
+        ("www.bbc.co.uk", true),
+        (".bbc.co.uk", true),
+        ("notyoutube.com", false),
+        ("youtube.com.evil.net", false),
+        ("evilgoogle.com", false),
+        (".com", false),
+        ("", false),
+        (".", false),
+    ];
+    for (domain, expected) in table {
+        assert_eq!(
+            SiteRegistry::cookie_domain_matches(domain),
+            expected,
+            "{domain:?}"
+        );
+    }
+}
+
+#[test]
+fn cookie_domains_are_lowercase_sorted_and_unique() {
+    let domains = SiteRegistry::cookie_domains();
+    let mut expected = domains.clone();
+    expected.sort();
+    expected.dedup();
+    assert_eq!(domains, expected);
+    assert!(
+        domains
+            .iter()
+            .all(|d| *d == d.to_lowercase() && !d.starts_with('.'))
+    );
+    assert!(domains.contains(&"google.com".to_string()));
+}
+
+#[test]
+fn the_version_is_a_stable_hash_of_the_list() {
+    // FNV-1a 64 over the domains joined with '\n'.
+    assert_eq!(
+        SiteRegistry::version_of(&["a.com".to_string(), "b.com".to_string()]),
+        "b097590bde032b00"
+    );
+    assert_ne!(
+        SiteRegistry::version_of(&["a.com".to_string()]),
+        SiteRegistry::version_of(&["a.com".to_string(), "b.com".to_string()])
+    );
+    assert_eq!(SiteRegistry::cookie_domains_version().len(), 16);
+}
+
+/// Adding a site without cookie domains must fail the suite: every host a
+/// pattern matches is covered by that same pattern's `cookie_domains`.
+#[test]
+fn every_registry_host_is_covered_by_its_own_cookie_domains() {
+    use sdm_resolve::HostMatch;
+    for pattern in SiteRegistry::patterns() {
+        for host in &pattern.hosts {
+            let host = match host {
+                HostMatch::Exact(h) | HostMatch::Suffix(h) => h.trim_start_matches('.'),
+            };
+            assert!(
+                pattern
+                    .cookie_domains
+                    .iter()
+                    .any(|d| host == d || host.ends_with(&format!(".{d}"))),
+                "{host} has no cookie domain in {:?}",
+                pattern.cookie_domains
+            );
+        }
+    }
+}

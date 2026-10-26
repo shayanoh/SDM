@@ -55,3 +55,22 @@ async fn sniff_skipped_when_status_is_not_successful() {
     })
     .await;
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_deep_sniff_source_overrides_the_flag_on_every_probe() {
+    within(async {
+        let origin = origin_with(200, vec![0x50, 0x4B, 0x03, 0x04]);
+        let on = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flag = Arc::clone(&on);
+        let prober = LinkProber::new(origin.clone(), true)
+            .with_deep_sniff_source(move || flag.load(std::sync::atomic::Ordering::SeqCst));
+
+        let off = prober.probe(&su(URL)).await;
+        assert_eq!(off.sniffed_signature, None, "the source says off");
+
+        on.store(true, std::sync::atomic::Ordering::SeqCst);
+        let sniffed = prober.probe(&su(URL)).await;
+        assert_eq!(sniffed.sniffed_signature, Some(FileSignature::Zip));
+    })
+    .await;
+}

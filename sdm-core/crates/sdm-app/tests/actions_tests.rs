@@ -1,0 +1,447 @@
+mod support;
+
+use sdm_app::AppError;
+use sdm_app::protocol::{ItemStateDto, StructureItem, StructurePackage};
+use sdm_engine::{FakeOrigin, FakeOriginBehavior};
+use support::*;
+
+/// The packages of the newest structure the sink received.
+fn packages(h: &Harness) -> Vec<StructurePackage> {
+    h.sink
+        .patches()
+        .iter()
+        .rev()
+        .find_map(|p| p.structure.clone())
+        .expect("a structure patch")
+        .packages
+}
+
+fn items(h: &Harness) -> Vec<StructureItem> {
+    packages(h).into_iter().flat_map(|p| p.items).collect()
+}
+
+fn state_of(h: &Harness, id: &str) -> ItemStateDto {
+    items(h)
+        .into_iter()
+        .find(|i| i.id == id)
+        .unwrap_or_else(|| panic!("no item {id}"))
+        .state
+}
+
+/// Adds one URL per name and returns the item ids in the same order.
+async fn add(h: &Harness, names: &[&str]) -> Vec<String> {
+    let mut ids = Vec::new();
+    for name in names {
+        h.app
+            .add_url(&format!("https://example.com/{name}"), None)
+            .await
+            .unwrap();
+        let id = items(h)
+            .into_iter()
+            .find(|i| i.filename == *name)
+            .unwrap_or_else(|| panic!("no item named {name}"))
+            .id;
+        ids.push(id);
+    }
+    ids
+}
+
+async fn tick_until_state(h: &Harness, id: &str, wanted: ItemStateDto) -> bool {
+    let id = id.to_owned();
+    tick_until(&h.app, 600, || {
+        items(h).iter().any(|i| i.id == id && i.state == wanted)
+    })
+    .await
+}
+
+/// A payload large enough that an item is still running when a test looks.
+const BIG: usize = 30_000_000;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn stop_items_then_start_items_round_trips_state() {
+    let h = harness(FakeOrigin::new(payload(BIG))).await;
+    let ids = add(&h, &["a.bin", "b.bin"]).await;
+
+    h.app.stop_items(&ids).await.unwrap();
+    for id in &ids {
+        assert_eq!(state_of(&h, id), ItemStateDto::Stopped);
+    }
+    h.app.start_items(&ids).await.unwrap();
+    for id in &ids {
+        assert!(
+            matches!(
+                state_of(&h, id),
+                ItemStateDto::Queued | ItemStateDto::Running
+            ),
+            "{:?}",
+            state_of(&h, id)
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_bad_id_rejects_the_whole_batch() {
+    let h = harness(FakeOrigin::new(payload(BIG))).await;
+    let ids = add(&h, &["a.bin"]).await;
+    let before = state_of(&h, &ids[0]);
+
+    let result = h.app.stop_items(&[ids[0].clone(), "nope".to_owned()]).await;
+
+    assert!(matches!(result, Err(AppError::InvalidArgument { .. })));
+    assert_eq!(state_of(&h, &ids[0]), before, "nothing may change");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn duplicate_ids_are_acted_on_once() {
+    let h = harness(FakeOrigin::new(payload(BIG))).await;
+    let ids = add(&h, &["a.bin"]).await;
+    h.app
+        .stop_items(&[ids[0].clone(), ids[0].clone()])
+        .await
+        .unwrap();
+    assert_eq!(state_of(&h, &ids[0]), ItemStateDto::Stopped);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn set_items_enabled_false_marks_items_disabled() {
+    let h = harness(FakeOrigin::new(payload(BIG))).await;
+    let ids = add(&h, &["a.bin", "b.bin"]).await;
+
+    h.app.set_items_enabled(&ids, false).await.unwrap();
+    assert!(items(&h).iter().all(|i| !i.is_enabled));
+    assert!(items(&h).iter().all(|i| i.state == ItemStateDto::Stopped));
+
+    h.app.set_items_enabled(&ids, true).await.unwrap();
+    assert!(items(&h).iter().all(|i| i.is_enabled));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn remove_items_without_files_keeps_the_file_on_disk() {
+    let h = harness(FakeOrigin::new(payload(3000))).await;
+    let ids = add(&h, &["keep.bin"]).await;
+    assert!(tick_until_state(&h, &ids[0], ItemStateDto::Completed).await);
+
+    h.app.remove_items(&ids, false).await.unwrap();
+
+    assert!(items(&h).is_empty());
+    assert!(
+        h.downloads
+            .path()
+            .join("keep.bin")
+            .join("keep.bin")
+            .exists()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn remove_items_with_files_trashes_the_file() {
+    let h = harness(FakeOrigin::new(payload(3000))).await;
+    let ids = add(&h, &["gone.bin"]).await;
+    assert!(tick_until_state(&h, &ids[0], ItemStateDto::Completed).await);
+
+    h.app.remove_items(&ids, true).await.unwrap();
+
+    assert!(items(&h).is_empty());
+    assert!(
+        !h.downloads
+            .path()
+            .join("gone.bin")
+            .join("gone.bin")
+            .exists()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reset_items_discards_a_stopped_items_progress() {
+    let h = harness(FakeOrigin::new(payload(3000))).await;
+    let ids = add(&h, &["r.bin"]).await;
+    assert!(tick_until_state(&h, &ids[0], ItemStateDto::Completed).await);
+
+    h.app.reset_items(&ids).await.unwrap();
+
+    assert!(
+        !h.downloads.path().join("r.bin").join("r.bin").exists(),
+        "reset trashes the finished file"
+    );
+    assert_ne!(state_of(&h, &ids[0]), ItemStateDto::Completed);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reset_items_skips_a_running_item() {
+    let h = harness(FakeOrigin::new(payload(BIG))).await;
+    let ids = add(&h, &["run.bin"]).await;
+    assert!(tick_until_state(&h, &ids[0], ItemStateDto::Running).await);
+
+    h.app.reset_items(&ids).await.unwrap();
+
+    h.app.tick().await.unwrap();
+    assert_eq!(state_of(&h, &ids[0]), ItemStateDto::Running);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn retry_items_restarts_a_failed_item() {
+    let origin = FakeOrigin::with_behavior(
+        payload(3000),
+        FakeOriginBehavior {
+            status_override: Some(404),
+            ..FakeOriginBehavior::default()
+        },
+    );
+    let h = harness(origin.clone()).await;
+    let ids = add(&h, &["bad.bin"]).await;
+    assert!(
+        tick_until(&h.app, 600, || matches!(
+            state_of(&h, &ids[0]),
+            ItemStateDto::Failed { .. }
+        ))
+        .await,
+        "the item never failed"
+    );
+
+    origin.set_behavior(FakeOriginBehavior::default());
+    h.app.retry_items(&ids).await.unwrap();
+
+    assert!(tick_until_state(&h, &ids[0], ItemStateDto::Completed).await);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn retry_mux_items_is_a_no_op_for_a_non_mux_item() {
+    let h = harness(FakeOrigin::new(payload(BIG))).await;
+    let ids = add(&h, &["m.bin"]).await;
+    let before = state_of(&h, &ids[0]);
+    h.app.retry_mux_items(&ids).await.unwrap();
+    assert_eq!(state_of(&h, &ids[0]), before);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_empty_id_list_is_ok_and_publishes_nothing() {
+    let h = harness(FakeOrigin::new(payload(BIG))).await;
+    add(&h, &["a.bin"]).await;
+    h.sink.take();
+    h.app.stop_items(&[]).await.unwrap();
+    h.app.remove_items(&[], true).await.unwrap();
+    assert!(h.sink.take().is_empty());
+}
+
+fn package_of(h: &Harness, item_id: &str) -> StructurePackage {
+    packages(h)
+        .into_iter()
+        .find(|p| p.items.iter().any(|i| i.id == item_id))
+        .unwrap_or_else(|| panic!("item {item_id} is in no package"))
+}
+
+fn names(package: &StructurePackage) -> Vec<String> {
+    package.items.iter().map(|i| i.filename.clone()).collect()
+}
+
+/// Three stopped items, each in its own package (`add_url` makes one each).
+async fn three_stopped(h: &Harness) -> Vec<String> {
+    let ids = add(h, &["a.bin", "b.bin", "c.bin"]).await;
+    h.app.stop_items(&ids).await.unwrap();
+    ids
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn move_items_to_new_package_creates_it_and_moves_the_items() {
+    let h = harness(FakeOrigin::new(payload(BIG))).await;
+    let ids = three_stopped(&h).await;
+
+    h.app
+        .move_items_to_new_package(&ids[..1], "  Fresh  ")
+        .await
+        .unwrap();
+
+    let package = package_of(&h, &ids[0]);
+    assert_eq!(package.name, "Fresh");
+    assert_eq!(names(&package), ["a.bin"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_blank_package_name_is_rejected() {
+    let h = harness(FakeOrigin::new(payload(BIG))).await;
+    let ids = three_stopped(&h).await;
+    for blank in ["", "   ", "\t\n"] {
+        let result = h.app.move_items_to_new_package(&ids[..1], blank).await;
+        assert!(
+            matches!(result, Err(AppError::InvalidArgument { .. })),
+            "{blank:?}"
+        );
+    }
+    assert_eq!(packages(&h).len(), 3, "no package may have been created");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn move_items_into_another_package_at_an_index() {
+    let h = harness(FakeOrigin::new(payload(BIG))).await;
+    let ids = three_stopped(&h).await;
+    let target = package_of(&h, &ids[0]).id;
+
+    h.app.move_items(&ids[2..], &target, Some(0)).await.unwrap();
+    assert_eq!(names(&package_of(&h, &ids[0])), ["c.bin", "a.bin"]);
+
+    h.app.move_items(&ids[1..2], &target, None).await.unwrap();
+    assert_eq!(
+        names(&package_of(&h, &ids[0])),
+        ["c.bin", "a.bin", "b.bin"],
+        "no index appends"
+    );
+    assert_eq!(
+        packages(&h).len(),
+        1,
+        "the engine drops packages that were emptied by the move"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn moving_a_running_item_is_refused_without_error() {
+    let h = harness(FakeOrigin::new(payload(BIG))).await;
+    let ids = add(&h, &["run.bin", "other.bin"]).await;
+    assert!(tick_until_state(&h, &ids[0], ItemStateDto::Running).await);
+    let target = package_of(&h, &ids[1]).id;
+
+    h.app.move_items(&ids[..1], &target, None).await.unwrap();
+
+    assert_eq!(names(&package_of(&h, &ids[0])), ["run.bin"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reorder_items_sets_the_order_in_the_structure() {
+    let h = harness(FakeOrigin::new(payload(BIG))).await;
+    let ids = three_stopped(&h).await;
+    let target = package_of(&h, &ids[0]).id;
+    h.app.move_items(&ids[1..], &target, None).await.unwrap();
+
+    let reversed = vec![ids[2].clone(), ids[1].clone(), ids[0].clone()];
+    h.app.reorder_items(&reversed, &target).await.unwrap();
+
+    assert_eq!(names(&package_of(&h, &ids[0])), ["c.bin", "b.bin", "a.bin"]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reorder_packages_sets_the_order() {
+    let h = harness(FakeOrigin::new(payload(BIG))).await;
+    let ids = three_stopped(&h).await;
+    let order: Vec<String> = ids.iter().rev().map(|id| package_of(&h, id).id).collect();
+
+    h.app.reorder_packages(&order).await.unwrap();
+
+    let now: Vec<String> = packages(&h).into_iter().map(|p| p.id).collect();
+    assert_eq!(now, order);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn remove_package_removes_all_its_items() {
+    let h = harness(FakeOrigin::new(payload(BIG))).await;
+    let ids = three_stopped(&h).await;
+    let target = package_of(&h, &ids[0]).id;
+    h.app.move_items(&ids[1..], &target, None).await.unwrap();
+
+    h.app.remove_package(&target, false).await.unwrap();
+
+    assert!(items(&h).iter().all(|i| !ids.contains(&i.id)));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn organize_actions_reject_bad_ids() {
+    let h = harness(FakeOrigin::new(payload(BIG))).await;
+    let ids = three_stopped(&h).await;
+    assert!(h.app.remove_package("nope", false).await.is_err());
+    assert!(h.app.move_items(&ids[..1], "nope", None).await.is_err());
+    assert!(h.app.reorder_items(&ids, "nope").await.is_err());
+    assert!(h.app.reorder_packages(&["nope".to_owned()]).await.is_err());
+}
+
+/// A completed 3000-byte download named `name`; returns its item id.
+async fn completed(h: &Harness, name: &str) -> String {
+    let ids = add(h, &[name]).await;
+    assert!(tick_until_state(h, &ids[0], ItemStateDto::Completed).await);
+    ids[0].clone()
+}
+
+fn file_of(h: &Harness, name: &str) -> std::path::PathBuf {
+    h.downloads.path().join(name).join(name)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn open_item_opens_a_completed_file() {
+    let h = harness(FakeOrigin::new(payload(3000))).await;
+    let id = completed(&h, "open.bin").await;
+
+    h.app.open_item(&id).await.unwrap();
+
+    assert_eq!(h.host.opened_paths(), [file_of(&h, "open.bin")]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn open_item_is_a_no_op_for_an_unfinished_item() {
+    let h = harness(FakeOrigin::new(payload(BIG))).await;
+    let ids = add(&h, &["slow.bin"]).await;
+
+    h.app.open_item(&ids[0]).await.unwrap();
+
+    assert!(h.host.opened_paths().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn open_item_is_a_no_op_when_the_file_is_missing() {
+    let h = harness(FakeOrigin::new(payload(3000))).await;
+    let id = completed(&h, "lost.bin").await;
+    std::fs::remove_file(file_of(&h, "lost.bin")).unwrap();
+    assert!(
+        tick_until(&h.app, 600, || items(&h)
+            .iter()
+            .any(|i| i.id == id && i.file_missing))
+        .await,
+        "the engine never noticed the missing file"
+    );
+
+    h.app.open_item(&id).await.unwrap();
+
+    assert!(h.host.opened_paths().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reveal_item_reveals_an_existing_file() {
+    let h = harness(FakeOrigin::new(payload(3000))).await;
+    let id = completed(&h, "show.bin").await;
+
+    h.app.reveal_item(&id).await.unwrap();
+
+    assert_eq!(h.host.revealed_paths(), [file_of(&h, "show.bin")]);
+    assert!(h.host.opened_paths().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reveal_item_opens_the_folder_when_there_is_no_finished_file() {
+    let h = harness(FakeOrigin::new(payload(BIG))).await;
+    let ids = add(&h, &["part.bin"]).await;
+
+    h.app.reveal_item(&ids[0]).await.unwrap();
+
+    assert_eq!(h.host.opened_paths(), [h.downloads.path().join("part.bin")]);
+    assert!(h.host.revealed_paths().is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn reveal_package_opens_the_package_folder() {
+    let h = harness(FakeOrigin::new(payload(BIG))).await;
+    let ids = add(&h, &["pk.bin"]).await;
+    let package = package_of(&h, &ids[0]).id;
+
+    h.app.reveal_package(&package).await.unwrap();
+
+    assert_eq!(h.host.opened_paths(), [h.downloads.path().join("pk.bin")]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn open_and_reveal_reject_bad_ids_and_ignore_unknown_ones() {
+    let h = harness(FakeOrigin::new(payload(10))).await;
+    assert!(h.app.open_item("nope").await.is_err());
+    assert!(h.app.reveal_item("nope").await.is_err());
+    assert!(h.app.reveal_package("nope").await.is_err());
+    let unknown = "00000000-0000-0000-0000-000000000000";
+    h.app.open_item(unknown).await.unwrap();
+    h.app.reveal_item(unknown).await.unwrap();
+    h.app.reveal_package(unknown).await.unwrap();
+    assert!(h.host.opened_paths().is_empty() && h.host.revealed_paths().is_empty());
+}

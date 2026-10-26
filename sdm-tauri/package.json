@@ -1,0 +1,20 @@
+{
+  "name": "sdm-tauri",
+  "version": "1.0.0",
+  "scripts": {
+    "tauri": "tauri"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "12.15.0",
+      "onFail": "download"
+    }
+  },
+  "packageManager": "pnpm@12.15.0",
+  "type": "module",
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.4"
+  },
+  "private": true
+}

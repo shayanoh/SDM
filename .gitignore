@@ -1,21 +1,5 @@
 .DS_Store
 
-## Xcode
-build/
-DerivedData/
-*.xcuserstate
-*.xcworkspace/xcuserdata/
-xcuserdata/
-*.moved-aside
-*.hmap
-*.ipa
-*.dSYM.zip
-*.dSYM
-
-## Swift Package Manager
-.build/
-.swiftpm/
-
 ## Misc
 *.log
 
@@ -23,6 +7,22 @@ xcuserdata/
 .vscode/
 SDMChromeExtension-Identity/
 
-## Rust core build outputs
-SDMKit/Artifacts/
-SDMKit/Sources/SDMRust/Generated/
+## Brag
+brag-output/
+
+## Tauri UI
+sdm-tauri/web/dist/
+sdm-tauri/node_modules/
+sdm-tauri/src-tauri/gen/
+.playwright-mcp/
+sdm-tauri/web/test-results/
+sdm-tauri/web/playwright-report/
+
+# Brainstorming visual companion mockups
+.superpowers/
+
+## Release builds (scripts/build-tauri.sh)
+/Releases/
+
+## Python
+__pycache__/

@@ -33,11 +33,13 @@ impl YtDlpChannel {
         ))
     }
 
-    /// Direct download URL for the universal2 macOS binary of a given tag.
+    /// Direct download URL for the binary of a given tag that suits this
+    /// platform (the universal2 build on macOS).
     pub fn asset_url(self, tag: &str) -> Url {
         static_url(&format!(
-            "https://github.com/{}/releases/download/{tag}/yt-dlp_macos",
-            self.repo()
+            "https://github.com/{}/releases/download/{tag}/{}",
+            self.repo(),
+            yt_dlp_asset_name()
         ))
     }
 
@@ -47,6 +49,19 @@ impl YtDlpChannel {
             "https://github.com/{}/releases/download/{tag}/SHA2-256SUMS",
             self.repo()
         ))
+    }
+}
+
+/// The release asset name of yt-dlp for the platform this build runs on.
+pub fn yt_dlp_asset_name() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "yt-dlp_macos"
+    } else if cfg!(windows) {
+        "yt-dlp.exe"
+    } else if cfg!(target_arch = "aarch64") {
+        "yt-dlp_linux_aarch64"
+    } else {
+        "yt-dlp_linux"
     }
 }
 
@@ -220,6 +235,18 @@ pub struct VendorAsset {
     pub version: String,
 }
 
+/// What the platform-tool step (ffmpeg, ffprobe, qjs on Windows and Linux)
+/// is doing, for a status line.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum ToolsActivity {
+    #[default]
+    Idle,
+    /// Downloading the named tool (`"ffmpeg"` or `"qjs"`).
+    Fetching(String),
+    /// The last attempt failed; retried by the next check.
+    Failed(String),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CheckReason {
     Launch,
@@ -248,4 +275,23 @@ pub struct ManagedBinariesStatus {
     pub qjs_version: Option<String>,
     pub last_check_tick: Option<i64>,
     pub last_error: Option<String>,
+}
+
+#[cfg(test)]
+mod asset_tests {
+    use super::*;
+
+    #[test]
+    fn yt_dlp_asset_matches_the_current_platform() {
+        let name = yt_dlp_asset_name();
+        if cfg!(target_os = "macos") {
+            assert_eq!(name, "yt-dlp_macos");
+        } else if cfg!(windows) {
+            assert_eq!(name, "yt-dlp.exe");
+        } else if cfg!(target_arch = "aarch64") {
+            assert_eq!(name, "yt-dlp_linux_aarch64");
+        } else {
+            assert_eq!(name, "yt-dlp_linux");
+        }
+    }
 }

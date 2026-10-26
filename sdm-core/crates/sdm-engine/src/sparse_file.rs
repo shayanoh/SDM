@@ -1,12 +1,13 @@
 use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
 use std::io;
-use std::os::fd::AsRawFd;
-use std::os::unix::fs::{FileExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use thiserror::Error;
+
+pub(crate) use crate::platform_io::fsync;
+use crate::platform_io::{self, EBADF, EIO};
 
 /// Swift's `SparseFile.FileError`. `errno` values are the raw OS error codes.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
@@ -43,26 +44,8 @@ impl FinalizeError {
     }
 }
 
-/// Reported when `pwrite` returns 0 (Swift reports a stale `errno` there,
-/// which is meaningless) or an `io::Error` carries no OS code.
-const EIO: i32 = libc::EIO;
-const EBADF: i32 = libc::EBADF;
-
 fn errno_of(error: &io::Error) -> i32 {
     error.raw_os_error().unwrap_or(EIO)
-}
-
-/// `fsync(2)`, not `File::sync_all`: on macOS std's `sync_all`/`sync_data`
-/// issue `fcntl(F_FULLFSYNC)`, a much stronger and slower flush than the
-/// plain `fsync` Swift calls.
-pub(crate) fn fsync(file: &File) -> io::Result<()> {
-    // SAFETY: `file` owns an open descriptor for the duration of the call.
-    let result = unsafe { libc::fsync(file.as_raw_fd()) };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
-    }
 }
 
 /// The on-disk destination for a download, written at arbitrary offsets by
@@ -93,17 +76,16 @@ impl SparseFile {
         assert!(total_bytes >= 0, "totalBytes must be non-negative");
         let incomplete_path = Self::incomplete_path(final_path);
 
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .mode(0o644)
-            .open(&incomplete_path)
-            .map_err(|error| SparseFileError::CouldNotOpen {
-                path: incomplete_path.to_string_lossy().into_owned(),
-                errno: errno_of(&error),
-            })?;
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).create(true).truncate(false);
+        platform_io::apply_mode(&mut options, 0o644);
+        let file =
+            options
+                .open(&incomplete_path)
+                .map_err(|error| SparseFileError::CouldNotOpen {
+                    path: incomplete_path.to_string_lossy().into_owned(),
+                    errno: errno_of(&error),
+                })?;
 
         // Sparse on APFS: allocates no blocks until bytes are actually written.
         // (The descriptor is closed by dropping `file` on the error path.)
@@ -143,11 +125,11 @@ impl SparseFile {
 
         let mut written = 0usize;
         while written < data.len() {
-            let result = file
-                .write_at(&data[written..], offset as u64 + written as u64)
-                .map_err(|error| SparseFileError::WriteFailed {
-                    errno: errno_of(&error),
-                })?;
+            let result =
+                platform_io::write_at(file, &data[written..], offset as u64 + written as u64)
+                    .map_err(|error| SparseFileError::WriteFailed {
+                        errno: errno_of(&error),
+                    })?;
             if result == 0 {
                 return Err(SparseFileError::WriteFailed { errno: EIO });
             }
