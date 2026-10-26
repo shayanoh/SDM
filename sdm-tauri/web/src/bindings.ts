@@ -38,6 +38,25 @@ export const commands = {
 	 *  window created from a synchronous command deadlocks on Windows.
 	 */
 	openSettings: () => typedError<null, AppError>(__TAURI_INVOKE("open_settings")),
+	/**
+	 *  Where the Chrome extension stands: reporting in, its version, the cookie
+	 *  file's age and the folder to load unpacked.
+	 */
+	chromeExtensionStatus: () => typedError<ChromeExtensionDto, AppError>(__TAURI_INVOKE("chrome_extension_status")),
+	/**
+	 *  Copies the extension to its stable folder and registers the host with
+	 *  Chrome; returns the folder.
+	 */
+	prepareChromeExtension: () => typedError<string, AppError>(__TAURI_INVOKE("prepare_chrome_extension")),
+	/**  Opens Chrome on `chrome://extensions/`. */
+	openChromeExtensions: () => typedError<null, AppError>(__TAURI_INVOKE("open_chrome_extensions")),
+	/**  Shows the extension folder in the file manager. */
+	revealChromeExtensionFolder: () => typedError<null, AppError>(__TAURI_INVOKE("reveal_chrome_extension_folder")),
+	/**
+	 *  Opens the Chrome extension setup window. Async because a window created
+	 *  from a synchronous command deadlocks on Windows.
+	 */
+	openChromeSetup: () => typedError<null, AppError>(__TAURI_INVOKE("open_chrome_setup")),
 	/**  Shows the main window, on the tab `route` names when it names one. */
 	showMain: (route: string | null) => typedError<null, AppError>(__TAURI_INVOKE("show_main", { route })),
 	/**  What the tray popover shows now. */
@@ -93,6 +112,24 @@ export type BinariesStatusDto = {
 	ffmpegVersion: string | null,
 	qjsVersion: string | null,
 	lastError: string | null,
+};
+
+/**
+ *  The Chrome extension's link to SDM, for the setup window and the Settings
+ *  note.
+ */
+export type ChromeExtensionDto = {
+	/**  `connected`, `outdated` (an older version reported) or `notConnected`. */
+	state: string,
+	/**  The version the extension last reported. */
+	installedVersion: string | null,
+	/**  The version shipped with this app. */
+	bundledVersion: string | null,
+	/**  Age of the cookie file; `None` when the extension never synced. */
+	cookiesSyncedSecondsAgo: number | null,
+	/**  The folder to load unpacked. */
+	extensionFolder: string,
+	chromeInstalled: boolean,
 };
 
 /**  The files a deletion would trash, for the confirmation sheet. */

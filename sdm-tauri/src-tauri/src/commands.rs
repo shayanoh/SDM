@@ -279,6 +279,48 @@ pub async fn open_settings(handle: tauri::AppHandle) -> Result<(), AppError> {
     crate::settings_window::open(&handle)
 }
 
+/// Where the Chrome extension stands: reporting in, its version, the cookie
+/// file's age and the folder to load unpacked.
+#[tauri::command]
+#[specta::specta]
+pub async fn chrome_extension_status(
+    handle: tauri::AppHandle,
+) -> Result<sdm_app::protocol::ChromeExtensionDto, AppError> {
+    crate::chrome_setup::status(&handle)
+}
+
+/// Copies the extension to its stable folder and registers the host with
+/// Chrome; returns the folder.
+#[tauri::command]
+#[specta::specta]
+pub async fn prepare_chrome_extension(handle: tauri::AppHandle) -> Result<String, AppError> {
+    crate::chrome_setup::prepare(&handle)
+}
+
+/// Opens Chrome on `chrome://extensions/`.
+#[tauri::command]
+#[specta::specta]
+pub async fn open_chrome_extensions() -> Result<(), AppError> {
+    crate::chrome_setup::open_chrome_extensions()
+}
+
+/// Shows the extension folder in the file manager.
+#[tauri::command]
+#[specta::specta]
+pub async fn reveal_chrome_extension_folder(handle: tauri::AppHandle) -> Result<(), AppError> {
+    let folder = crate::chrome_setup::prepare(&handle)?;
+    tauri_plugin_opener::reveal_item_in_dir(folder)
+        .map_err(|e| AppError::failed(format!("could not show the folder: {e}")))
+}
+
+/// Opens the Chrome extension setup window. Async because a window created
+/// from a synchronous command deadlocks on Windows.
+#[tauri::command]
+#[specta::specta]
+pub async fn open_chrome_setup(handle: tauri::AppHandle) -> Result<(), AppError> {
+    crate::chrome_setup_window::open(&handle)
+}
+
 /// What the tray popover shows now.
 #[tauri::command]
 #[specta::specta]

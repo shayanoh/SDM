@@ -1,6 +1,8 @@
 #[cfg(target_os = "macos")]
 mod activation;
 mod autostart;
+mod chrome_setup;
+mod chrome_setup_window;
 mod clipboard;
 mod commands;
 mod handoff;
@@ -31,7 +33,8 @@ use tauri_specta::{Builder, collect_commands};
 /// its tab, and the tray popover is positioned against the icon and must stay
 /// hidden until a click ("tray" is `popover::LABEL`, which only exists on
 /// macOS and Windows).
-const WINDOW_STATE_DENYLIST: [&str; 2] = [settings_window::LABEL, "tray"];
+const WINDOW_STATE_DENYLIST: [&str; 3] =
+    [settings_window::LABEL, chrome_setup_window::LABEL, "tray"];
 
 /// The id of the app menu's "Settings…" item on macOS.
 #[cfg(target_os = "macos")]
@@ -89,6 +92,11 @@ fn specta_builder() -> Builder<tauri::Wry> {
         check_binaries_now,
         list_themes,
         open_settings,
+        chrome_extension_status,
+        prepare_chrome_extension,
+        open_chrome_extensions,
+        reveal_chrome_extension_folder,
+        open_chrome_setup,
         show_main,
         tray_status,
         quit_requested,
@@ -214,7 +222,10 @@ pub fn run() {
                     api.prevent_close();
                     lifecycle::on_close_requested(window.app_handle());
                 }
-                tauri::WindowEvent::Destroyed => settings_window::close(window.app_handle()),
+                tauri::WindowEvent::Destroyed => {
+                    settings_window::close(window.app_handle());
+                    chrome_setup_window::close(window.app_handle());
+                }
                 _ => {}
             }
         })
@@ -241,6 +252,7 @@ pub fn run() {
             let (app, simulation) = build_app(tauri_app.handle())?;
             tauri_app.manage(Arc::clone(&app));
             clipboard::spawn(tauri_app.handle().clone(), Arc::clone(&app));
+            chrome_setup::ensure_host_registered();
             // Started by the Chrome extension's host to add a download.
             if let Some(url) = handoff::add_url_from_args(&std::env::args().collect::<Vec<_>>()) {
                 handoff::deliver(tauri_app.handle(), Arc::clone(&app), url);

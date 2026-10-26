@@ -265,6 +265,24 @@ pub struct BinariesStatusDto {
     pub last_error: Option<String>,
 }
 
+/// The Chrome extension's link to SDM, for the setup window and the Settings
+/// note.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
+#[serde(rename_all = "camelCase")]
+pub struct ChromeExtensionDto {
+    /// `connected`, `outdated` (an older version reported) or `notConnected`.
+    pub state: String,
+    /// The version the extension last reported.
+    pub installed_version: Option<String>,
+    /// The version shipped with this app.
+    pub bundled_version: Option<String>,
+    /// Age of the cookie file; `None` when the extension never synced.
+    pub cookies_synced_seconds_ago: Option<u32>,
+    /// The folder to load unpacked.
+    pub extension_folder: String,
+    pub chrome_installed: bool,
+}
+
 /// A bundled theme, for the picker.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]

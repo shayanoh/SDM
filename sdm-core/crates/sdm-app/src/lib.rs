@@ -4,6 +4,7 @@
 
 pub mod app;
 mod autoadd;
+pub mod chrome;
 pub mod clipboard;
 pub mod deletion;
 pub mod error;
