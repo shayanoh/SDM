@@ -347,3 +347,37 @@ async fn a_url_with_no_parsed_form_still_downloads_with_its_string() {
         Some("a/b")
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_cookie_provider_replaces_the_source_arguments_and_is_released_after_the_run() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    struct Release(Arc<AtomicBool>);
+    impl Drop for Release {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+    let dest = TempDest::new();
+    let runner = FakeStreamingRunner::new(&["sdm:downloading|1|1|NA|1|1"], 0, true);
+    let released = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&released);
+    let d = downloader(runner.clone(), true).with_cookie_provider(Arc::new(move || {
+        sdm_resolve::CookieLease::with_guard(
+            vec!["--cookies".into(), "/data/leases/2.txt".into()],
+            Box::new(Release(Arc::clone(&flag))),
+        )
+    }));
+    d.download(
+        &u("https://x.com/1"),
+        "b",
+        &dest.0,
+        Arc::new(|_| {}),
+        &CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    let args = runner.last_arguments();
+    assert!(args.contains(&"/data/leases/2.txt".to_string()));
+    assert!(!args.contains(&"--cookies-from-browser".to_string()));
+    assert!(released.load(Ordering::SeqCst));
+}

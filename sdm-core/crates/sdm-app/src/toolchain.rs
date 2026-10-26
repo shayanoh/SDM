@@ -17,7 +17,9 @@ use crate::app::{App, Dependencies};
 use crate::error::AppError;
 use crate::grabber::GrabberController;
 use crate::host::Host;
-use crate::settings::{SettingsStore, channel_reader, cookie_source_reader, playlist_cap_reader};
+use crate::settings::{
+    SettingsStore, channel_reader, cookie_provider, cookie_source_reader, playlist_cap_reader,
+};
 
 pub fn production_dependencies(host: &dyn Host) -> Dependencies {
     let data_dir = host.data_dir();
@@ -31,19 +33,28 @@ pub fn production_dependencies(host: &dyn Host) -> Dependencies {
     search_paths.extend(BinaryLocator::default_search_paths());
     let locator = Arc::new(BinaryLocator::new().with_search_paths(search_paths));
 
-    let resolver: Arc<dyn LinkResolver> = Arc::new(YtDlpResolver::new(
-        Arc::clone(&runner),
-        Arc::clone(&locator),
-        cookie_source_reader(&shared),
-        playlist_cap_reader(&shared),
-        extra_arguments(&bin_directory),
-    ));
-    let wholesale: Arc<dyn WholesaleDownloader> = Arc::new(YtDlpWholesaleDownloader::new(
-        Arc::clone(&runner),
-        Arc::clone(&locator),
-        cookie_source_reader(&shared),
-        extra_arguments(&bin_directory),
-    ));
+    // A crash can leave cookie copies behind; none is in use yet.
+    sdm_browser::lease::sweep_stale_leases(&data_dir);
+
+    let resolver: Arc<dyn LinkResolver> = Arc::new(
+        YtDlpResolver::new(
+            Arc::clone(&runner),
+            Arc::clone(&locator),
+            cookie_source_reader(&shared),
+            playlist_cap_reader(&shared),
+            extra_arguments(&bin_directory),
+        )
+        .with_cookie_provider(cookie_provider(&shared, data_dir.clone())),
+    );
+    let wholesale: Arc<dyn WholesaleDownloader> = Arc::new(
+        YtDlpWholesaleDownloader::new(
+            Arc::clone(&runner),
+            Arc::clone(&locator),
+            cookie_source_reader(&shared),
+            extra_arguments(&bin_directory),
+        )
+        .with_cookie_provider(cookie_provider(&shared, data_dir.clone())),
+    );
     let muxer: Arc<dyn Muxer> =
         Arc::new(FfmpegMuxer::new(Arc::clone(&runner), Arc::clone(&locator)));
 

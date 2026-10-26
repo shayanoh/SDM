@@ -9,6 +9,7 @@ async-trait = "0.1.92"
 bytes = "1.12.1"
 futures = "0.3.34"
 percent-encoding = "2.3.2"
+sdm-browser = { version = "0.1.0", path = "../sdm-browser" }
 sdm-core = { version = "0.1.0", path = "../sdm-core" }
 sdm-engine = { version = "0.1.0", path = "../sdm-engine" }
 sdm-grabber = { version = "0.1.0", path = "../sdm-grabber" }

@@ -205,6 +205,22 @@ pub fn cookie_source_reader(
     Arc::new(move || read(&shared).cookie_source())
 }
 
+/// The cookie arguments for one yt-dlp run, chosen from the cookie source
+/// read fresh each time. Chrome uses the file the SDM extension keeps current
+/// (a private copy per run) because yt-dlp cannot read Chrome's own database
+/// on Windows and macOS asks for the user's password; every other browser
+/// keeps `--cookies-from-browser`.
+pub fn cookie_provider(
+    shared: &SharedSettings,
+    data_dir: std::path::PathBuf,
+) -> sdm_resolve::CookieProvider {
+    let shared = Arc::clone(shared);
+    Arc::new(move || match read(&shared).cookie_source() {
+        CookieSource::Chrome => sdm_browser::lease::lease_for_chrome(&data_dir),
+        source => sdm_resolve::CookieLease::plain(source.yt_dlp_arguments()),
+    })
+}
+
 /// The playlist cap, read fresh on every call.
 pub fn playlist_cap_reader(shared: &SharedSettings) -> Arc<dyn Fn() -> usize + Send + Sync> {
     let shared = Arc::clone(shared);

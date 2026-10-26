@@ -11,8 +11,8 @@ use tokio_util::sync::CancellationToken;
 use url::Url;
 
 use crate::{
-    BinaryLocator, CookieSource, ProcessOutput, ProcessRunError, ProcessRunner, SiteRegistry,
-    YtDlpDump, YtDlpParser,
+    BinaryLocator, CookieLease, CookieProvider, CookieSource, ProcessOutput, ProcessRunError,
+    ProcessRunner, SiteRegistry, YtDlpDump, YtDlpParser,
 };
 
 type CookieSourceFn = Arc<dyn Fn() -> CookieSource + Send + Sync>;
@@ -25,6 +25,9 @@ pub struct YtDlpResolver {
     runner: Arc<dyn ProcessRunner>,
     locator: Arc<BinaryLocator>,
     cookie_source: CookieSourceFn,
+    /// Replaces `cookie_source` when set (the Tauri app's Chrome extension
+    /// cookie file).
+    cookie_provider: Option<CookieProvider>,
     max_playlist_videos: MaxPlaylistVideosFn,
     /// Tokens spliced into every yt-dlp invocation — the app supplies
     /// `--extractor-args youtube:jsruntime=quickjs` (QuickJS is off by
@@ -48,6 +51,7 @@ impl YtDlpResolver {
             runner,
             locator,
             cookie_source,
+            cookie_provider: None,
             max_playlist_videos,
             extra_arguments,
             resolve_timeout: Duration::from_secs(60),
@@ -65,6 +69,20 @@ impl YtDlpResolver {
             Arc::new(|| 50),
             Arc::new(Vec::new),
         )
+    }
+
+    /// Use `provider`'s arguments in place of the cookie source's; the lease
+    /// is held for the whole yt-dlp run.
+    pub fn with_cookie_provider(mut self, provider: CookieProvider) -> Self {
+        self.cookie_provider = Some(provider);
+        self
+    }
+
+    fn cookie_lease(&self) -> CookieLease {
+        match &self.cookie_provider {
+            Some(provider) => provider(),
+            None => CookieLease::plain((self.cookie_source)().yt_dlp_arguments()),
+        }
     }
 
     pub fn with_timeouts(mut self, resolve_timeout: Duration, playlist_timeout: Duration) -> Self {
@@ -124,12 +142,14 @@ impl YtDlpResolver {
     ) -> Result<ResolvedTarget, ResolveError> {
         let yt_dlp = self.require_yt_dlp()?;
         let mut args = strings(&["-J", "--no-warnings", "--no-playlist"]);
-        args.extend((self.cookie_source)().yt_dlp_arguments());
+        let lease = self.cookie_lease();
+        args.extend(lease.arguments().iter().cloned());
         args.extend(Self::per_site_arguments(url));
         args.push(source.as_str().to_string());
         let out = self
             .run_yt_dlp(&yt_dlp, &args, self.resolve_timeout, cancel)
-            .await?;
+            .await
+            .map_err(|error| with_cookie_hint(&lease, error))?;
         let dump = decode_dump(&out.stdout, "-J")?;
         // Some sites ignore `--no-playlist` and hand back a playlist anyway.
         if dump.type_.as_deref() == Some("playlist") {
@@ -146,12 +166,14 @@ impl YtDlpResolver {
     ) -> Result<ResolvedTarget, ResolveError> {
         let yt_dlp = self.require_yt_dlp()?;
         let mut args = strings(&["-J", "--flat-playlist", "--no-warnings"]);
-        args.extend((self.cookie_source)().yt_dlp_arguments());
+        let lease = self.cookie_lease();
+        args.extend(lease.arguments().iter().cloned());
         args.extend(Self::per_site_arguments(url));
         args.push(source.as_str().to_string());
         let out = self
             .run_yt_dlp(&yt_dlp, &args, self.playlist_timeout, cancel)
-            .await?;
+            .await
+            .map_err(|error| with_cookie_hint(&lease, error))?;
         let dump = decode_dump(&out.stdout, "--flat-playlist")?;
         // The guess was wrong and this is actually a single video.
         let no_entries = dump.entries.as_ref().is_none_or(|e| e.is_empty());
@@ -280,12 +302,14 @@ impl LinkResolver for YtDlpResolver {
         // `--no-playlist` so a `watch?v=…&list=…` source still resolves the
         // one video; yt-dlp normalizes youtu.be / shorts / tracking params.
         let mut args = strings(&["-J", "--no-warnings", "--no-playlist"]);
-        args.extend((self.cookie_source)().yt_dlp_arguments());
+        let lease = self.cookie_lease();
+        args.extend(lease.arguments().iter().cloned());
         args.extend(Self::per_site_arguments(parsed));
         args.push(source_url.as_str().to_string());
         let out = self
             .run_yt_dlp(&yt_dlp, &args, self.resolve_timeout, cancel)
-            .await?;
+            .await
+            .map_err(|error| with_cookie_hint(&lease, error))?;
         let dump = decode_dump(&out.stdout, "-J")?;
         let mapped = dump
             .formats
@@ -300,6 +324,20 @@ impl LinkResolver for YtDlpResolver {
             format_id,
         ))
     }
+}
+
+/// A sign-in failure while the Chrome cookie file is missing is really "the
+/// extension is not connected": say so instead of the generic wall message.
+fn with_cookie_hint(lease: &CookieLease, error: ResolveError) -> ResolveError {
+    if lease.is_chrome_unavailable() && error == ResolveError::AuthRequired {
+        return ResolveError::YtDlpFailed {
+            stderr_tail: "Sign-in is required, and Chrome cookies are unavailable: they come \
+                          from the SDM Chrome extension, which is not connected. Open \
+                          Settings → YouTube and choose Set up the extension."
+                .to_owned(),
+        };
+    }
+    error
 }
 
 /// Classifies yt-dlp's stderr into a `ResolveError` (`YtDlpResolver.Classifier`

@@ -5,4 +5,5 @@
 pub mod cookies;
 pub mod framing;
 pub mod host;
+pub mod lease;
 pub mod status;

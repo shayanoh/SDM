@@ -661,3 +661,78 @@ async fn a_url_with_no_parsed_form_is_unsupported() {
         ResolveError::Unsupported
     );
 }
+
+// MARK: - cookie provider
+
+struct DropFlag(Arc<std::sync::atomic::AtomicBool>);
+
+impl Drop for DropFlag {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn cookie_provider_replaces_the_source_arguments_and_the_lease_is_released_after_the_run() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let runner = Arc::new({
+        let mut r = FakeProcessRunner::new();
+        r.responses = vec![("-J".into(), ok(fixture_data("video_muxed")))];
+        r
+    });
+    let released = Arc::new(AtomicBool::new(false));
+    let flag = Arc::clone(&released);
+    let r = YtDlpResolver::new(
+        runner.clone(),
+        make_locator(true),
+        Arc::new(|| CookieSource::Chrome),
+        Arc::new(|| 50),
+        Arc::new(Vec::new),
+    )
+    .with_cookie_provider(Arc::new(move || {
+        sdm_resolve::CookieLease::with_guard(
+            vec!["--cookies".into(), "/data/leases/1.txt".into()],
+            Box::new(DropFlag(Arc::clone(&flag))),
+        )
+    }));
+    r.resolve(&u("https://youtu.be/abc")).await.unwrap();
+    let calls = runner.calls();
+    let arguments = &calls.first().expect("a call").arguments;
+    assert!(arguments.contains(&"--cookies".to_string()));
+    assert!(arguments.contains(&"/data/leases/1.txt".to_string()));
+    assert!(!arguments.contains(&"--cookies-from-browser".to_string()));
+    assert!(
+        released.load(Ordering::SeqCst),
+        "lease must be dropped after the run"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_sign_in_failure_without_the_chrome_cookie_file_points_at_the_extension() {
+    let mut runner = FakeProcessRunner::new();
+    runner.default_output = fail_default(AGE_RESTRICTED_STDERR);
+    let r = YtDlpResolver::with_defaults(Arc::new(runner), make_locator(true))
+        .with_cookie_provider(Arc::new(sdm_resolve::CookieLease::chrome_unavailable));
+    let error = r.resolve(&u("https://youtu.be/abc")).await.unwrap_err();
+    let ResolveError::YtDlpFailed { stderr_tail } = error else {
+        panic!("expected YtDlpFailed, got {error:?}");
+    };
+    assert!(
+        stderr_tail.contains("SDM Chrome extension"),
+        "{stderr_tail}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_sign_in_failure_with_a_cookie_file_stays_auth_required() {
+    let mut runner = FakeProcessRunner::new();
+    runner.default_output = fail_default(AGE_RESTRICTED_STDERR);
+    let r = YtDlpResolver::with_defaults(Arc::new(runner), make_locator(true))
+        .with_cookie_provider(Arc::new(|| {
+            sdm_resolve::CookieLease::plain(vec!["--cookies".into(), "/x".into()])
+        }));
+    assert_eq!(
+        r.resolve(&u("https://youtu.be/abc")).await.unwrap_err(),
+        ResolveError::AuthRequired
+    );
+}

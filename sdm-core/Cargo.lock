@@ -4016,6 +4016,7 @@ dependencies = [
  "bytes",
  "futures",
  "percent-encoding",
+ "sdm-browser",
  "sdm-core",
  "sdm-engine",
  "sdm-grabber",

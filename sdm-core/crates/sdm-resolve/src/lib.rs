@@ -2,6 +2,7 @@
 
 mod binary_fetching;
 mod binary_locator;
+mod cookie_lease;
 mod cookie_source;
 mod format_selector;
 pub mod lzfse;
@@ -23,6 +24,7 @@ pub mod testing;
 
 pub use binary_fetching::{BinaryFetchError, BinaryFetching, ReqwestBinaryFetcher};
 pub use binary_locator::BinaryLocator;
+pub use cookie_lease::{CookieLease, CookieProvider};
 pub use cookie_source::CookieSource;
 pub use format_selector::FormatSelector;
 pub use managed_binaries::{BinariesChangedFuture, ManagedBinaries, ManagedBinariesError};
