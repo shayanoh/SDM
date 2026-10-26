@@ -38,7 +38,8 @@
       "../../SDMChromeExtension/options.html": "chrome-extension/options.html",
       "../../SDMChromeExtension/options.js": "chrome-extension/options.js",
       "../../SDMChromeExtension/images/*.png": "chrome-extension/images/",
-      "../../LICENSE": "LICENSE"
+      "../../LICENSE": "LICENSE",
+      "licenses.txt": "licenses.txt"
     },
     "icon": [
       "icons/32x32.png",

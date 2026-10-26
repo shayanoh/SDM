@@ -1,0 +1,31 @@
+# Licenses of the Rust crates compiled into SDM, for the About window and the
+# licenses file shipped in every package. Regenerate with
+# `scripts/generate_licenses.py`. Anything outside `accepted` fails the run, so a
+# new dependency with an unusual license is noticed rather than shipped.
+
+accepted = [
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "ISC",
+    "MIT",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Zlib",
+]
+
+# The three systems SDM is built for, so a crate used on only one is listed.
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+]
+
+# Compile-time only: not part of what ships.
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+
+# SDM's own crates (publish = false): covered by the MIT LICENSE.
+private = { ignore = true }

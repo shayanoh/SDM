@@ -64,7 +64,7 @@ The two properties that must never regress:
 - Add packages with the package manager (`cargo add`, `pnpm add`), never by hand-editing manifests or lockfiles. Versions only through `scripts/version.py`.
 - A change to the Chrome extension that is incompatible with older copies gets a major version bump in its `manifest.json` (2.0.0 was the cookie sync); the app's launch prompt compares it with the version the extension reports.
 - `ffmpeg`/`ffprobe`/`qjs` are downloaded at run time on every platform and never bundled (`platform_tools.rs`); a Chrome extension file that is not listed in `bundle.resources` of `tauri.conf.json` is not shipped (`scripts/test_bundle_resources.py` checks).
-- The project is MIT-licensed; keep `LICENSE` and the metadata in `tauri.conf.json` in step when anything about the licence or the downloaded tools changes.
+- The project is MIT-licensed; keep `LICENSE` and the metadata in `tauri.conf.json` in step when anything about the licence or the downloaded tools changes. `sdm-tauri/src-tauri/licenses.txt` (the licenses of every compiled-in Rust crate and web library, shipped in every package) is generated: after adding or updating a dependency run `python3 scripts/generate_licenses.py` (needs `cargo install --locked cargo-about --features cli`) and commit the result; a dependency with a license outside `accepted` in `sdm-core/about.toml` fails the run.
 - Verify library APIs against current documentation (Context7) rather than from memory.
 
 ## Git
