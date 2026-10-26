@@ -4045,6 +4045,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "sdm-browser"
+version = "0.1.0"
+dependencies = [
+ "sdm-resolve",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "sdm-core"
 version = "0.1.0"
 dependencies = [
