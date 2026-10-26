@@ -197,7 +197,7 @@ The registry's `HostMatch` lists where videos are served, not where logins live.
 
 ### 4.7 Settings note
 
-In the YouTube tab's cookie-source row: when Chrome is selected, a note appears (hidden for other sources): "Chrome
+In the Media Sites tab's cookie-source row: when Chrome is selected, a note appears (hidden for other sources): "Chrome
 cookies come from the SDM Chrome extension. Install it from [Set up the extension]." plus the sync status line from
 4.6. Wording is a first suggestion. Theme roles only; this keeps the buffered OK/Cancel behavior of the Settings
 window.

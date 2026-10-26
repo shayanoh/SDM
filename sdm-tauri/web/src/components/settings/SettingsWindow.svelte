@@ -1,6 +1,10 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import type { BinariesStatusDto, ThemeInfo } from "../../bindings";
+  import type {
+    BinariesStatusDto,
+    ChromeExtensionDto,
+    ThemeInfo,
+  } from "../../bindings";
   import { errorMessage, useBridge } from "../../lib/context";
   import { detectPlatform, type Platform } from "../../lib/platform";
   import { SettingsDraft } from "../../lib/settingsDraft.svelte";
@@ -35,6 +39,7 @@
   let draft = $state<SettingsDraft | null>(null);
   let themes = $state<ThemeInfo[]>([]);
   let status = $state<BinariesStatusDto | null>(null);
+  let chrome = $state<ChromeExtensionDto | null>(null);
   let tab = $state<(typeof TABS)[number][0]>("appearance");
   let error = $state<string | null>(null);
   let busy = false;
@@ -51,6 +56,17 @@
     }
   }
 
+  // Only asked while the cookie source is Chrome: that is the only time the
+  // extension matters to this window.
+  async function refreshChrome() {
+    if (draft?.values.cookieSource !== "chrome") return;
+    try {
+      chrome = await bridge.chromeExtensionStatus();
+    } catch {
+      // Informational, like the binaries status.
+    }
+  }
+
   onMount(() => {
     void (async () => {
       try {
@@ -61,13 +77,20 @@
       }
     })();
     void refreshStatus();
-    const timer = setInterval(refreshStatus, 5000);
+    const timer = setInterval(() => {
+      void refreshStatus();
+      void refreshChrome();
+    }, 5000);
     // Closing by the titlebar is Cancel: take a previewed theme back.
     const stopClose = onCloseRequested(() => void bridge.broadcastTheme(null));
     return () => {
       clearInterval(timer);
       stopClose();
     };
+  });
+
+  $effect(() => {
+    if (draft?.values.cookieSource === "chrome") void refreshChrome();
   });
 
   // The window is as tall as the tab it shows.
@@ -176,6 +199,8 @@
             {draft}
             {platform}
             {status}
+            {chrome}
+            onSetupChrome={() => void bridge.openChromeSetup()}
             onChannel={changeChannel}
             onCheck={checkNow}
           />

@@ -1,5 +1,6 @@
 <script lang="ts">
-  import type { BinariesStatusDto } from "../../bindings";
+  import type { BinariesStatusDto, ChromeExtensionDto } from "../../bindings";
+  import { statusLine } from "../../lib/chromeSetup";
   import type { Platform } from "../../lib/platform";
   import type { SettingsDraft } from "../../lib/settingsDraft.svelte";
   import {
@@ -17,12 +18,16 @@
     draft,
     platform,
     status,
+    chrome,
+    onSetupChrome,
     onChannel,
     onCheck,
   }: {
     draft: SettingsDraft;
     platform: Platform;
     status: BinariesStatusDto | null;
+    chrome: ChromeExtensionDto | null;
+    onSetupChrome: () => void;
     onChannel: (channel: string) => void;
     onCheck: () => void;
   } = $props();
@@ -104,11 +109,33 @@
       width={160}
       onchange={(v) => draft.set("cookieSource", v)}
     />
+    {#if draft.values.cookieSource === "chrome"}
+      <div class="note" data-testid="chrome-cookies-note">
+        <p>Chrome cookies come from the SDM Chrome extension.</p>
+        {#if chrome}<p class="muted">{statusLine(chrome)}</p>{/if}
+        <button type="button" onclick={onSetupChrome}>
+          Set up the extension
+        </button>
+      </div>
+    {/if}
   </SettingsSection>
   <ComponentsSection {draft} {status} {onChannel} {onCheck} />
 </div>
 
 <style>
+  .note {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+  .note p {
+    margin: 0;
+    font-size: 14px;
+  }
+  .note .muted {
+    color: var(--text-secondary);
+  }
   .three {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));

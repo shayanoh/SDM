@@ -1,5 +1,6 @@
 import type {
   BinariesStatusDto,
+  ChromeExtensionDto,
   DeletionInfo,
   DeletionTarget,
   EngineStats,
@@ -485,6 +486,20 @@ export class MockBridge implements Bridge {
   /** How often `openSettings` and `checkBinariesNow` were called. */
   settingsOpens = 0;
   binaryChecks = 0;
+  /** What `chromeExtensionStatus` reports, and how often the Chrome setup calls were made. */
+  chromeStatus: ChromeExtensionDto = {
+    state: "notConnected",
+    installedVersion: null,
+    bundledVersion: "2.0.0",
+    cookiesSyncedSecondsAgo: null,
+    extensionFolder:
+      "/Users/mock/Library/Application Support/SDM/ChromeExtension",
+    chromeInstalled: true,
+  };
+  chromePrepares = 0;
+  chromeExtensionsOpens = 0;
+  chromeFolderReveals = 0;
+  chromeSetupOpens = 0;
   /** What `binariesStatus` reports; tests and the browser preview change it. */
   binaries: BinariesStatusDto = {
     bundled: false,
@@ -832,6 +847,27 @@ export class MockBridge implements Bridge {
 
   async openSettings() {
     this.settingsOpens += 1;
+  }
+
+  async chromeExtensionStatus(): Promise<ChromeExtensionDto> {
+    return { ...this.chromeStatus };
+  }
+
+  async prepareChromeExtension() {
+    this.chromePrepares += 1;
+    return this.chromeStatus.extensionFolder;
+  }
+
+  async openChromeExtensions() {
+    this.chromeExtensionsOpens += 1;
+  }
+
+  async revealChromeExtensionFolder() {
+    this.chromeFolderReveals += 1;
+  }
+
+  async openChromeSetup() {
+    this.chromeSetupOpens += 1;
   }
 
   async broadcastTheme(themeId: string | null) {

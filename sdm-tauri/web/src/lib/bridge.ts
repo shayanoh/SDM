@@ -2,6 +2,7 @@ import type {
   Patch,
   SettingsDto,
   BinariesStatusDto,
+  ChromeExtensionDto,
   AppError,
   DeletionInfo,
   DeletionTarget,
@@ -47,6 +48,16 @@ export interface Bridge {
   listThemes(): Promise<ThemeInfo[]>;
   /** Shows the Settings window, or focuses it if it is open. */
   openSettings(): Promise<void>;
+  /** Whether the Chrome extension has reported in, and the cookie file's age. */
+  chromeExtensionStatus(): Promise<ChromeExtensionDto>;
+  /** Copies the extension to its stable folder and registers the host; returns the folder. */
+  prepareChromeExtension(): Promise<string>;
+  /** Opens Chrome on its extensions page. */
+  openChromeExtensions(): Promise<void>;
+  /** Shows the extension folder in the file manager. */
+  revealChromeExtensionFolder(): Promise<void>;
+  /** Shows the extension setup window, or focuses it if it is open. */
+  openChromeSetup(): Promise<void>;
   /** Previews a theme in every window; `null` restores the stored one. */
   broadcastTheme(themeId: string | null): Promise<void>;
   /** What the tray popover shows now. */

@@ -333,7 +333,7 @@ fn with_cookie_hint(lease: &CookieLease, error: ResolveError) -> ResolveError {
         return ResolveError::YtDlpFailed {
             stderr_tail: "Sign-in is required, and Chrome cookies are unavailable: they come \
                           from the SDM Chrome extension, which is not connected. Open \
-                          Settings → YouTube and choose Set up the extension."
+                          Settings → Media Sites and choose Set up the extension."
                 .to_owned(),
         };
     }

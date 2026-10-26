@@ -1,6 +1,7 @@
 import { mount } from "svelte";
 import "./theme.css";
 import App from "./App.svelte";
+import ChromeSetup from "./components/ChromeSetup.svelte";
 import SettingsWindow from "./components/settings/SettingsWindow.svelte";
 import TrayPopover from "./components/TrayPopover.svelte";
 import { startTheming } from "./lib/theme";
@@ -49,14 +50,23 @@ const query = new URLSearchParams(location.search);
 const windowName = query.get("window");
 const isSettings = windowName === "settings";
 const isTray = windowName === "tray";
-if (isSettings || isTray) {
+const isChromeSetup = windowName === "chrome-setup";
+if (isSettings || isTray || isChromeSetup) {
   // The main window's App starts its own theming; these windows have none.
   void startTheming(bridge, query.get("theme")).catch((error) =>
     ui.report(String(error)),
   );
 }
 
-export default mount(isSettings ? SettingsWindow : isTray ? TrayPopover : App, {
+const root = isSettings
+  ? SettingsWindow
+  : isTray
+    ? TrayPopover
+    : isChromeSetup
+      ? ChromeSetup
+      : App;
+
+export default mount(root, {
   target,
   context: createContext(bridge, store, ui),
 });

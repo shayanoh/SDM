@@ -248,4 +248,27 @@ describe("the Settings window", () => {
       expect((await bridge.getSettings()).maxPlaylistVideos).toBe(200),
     );
   });
+
+  it("shows the extension note only while the cookie source is Chrome", async () => {
+    const { bridge } = await open();
+    await fireEvent.click(tab("Media Sites"));
+    const note = () => screen.queryByTestId("chrome-cookies-note");
+    expect(note()).toBeNull();
+    await fireEvent.change(screen.getByLabelText("Cookies from browser"), {
+      target: { value: "chrome" },
+    });
+    const shown = await screen.findByTestId("chrome-cookies-note");
+    expect(shown.textContent).toContain(
+      "Chrome cookies come from the SDM Chrome extension.",
+    );
+    expect(await screen.findByText("Extension not connected.")).toBeTruthy();
+    await fireEvent.click(
+      screen.getByRole("button", { name: "Set up the extension" }),
+    );
+    expect(bridge.chromeSetupOpens).toBe(1);
+    await fireEvent.change(screen.getByLabelText("Cookies from browser"), {
+      target: { value: "firefox" },
+    });
+    expect(note()).toBeNull();
+  });
 });

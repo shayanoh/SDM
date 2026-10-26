@@ -148,7 +148,7 @@ Working hypothesis (verify first, do not patch blindly): `tauri_plugin_window_st
 
 - [ ] **Step 1: Write failing tests:** resolver with a provider returns its arguments and not `--cookies-from-browser`; the lease is dropped after the run (use a guard that flips an `AtomicBool`); wholesale likewise; `lease_for_chrome` with a present file returns `--cookies <path that exists>` and deleting the lease removes the copy, a missing file returns no arguments; `sweep_stale_leases` removes leftovers; toolchain-level test: settings `chrome` + missing file ⇒ no cookie arguments; `firefox` ⇒ `--cookies-from-browser firefox`.
 - [ ] **Step 2:** Run; fails.
-- [ ] **Step 3:** Implement; call `sweep_stale_leases` from `production_dependencies`. The sign-in failure text (resolver, near the "sign in … cookies" check) gains the hint "Chrome cookies come from the SDM extension; open Settings → YouTube to set it up" only when the provider reported Chrome with a missing file (carry a flag on the lease, `CookieLease::chrome_missing`).
+- [ ] **Step 3:** Implement; call `sweep_stale_leases` from `production_dependencies`. The sign-in failure text (resolver, near the "sign in … cookies" check) gains the hint "Chrome cookies come from the SDM extension; open Settings → Media Sites to set it up" only when the provider reported Chrome with a missing file (carry a flag on the lease, `CookieLease::chrome_missing`).
 - [ ] **Step 4:** `cargo test -p sdm-resolve -p sdm-browser -p sdm-app` and `cargo test -p sdm-ffi` (unchanged behavior) pass.
 - [ ] **Step 5: Commit** `Give yt-dlp the extension's cookie file when the cookie source is Chrome`.
 
@@ -195,7 +195,7 @@ Working hypothesis (verify first, do not patch blindly): `tauri_plugin_window_st
 **Interfaces:**
 - `chromeSetup.ts`: `export function statusLine(dto: ChromeExtensionDto): string` ("Connected, extension 2.0.0, cookies synced 3 min ago" / "Update available: press Reload on chrome://extensions" / "Extension not connected") and `export function steps(platform): Step[]`.
 - The setup window polls `chrome_extension_status` once per second while open, shows the four steps (Open Chrome Extensions, enable Developer mode, Load unpacked, then **Show folder** / **Copy path** instead of the drag tile) and the "You're all set" state; calls `prepare_chrome_extension` when it opens.
-- Settings YouTube tab: when the draft `cookieSource` is `chrome`, show the note "Chrome cookies come from the SDM Chrome extension." plus the `statusLine` and a **Set up the extension** button (`open_chrome_setup`); hidden for any other source. Theme roles only.
+- Settings Media Sites tab: when the draft `cookieSource` is `chrome`, show the note "Chrome cookies come from the SDM Chrome extension." plus the `statusLine` and a **Set up the extension** button (`open_chrome_setup`); hidden for any other source. Theme roles only.
 
 - [ ] **Step 1: Write failing vitest tests:** `statusLine` per state; the Settings component shows the note only when the draft source is `chrome` and the button invokes `open_chrome_setup` (component test style as the existing settings tests); mockBridge answers the new commands.
 - [ ] **Step 2:** `cd sdm-tauri/web && pnpm test` fails.
