@@ -40,3 +40,9 @@ sdm-tauri/web/playwright-report/
 
 # Brainstorming visual companion mockups
 .superpowers/
+
+## Release builds (scripts/build-tauri.sh)
+/Releases/
+
+## Python
+__pycache__/

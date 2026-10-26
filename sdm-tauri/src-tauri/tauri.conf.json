@@ -28,7 +28,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "app", "deb", "appimage"],
+    "targets": ["nsis", "app", "dmg", "deb", "appimage"],
     "resources": {
       "../../SDMChromeExtension": "chrome-extension"
     },
