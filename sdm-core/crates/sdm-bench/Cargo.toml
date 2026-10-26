@@ -11,8 +11,8 @@ repository.workspace = true
 [dependencies]
 async-trait = "0.1.92"
 bytes = "1.12.1"
-sdm-core = { version = "4.0.0", path = "../sdm-core" }
-sdm-engine = { version = "4.0.0", path = "../sdm-engine" }
+sdm-core = { version = "4.0.1", path = "../sdm-core" }
+sdm-engine = { version = "4.0.1", path = "../sdm-engine" }
 tempfile = "3.27.0"
 tokio = { version = "1.53.2", features = ["rt-multi-thread", "macros"] }
 

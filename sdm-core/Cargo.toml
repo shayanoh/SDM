@@ -4,7 +4,7 @@ members = ["crates/*", "../sdm-tauri/src-tauri"]
 
 [workspace.package]
 edition = "2024"
-version = "4.0.0"
+version = "4.0.1"
 publish = false
 license = "MIT"
 authors = ["Shayan Ostadhassan"]

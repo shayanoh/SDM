@@ -3811,7 +3811,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "sdm-app"
-version = "4.0.0"
+version = "4.0.1"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3836,7 +3836,7 @@ dependencies = [
 
 [[package]]
 name = "sdm-bench"
-version = "4.0.0"
+version = "4.0.1"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3848,7 +3848,7 @@ dependencies = [
 
 [[package]]
 name = "sdm-browser"
-version = "4.0.0"
+version = "4.0.1"
 dependencies = [
  "sdm-resolve",
  "serde",
@@ -3859,7 +3859,7 @@ dependencies = [
 
 [[package]]
 name = "sdm-core"
-version = "4.0.0"
+version = "4.0.1"
 dependencies = [
  "async-trait",
  "rand 0.10.3",
@@ -3873,7 +3873,7 @@ dependencies = [
 
 [[package]]
 name = "sdm-engine"
-version = "4.0.0"
+version = "4.0.1"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3901,7 +3901,7 @@ dependencies = [
 
 [[package]]
 name = "sdm-grabber"
-version = "4.0.0"
+version = "4.0.1"
 dependencies = [
  "async-trait",
  "bytes",
@@ -3926,7 +3926,7 @@ dependencies = [
 
 [[package]]
 name = "sdm-resolve"
-version = "4.0.0"
+version = "4.0.1"
 dependencies = [
  "async-trait",
  "hex",
@@ -3951,7 +3951,7 @@ dependencies = [
 
 [[package]]
 name = "sdm-tauri"
-version = "4.0.0"
+version = "4.0.1"
 dependencies = [
  "dirs 6.0.0",
  "sdm-app",
