@@ -7,4 +7,5 @@ pub mod framing;
 pub mod host;
 pub mod install;
 pub mod lease;
+pub mod prompt;
 pub mod status;

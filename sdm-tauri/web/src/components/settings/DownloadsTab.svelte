@@ -1,9 +1,19 @@
 <script lang="ts">
+  import type { ChromeExtensionDto } from "../../bindings";
+  import { statusLine } from "../../lib/chromeSetup";
   import type { SettingsDraft } from "../../lib/settingsDraft.svelte";
   import SettingsSection from "./SettingsSection.svelte";
   import SteppedNumberField from "./SteppedNumberField.svelte";
 
-  let { draft }: { draft: SettingsDraft } = $props();
+  let {
+    draft,
+    chrome,
+    onSetupChrome,
+  }: {
+    draft: SettingsDraft;
+    chrome: ChromeExtensionDto | null;
+    onSetupChrome: () => void;
+  } = $props();
 </script>
 
 <div class="tab">
@@ -55,4 +65,34 @@
       Resume downloads automatically when SDM opens
     </label>
   </SettingsSection>
+  <SettingsSection title="Chrome Extension">
+    <p class="about">
+      The SDM Chrome extension is a helper: it captures downloads from Chrome
+      and shares Chrome's cookies with SDM for media sites.
+    </p>
+    {#if chrome}<p class="status">{statusLine(chrome)}</p>{/if}
+    <div class="action">
+      <button type="button" onclick={onSetupChrome}>
+        Install Chrome Extension…
+      </button>
+    </div>
+  </SettingsSection>
 </div>
+
+<style>
+  .about,
+  .status {
+    margin: 0;
+    font-size: 15px;
+  }
+  .status {
+    color: var(--text-secondary);
+  }
+  .action {
+    display: flex;
+  }
+  .action button {
+    padding: 4px 14px;
+    font-size: 15px;
+  }
+</style>

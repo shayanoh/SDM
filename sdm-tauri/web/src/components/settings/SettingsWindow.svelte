@@ -56,10 +56,8 @@
     }
   }
 
-  // Only asked while the cookie source is Chrome: that is the only time the
-  // extension matters to this window.
+  // The extension's status is shown on the Downloads and Media Sites tabs.
   async function refreshChrome() {
-    if (draft?.values.cookieSource !== "chrome") return;
     try {
       chrome = await bridge.chromeExtensionStatus();
     } catch {
@@ -89,8 +87,10 @@
     };
   });
 
+  // Looked at again whenever a tab is opened, and by the poll above.
   $effect(() => {
-    if (draft?.values.cookieSource === "chrome") void refreshChrome();
+    void tab;
+    void refreshChrome();
   });
 
   // The window is as tall as the tab it shows.
@@ -191,7 +191,11 @@
         {:else if tab === "appearance"}
           <AppearanceTab {draft} {themes} {platform} onTheme={previewTheme} />
         {:else if tab === "downloads"}
-          <DownloadsTab {draft} />
+          <DownloadsTab
+            {draft}
+            {chrome}
+            onSetupChrome={() => void bridge.openChromeSetup()}
+          />
         {:else if tab === "linkgrabber"}
           <LinkgrabberTab {draft} />
         {:else if tab === "media"}

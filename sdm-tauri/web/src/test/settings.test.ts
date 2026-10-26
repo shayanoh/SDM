@@ -271,4 +271,36 @@ describe("the Settings window", () => {
     });
     expect(note()).toBeNull();
   });
+
+  it("describes the Chrome extension on Downloads, with its status and an install button", async () => {
+    const { bridge } = await open();
+    bridge.chromeStatus = {
+      ...bridge.chromeStatus,
+      state: "connected",
+      installedVersion: "2.0.0",
+      cookiesSyncedSecondsAgo: 120,
+    };
+    await fireEvent.click(tab("Downloads"));
+    expect(
+      await screen.findByRole("heading", { name: "Chrome Extension" }),
+    ).toBeTruthy();
+    expect(screen.getByText(/captures downloads from Chrome/i)).toBeTruthy();
+    expect(
+      await screen.findByText(
+        "Connected (extension 2.0.0). Cookies synced 2 min ago.",
+      ),
+    ).toBeTruthy();
+    const button = screen.getByRole("button", {
+      name: "Install Chrome Extension…",
+    });
+    expect(button.className).not.toContain("small");
+    await fireEvent.click(button);
+    expect(bridge.chromeSetupOpens).toBe(1);
+  });
+
+  it("shows the extension status on Downloads even when the cookie source is not Chrome", async () => {
+    await open();
+    await fireEvent.click(tab("Downloads"));
+    expect(await screen.findByText("Extension not connected.")).toBeTruthy();
+  });
 });

@@ -186,6 +186,31 @@ pub fn status(app: &AppHandle) -> Result<ChromeExtensionDto, AppError> {
     ))
 }
 
+/// Shortly after launch, opens the setup window if Chrome is installed and the
+/// extension is missing or older than the shipped one, at most three times per
+/// shipped version (`sdm_browser::prompt`).
+pub async fn prompt_after_launch(app: AppHandle) {
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    let (Ok(data_dir), Ok(dto)) = (data_dir(), status(&app)) else {
+        return;
+    };
+    let (show, next) = sdm_browser::prompt::decide(
+        &sdm_browser::prompt::load(&data_dir),
+        dto.bundled_version.as_deref(),
+        dto.installed_version.as_deref(),
+        dto.chrome_installed,
+    );
+    if !show {
+        return;
+    }
+    if let Err(error) = sdm_browser::prompt::save(&data_dir, &next) {
+        tracing::warn!("could not remember the extension prompt: {error}");
+    }
+    if let Err(error) = crate::chrome_setup_window::open(&app) {
+        tracing::warn!("{error}");
+    }
+}
+
 /// Copies the extension to its stable folder and registers the host with
 /// Chrome. Returns the folder to load unpacked.
 pub fn prepare(app: &AppHandle) -> Result<String, AppError> {

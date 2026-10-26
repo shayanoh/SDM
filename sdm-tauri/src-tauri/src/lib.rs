@@ -39,9 +39,12 @@ const WINDOW_STATE_DENYLIST: [&str; 3] =
 /// The id of the app menu's "Settings…" item on macOS.
 #[cfg(target_os = "macos")]
 const SETTINGS_MENU_ID: &str = "settings";
+/// The id of the app menu's "Install Google Chrome Extensions…" item on macOS.
+#[cfg(target_os = "macos")]
+const CHROME_SETUP_MENU_ID: &str = "chrome-setup";
 
-/// macOS: the default app menu with "Settings…" (Cmd+,) added under About, as
-/// the SwiftUI app has it. Windows and Linux get no menu bar.
+/// macOS: the default app menu with "Settings…" (Cmd+,) added under About, and
+/// above it "Install Google Chrome Extensions…", as the SwiftUI app has it. Windows and Linux get no menu bar.
 #[cfg(target_os = "macos")]
 fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
     use tauri::menu::{Menu, MenuItem, MenuItemKind, PredefinedMenuItem};
@@ -54,8 +57,16 @@ fn install_menu(app: &tauri::AppHandle) -> tauri::Result<()> {
             true,
             Some("CmdOrCtrl+,"),
         )?;
-        application.insert(&settings, 2)?;
-        application.insert(&PredefinedMenuItem::separator(app)?, 3)?;
+        let chrome = MenuItem::with_id(
+            app,
+            CHROME_SETUP_MENU_ID,
+            "Install Google Chrome Extensions…",
+            true,
+            None::<&str>,
+        )?;
+        application.insert(&chrome, 2)?;
+        application.insert(&settings, 3)?;
+        application.insert(&PredefinedMenuItem::separator(app)?, 4)?;
     }
     app.set_menu(menu)?;
     Ok(())
@@ -233,15 +244,23 @@ pub fn run() {
         })
         .on_menu_event(|app, event| {
             #[cfg(target_os = "macos")]
-            if event.id() == SETTINGS_MENU_ID {
+            {
                 // A window made inside a menu event handler can deadlock on
                 // some platforms; its own task is safe everywhere.
                 let handle = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    if let Err(error) = settings_window::open(&handle) {
-                        tracing::error!("could not open Settings: {error}");
-                    }
-                });
+                if event.id() == SETTINGS_MENU_ID {
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(error) = settings_window::open(&handle) {
+                            tracing::error!("could not open Settings: {error}");
+                        }
+                    });
+                } else if event.id() == CHROME_SETUP_MENU_ID {
+                    tauri::async_runtime::spawn(async move {
+                        if let Err(error) = chrome_setup_window::open(&handle) {
+                            tracing::error!("could not open the extension setup: {error}");
+                        }
+                    });
+                }
             }
             #[cfg(not(target_os = "macos"))]
             let _ = (app, event);
@@ -265,6 +284,15 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             activation::apply_current(tauri_app.handle());
             if simulation.is_none() {
+                // The SwiftUI app opens the extension setup a few times after
+                // launch; a start hidden in the tray shows no window, so no prompt.
+                let hidden = !cfg!(target_os = "macos")
+                    && autostart::is_hidden_launch(&std::env::args().collect::<Vec<_>>());
+                if !hidden {
+                    tauri::async_runtime::spawn(chrome_setup::prompt_after_launch(
+                        tauri_app.handle().clone(),
+                    ));
+                }
                 let (handle, core) = (tauri_app.handle().clone(), Arc::clone(&app));
                 tauri::async_runtime::spawn(async move {
                     autostart::reconcile_at_startup(&handle, &core).await;
