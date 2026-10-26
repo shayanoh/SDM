@@ -110,6 +110,7 @@
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
           class="slot header"
+          class:odd={line.index % 2 === 1}
           class:drop-target={dropTarget === line.key}
           style:top="{offsets[index]}px"
           style:height="{line.height}px"
@@ -151,7 +152,7 @@
         <!-- svelte-ignore a11y_click_events_have_key_events -->
         <div
           class="slot row"
-          class:odd={index % 2 === 1}
+          class:odd={line.index % 2 === 1}
           class:selected={ui.selected.has(row.id)}
           style:top="{offsets[index]}px"
           style:height="{line.height}px"
@@ -211,7 +212,11 @@
     align-items: center;
     gap: 8px;
     padding: 8px 12px;
-    background: var(--surface-secondary);
+    /* The same translucent stripes as the Downloads package headers. */
+    background: color-mix(in srgb, var(--surface-secondary) 50%, transparent);
+  }
+  .header.odd {
+    background: color-mix(in srgb, var(--surface-secondary) 90%, transparent);
   }
   .header.drop-target {
     box-shadow: inset 0 0 0 2px var(--accent);

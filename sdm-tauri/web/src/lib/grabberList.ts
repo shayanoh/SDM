@@ -4,33 +4,51 @@ import { GRABBER_HEADER_HEIGHT, GRABBER_ROW_HEIGHT } from "./layout";
 
 /** One line of the grabber list: a package header or a row. */
 export type FlatLine =
-  | { kind: "header"; key: string; height: number; pkg: GrabberPackage }
-  | { kind: "row"; key: string; height: number; row: GrabberRow };
+  | {
+      kind: "header";
+      key: string;
+      height: number;
+      /** The package's position among the packages (zebra striping). */
+      index: number;
+      pkg: GrabberPackage;
+    }
+  | {
+      kind: "row";
+      key: string;
+      height: number;
+      /** The row's position within its package, or among the loose rows (zebra striping). */
+      index: number;
+      row: GrabberRow;
+    };
 
 /** Rows in no package first, then each package's header followed by its rows. */
 export function flatLines(view: GrabberView): FlatLine[] {
   const { loose, packages } = rowsByPackage(view);
-  const lines: FlatLine[] = loose.map((row) => ({
+  const lines: FlatLine[] = loose.map((row, index) => ({
     kind: "row",
     key: row.id,
     height: GRABBER_ROW_HEIGHT,
+    index,
     row,
   }));
-  for (const { pkg, rows } of packages) {
+  packages.forEach(({ pkg, rows }, packageIndex) => {
     lines.push({
       kind: "header",
       key: `package:${pkg.id}`,
       height: GRABBER_HEADER_HEIGHT,
+      index: packageIndex,
       pkg,
     });
-    for (const row of rows)
+    rows.forEach((row, index) =>
       lines.push({
         kind: "row",
         key: row.id,
         height: GRABBER_ROW_HEIGHT,
+        index,
         row,
-      });
-  }
+      }),
+    );
+  });
   return lines;
 }
 

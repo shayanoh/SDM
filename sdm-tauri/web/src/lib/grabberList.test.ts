@@ -46,6 +46,20 @@ describe("flatLines", () => {
     ]);
   });
 
+  it("numbers rows within their group and headers by package, for zebra stripes", () => {
+    // loose, then package p (a, b), then package q: each group restarts at 0,
+    // as the Downloads list does, so the first row of every package is even.
+    expect(flatLines(view).map((l) => l.index)).toEqual([0, 0, 0, 1, 1]);
+    const three = flatLines({
+      ...view,
+      rows: [link("a"), link("b"), link("c"), link("d")],
+      packages: [
+        { id: "p", name: "P", note: null, rowIds: ["a", "b", "c", "d"] },
+      ],
+    });
+    expect(three.map((l) => l.index)).toEqual([0, 0, 1, 2, 3]);
+  });
+
   it("makes only rows selectable", () => {
     expect(selectableIds(flatLines(view))).toEqual(["loose", "a", "b"]);
   });
