@@ -3,10 +3,14 @@ import { describe, expect, it, vi } from "vitest";
 import ChromeSetup from "../components/ChromeSetup.svelte";
 import { createContext } from "../lib/context";
 import { MockBridge } from "../lib/mockBridge";
+import type { Platform } from "../lib/platform";
 import { DownloadStore } from "../lib/store.svelte";
 import { UiState } from "../lib/ui.svelte";
 
-function open(setup: (bridge: MockBridge) => void = () => {}) {
+function open(
+  setup: (bridge: MockBridge) => void = () => {},
+  platform: Platform = "mac",
+) {
   const bridge = new MockBridge();
   setup(bridge);
   const onClose = vi.fn();
@@ -16,7 +20,7 @@ function open(setup: (bridge: MockBridge) => void = () => {}) {
     new DownloadStore(() => {}),
     new UiState(),
   );
-  render(ChromeSetup, { context, props: { onClose, clipboard } });
+  render(ChromeSetup, { context, props: { onClose, clipboard, platform } });
   return { bridge, onClose, clipboard };
 }
 
@@ -101,4 +105,48 @@ describe("the Chrome extension setup window", () => {
     );
     expect(onClose).toHaveBeenCalled();
   });
+
+  describe("on Windows", () => {
+    // Chrome drops a chrome:// address handed to it by another program, so
+    // the step asks the user to paste it instead of opening the page.
+    it("shows the address to paste, with the instructions for it", async () => {
+      open(() => {}, "windows");
+      await screen.findByText("Install the Chrome Extension");
+      const box = screen.getByLabelText(
+        "Extensions page address",
+      ) as HTMLInputElement;
+      expect(box.value).toBe("chrome://extensions");
+      expect(box.readOnly).toBe(true);
+      expect(
+        screen.getByText(/open a new tab, paste this address/i),
+      ).toBeTruthy();
+      expect(
+        screen.queryByRole("button", { name: "Open Chrome Extensions" }),
+      ).toBeNull();
+    });
+
+    it("copies the address from its own button", async () => {
+      const { bridge, clipboard } = open(() => {}, "windows");
+      await screen.findByText("Install the Chrome Extension");
+      await fireEvent.click(
+        screen.getByRole("button", { name: "Copy Address" }),
+      );
+      await waitFor(() =>
+        expect(clipboard.writeText).toHaveBeenCalledWith("chrome://extensions"),
+      );
+      expect(bridge.chromeExtensionsOpens).toBe(0);
+    });
+  });
+
+  it.each(["mac", "linux"] as const)(
+    "keeps the Open Chrome Extensions button on %s",
+    async (platform) => {
+      open(() => {}, platform);
+      await screen.findByText("Install the Chrome Extension");
+      expect(
+        screen.getByRole("button", { name: "Open Chrome Extensions" }),
+      ).toBeTruthy();
+      expect(screen.queryByLabelText("Extensions page address")).toBeNull();
+    },
+  );
 });

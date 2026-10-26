@@ -3,16 +3,21 @@
   import type { ChromeExtensionDto } from "../bindings";
   import { statusLine } from "../lib/chromeSetup";
   import { errorMessage, useBridge } from "../lib/context";
+  import { detectPlatform, type Platform } from "../lib/platform";
   import { closeWindow, fitWindow } from "../lib/windowControl";
 
   /** The Chrome extension setup window: the Load-unpacked steps, and "all set" once the extension reports in. */
   let {
     onClose = closeWindow,
     clipboard = navigator.clipboard,
+    platform = detectPlatform(),
   }: {
     onClose?: () => void | Promise<void>;
     clipboard?: Pick<Clipboard, "writeText">;
+    platform?: Platform;
   } = $props();
+
+  const EXTENSIONS_ADDRESS = "chrome://extensions";
 
   const WIDTH = 560;
   const bridge = useBridge();
@@ -83,15 +88,39 @@
         <span class="n">1</span>
         <div>
           <strong>Open Chrome's Extensions page</strong>
-          <div class="row">
-            <button
-              type="button"
-              disabled={status ? !status.chromeInstalled : false}
-              onclick={() => void act(() => bridge.openChromeExtensions())}
-            >
-              Open Chrome Extensions
-            </button>
-          </div>
+          {#if platform === "windows"}
+            <!-- Chrome ignores a chrome:// address another program hands it
+                 (it opens an empty window instead), so the user pastes it. -->
+            <p class="muted">
+              In Chrome, open a new tab, paste this address and press Enter.
+            </p>
+            <div class="row">
+              <input
+                type="text"
+                readonly
+                aria-label="Extensions page address"
+                value={EXTENSIONS_ADDRESS}
+                onfocus={(event) => event.currentTarget.select()}
+              />
+              <button
+                type="button"
+                onclick={() =>
+                  void act(() => clipboard.writeText(EXTENSIONS_ADDRESS))}
+              >
+                Copy Address
+              </button>
+            </div>
+          {:else}
+            <div class="row">
+              <button
+                type="button"
+                disabled={status ? !status.chromeInstalled : false}
+                onclick={() => void act(() => bridge.openChromeExtensions())}
+              >
+                Open Chrome Extensions
+              </button>
+            </div>
+          {/if}
         </div>
       </li>
       <li>
@@ -214,6 +243,17 @@
     display: flex;
     gap: 8px;
     margin-top: 6px;
+  }
+  input {
+    flex: 1;
+    min-width: 0;
+    padding: 4px 8px;
+    font: inherit;
+    font-family: ui-monospace, monospace;
+    color: var(--text-primary);
+    background: var(--surface-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
   }
   .status {
     margin: 0 0 8px;
