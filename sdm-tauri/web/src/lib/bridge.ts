@@ -68,6 +68,8 @@ export interface Bridge {
   requestQuit(): Promise<void>;
   /** Shows the main window, on the tab `route` names (`downloads`, `completed`, `linkgrabber`). */
   showMain(route?: string): Promise<void>;
+  /** The tab asked for while the page was still loading, if any; the first call tells the backend the page is listening. */
+  takePendingRoute(): Promise<string | null>;
   /** Calls `handler` with the route of each request to switch tabs; returns the way to stop. */
   onNavigate(handler: (route: string) => void): () => void;
   /** Calls `handler` for each theme preview; returns the way to stop. */

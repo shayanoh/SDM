@@ -24,7 +24,8 @@
 
   const done = $derived(
     status?.state === "connected" &&
-      status.installedVersion === status.bundledVersion,
+      status.installedVersion === status.bundledVersion &&
+      status.cookiesSyncedSecondsAgo !== null,
   );
 
   async function refresh() {

@@ -70,12 +70,27 @@ describe("the Chrome extension setup window", () => {
         state: "connected",
         installedVersion: "2.0.0",
         bundledVersion: "2.0.0",
+        cookiesSyncedSecondsAgo: 5,
       };
     });
     expect(await screen.findByText("You're all set!")).toBeTruthy();
     expect(
       screen.getByText(/SDM Chrome Extension 2\.0\.0 is installed/),
     ).toBeTruthy();
+  });
+
+  it("is not all set while a connected extension has sent no cookies", async () => {
+    open((bridge) => {
+      bridge.chromeStatus = {
+        ...bridge.chromeStatus,
+        state: "connected",
+        installedVersion: "2.0.0",
+        bundledVersion: "2.0.0",
+        cookiesSyncedSecondsAgo: null,
+      };
+    });
+    expect(await screen.findByText(/no cookies have arrived/)).toBeTruthy();
+    expect(screen.queryByText("You're all set!")).toBeNull();
   });
 
   it("closes from the done button", async () => {

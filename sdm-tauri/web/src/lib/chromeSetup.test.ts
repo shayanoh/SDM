@@ -40,6 +40,14 @@ describe("statusLine", () => {
     ).toBe("Connected (extension 2.0.0). Cookies synced 3 min ago.");
   });
 
+  it("tells a connected extension that has never synced to reload", () => {
+    expect(
+      statusLine(dto({ state: "connected", installedVersion: "2.0.0" })),
+    ).toBe(
+      "Connected (extension 2.0.0), but no cookies have arrived. Press Reload on SDM at chrome://extensions; if that does not help, remove the extension and load it again.",
+    );
+  });
+
   it("asks for a reload when an older version reports", () => {
     expect(
       statusLine(dto({ state: "outdated", installedVersion: "1.0.1" })),

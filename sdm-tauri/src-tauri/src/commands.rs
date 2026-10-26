@@ -336,6 +336,20 @@ pub async fn quit_requested(handle: tauri::AppHandle) -> Result<(), AppError> {
     Ok(())
 }
 
+/// The page calls this once its navigation listener is on: it returns the tab
+/// asked for while the page was loading, if any, and from then on requests are
+/// sent as events.
+#[tauri::command]
+#[specta::specta]
+pub async fn take_pending_route(
+    state: State<'_, crate::main_window::NavigationState>,
+) -> Result<Option<String>, AppError> {
+    Ok(state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .page_ready())
+}
+
 /// Shows the main window, on the tab `route` names when it names one.
 #[tauri::command]
 #[specta::specta]

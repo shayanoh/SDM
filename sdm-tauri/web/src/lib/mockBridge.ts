@@ -906,7 +906,15 @@ export class MockBridge implements Bridge {
     this.quitRequests += 1;
   }
 
+  /** A tab asked for before the page was ready; `takePendingRoute` hands it over once. */
+  pendingRoute: string | null = null;
   #navigateListeners = new Set<(route: string) => void>();
+
+  async takePendingRoute() {
+    const route = this.pendingRoute;
+    this.pendingRoute = null;
+    return route;
+  }
 
   async showMain(route?: string) {
     if (route !== undefined) this.emitNavigate(route);

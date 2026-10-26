@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { MockBridge } from "./mockBridge";
 import { wireNavigation } from "./navigation";
 import { UiState } from "./ui.svelte";
@@ -28,6 +28,23 @@ describe("wireNavigation", () => {
     const stop = wireNavigation(bridge, ui);
     stop();
     bridge.emitNavigate("completed");
+    expect(ui.tab).toBe("downloads");
+  });
+
+  it("applies a tab the backend asked for before the page was ready", async () => {
+    const bridge = new MockBridge();
+    bridge.pendingRoute = "linkgrabber";
+    const ui = new UiState();
+    wireNavigation(bridge, ui);
+    await vi.waitFor(() => expect(ui.tab).toBe("linkgrabber"));
+    expect(bridge.pendingRoute).toBeNull();
+  });
+
+  it("stays on the current tab when nothing was asked for", async () => {
+    const bridge = new MockBridge();
+    const ui = new UiState();
+    wireNavigation(bridge, ui);
+    await Promise.resolve();
     expect(ui.tab).toBe("downloads");
   });
 });

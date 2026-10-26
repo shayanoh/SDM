@@ -14,6 +14,12 @@ export function cookiesAge(seconds: number | null): string {
 /** The one line that says where the extension stands. */
 export function statusLine(dto: ChromeExtensionDto): string {
   if (dto.state === "connected") {
+    // Chrome can keep running an older copy of the extension's script (it
+    // reports the new version from the manifest but never syncs): the cookie
+    // file never appearing is how that shows.
+    if (dto.cookiesSyncedSecondsAgo === null) {
+      return `Connected (extension ${dto.installedVersion ?? "?"}), but no cookies have arrived. Press Reload on SDM at chrome://extensions; if that does not help, remove the extension and load it again.`;
+    }
     return `Connected (extension ${dto.installedVersion ?? "?"}). ${cookiesAge(dto.cookiesSyncedSecondsAgo)}.`;
   }
   if (!dto.chromeInstalled)

@@ -98,6 +98,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
         reveal_chrome_extension_folder,
         open_chrome_setup,
         show_main,
+        take_pending_route,
         tray_status,
         quit_requested,
         broadcast_theme,
@@ -184,6 +185,7 @@ pub fn run() {
     export_bindings(&builder);
 
     tauri::Builder::default()
+        .manage(main_window::NavigationState::default())
         // First, so a second launch hands over before anything else starts.
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             // A captured download from the Chrome extension: the host starts

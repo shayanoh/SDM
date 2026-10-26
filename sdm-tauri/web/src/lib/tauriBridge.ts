@@ -150,6 +150,9 @@ export class TauriBridge implements Bridge {
   showMain(route?: string) {
     return unwrapVoid(commands.showMain(route ?? null));
   }
+  takePendingRoute() {
+    return unwrap(commands.takePendingRoute());
+  }
   onNavigate(handler: (route: string) => void) {
     const stopping = listen<string>("navigate", (event) =>
       handler(event.payload),

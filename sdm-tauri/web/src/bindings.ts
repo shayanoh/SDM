@@ -59,6 +59,12 @@ export const commands = {
 	openChromeSetup: () => typedError<null, AppError>(__TAURI_INVOKE("open_chrome_setup")),
 	/**  Shows the main window, on the tab `route` names when it names one. */
 	showMain: (route: string | null) => typedError<null, AppError>(__TAURI_INVOKE("show_main", { route })),
+	/**
+	 *  The page calls this once its navigation listener is on: it returns the tab
+	 *  asked for while the page was loading, if any, and from then on requests are
+	 *  sent as events.
+	 */
+	takePendingRoute: () => typedError<string | null, AppError>(__TAURI_INVOKE("take_pending_route")),
 	/**  What the tray popover shows now. */
 	trayStatus: () => typedError<TrayStatus, AppError>(__TAURI_INVOKE("tray_status")),
 	/**  The popover's Quit: goes through the quit guard. */
