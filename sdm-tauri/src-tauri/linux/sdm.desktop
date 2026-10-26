@@ -8,6 +8,6 @@ Comment={{comment}}
 Exec={{exec}}
 Icon={{icon}}
 Name={{name}}
-Keywords=download;downloader;manager;torrent;video;
+Keywords=download;downloader;manager;video;
 Terminal=false
 Type=Application
