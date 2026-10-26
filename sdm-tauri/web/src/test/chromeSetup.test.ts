@@ -20,11 +20,21 @@ function open(
     new DownloadStore(() => {}),
     new UiState(),
   );
-  render(ChromeSetup, { context, props: { onClose, clipboard, platform } });
+  render(ChromeSetup, {
+    context,
+    props: { onClose, clipboard, platform, themeReady: Promise.resolve() },
+  });
   return { bridge, onClose, clipboard };
 }
 
 describe("the Chrome extension setup window", () => {
+  it("shows its window once, after its status is in", async () => {
+    const { bridge } = open();
+    await waitFor(() => expect(bridge.windowReadyCalls).toBe(1));
+    await new Promise((done) => setTimeout(done, 1200));
+    expect(bridge.windowReadyCalls).toBe(1);
+  });
+
   it("prepares the folder when it opens and shows the four steps", async () => {
     const { bridge } = open();
     await screen.findByText("Install the Chrome Extension");

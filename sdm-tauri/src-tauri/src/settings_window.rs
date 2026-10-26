@@ -40,9 +40,10 @@ pub fn open(app: &AppHandle) -> Result<(), AppError> {
     .inner_size(WIDTH, INITIAL_HEIGHT)
     .resizable(false)
     .maximizable(false)
+    .visible(false)
     .center()
     .build()
-    .map(|_| ())
+    .map(|_| crate::window_ready::show_if_stuck(app, LABEL))
     .map_err(|e| AppError::failed(format!("could not open Settings: {e}")))
 }
 

@@ -350,6 +350,14 @@ pub async fn take_pending_route(
         .page_ready())
 }
 
+/// A page calls this when its theme is painted and its size fitted: its window
+/// (created hidden) is shown.
+#[tauri::command]
+#[specta::specta]
+pub async fn window_ready(window: tauri::WebviewWindow) -> Result<(), AppError> {
+    crate::window_ready::reveal(&window)
+}
+
 /// Shows the main window, on the tab `route` names when it names one.
 #[tauri::command]
 #[specta::specta]

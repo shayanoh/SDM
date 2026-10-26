@@ -7,6 +7,17 @@ type ThemeBridge = Pick<
   "getSettings" | "listThemes" | "themeCss" | "onThemePreview"
 >;
 
+let markFirstPaint: () => void = () => {};
+
+/**
+ * Settles once the first theme is in the page. A window that was created
+ * hidden waits for this before it asks to be shown, so it never appears
+ * unstyled.
+ */
+export const firstThemePaint: Promise<void> = new Promise((resolve) => {
+  markFirstPaint = resolve;
+});
+
 /**
  * Paints the stored theme into `<style id="theme">` and keeps it current: a
  * `theme-preview` from the Settings window swaps it (`null` goes back to the
@@ -37,6 +48,7 @@ export async function startTheming(
     resetThemeColors();
   }
   await paint();
+  markFirstPaint();
 
   const stopPreview = bridge.onThemePreview(async (themeId) => {
     if (themeId === null) {

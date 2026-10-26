@@ -60,6 +60,11 @@ export const commands = {
 	/**  Shows the main window, on the tab `route` names when it names one. */
 	showMain: (route: string | null) => typedError<null, AppError>(__TAURI_INVOKE("show_main", { route })),
 	/**
+	 *  A page calls this when its theme is painted and its size fitted: its window
+	 *  (created hidden) is shown.
+	 */
+	windowReady: () => typedError<null, AppError>(__TAURI_INVOKE("window_ready")),
+	/**
 	 *  The page calls this once its navigation listener is on: it returns the tab
 	 *  asked for while the page was loading, if any, and from then on requests are
 	 *  sent as events.

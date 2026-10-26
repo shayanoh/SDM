@@ -17,6 +17,7 @@ mod settings_window;
 mod tray;
 mod tray_icon;
 mod vibrancy;
+mod window_ready;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -33,6 +34,12 @@ use tauri_specta::{Builder, collect_commands};
 /// its tab, and the tray popover is positioned against the icon and must stay
 /// hidden until a click ("tray" is `popover::LABEL`, which only exists on
 /// macOS and Windows).
+/// What the window-state plugin keeps for the main window: where it is and how
+/// big, not whether it is visible (the page shows it once painted).
+fn window_state_flags() -> tauri_plugin_window_state::StateFlags {
+    tauri_plugin_window_state::StateFlags::all() - tauri_plugin_window_state::StateFlags::VISIBLE
+}
+
 const WINDOW_STATE_DENYLIST: [&str; 3] =
     [settings_window::LABEL, chrome_setup_window::LABEL, "tray"];
 
@@ -109,6 +116,7 @@ fn specta_builder() -> Builder<tauri::Wry> {
         reveal_chrome_extension_folder,
         open_chrome_setup,
         show_main,
+        window_ready,
         take_pending_route,
         tray_status,
         quit_requested,
@@ -219,6 +227,7 @@ pub fn run() {
         // Remembers the main window's size, position and maximized state.
         .plugin(
             tauri_plugin_window_state::Builder::default()
+                .with_state_flags(window_state_flags())
                 .with_denylist(&WINDOW_STATE_DENYLIST)
                 .build(),
         )
@@ -289,6 +298,7 @@ pub fn run() {
                 let hidden = !cfg!(target_os = "macos")
                     && autostart::is_hidden_launch(&std::env::args().collect::<Vec<_>>());
                 if !hidden {
+                    window_ready::show_if_stuck(tauri_app.handle(), main_window::LABEL);
                     tauri::async_runtime::spawn(chrome_setup::prompt_after_launch(
                         tauri_app.handle().clone(),
                     ));
@@ -380,6 +390,17 @@ mod tests {
         assert!(super::WINDOW_STATE_DENYLIST.contains(&crate::popover::LABEL));
     }
 
+    /// Windows start hidden and the page shows them once it is painted
+    /// (`window_ready`); the plugin must not show them first by restoring a
+    /// saved "visible".
+    #[test]
+    fn window_state_restores_geometry_but_never_visibility() {
+        use tauri_plugin_window_state::StateFlags;
+        let flags = super::window_state_flags();
+        assert!(!flags.contains(StateFlags::VISIBLE));
+        assert!(flags.contains(StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED));
+    }
+
     #[test]
     fn the_main_window_is_configured_like_the_swiftui_one() {
         let config: serde_json::Value =
@@ -392,6 +413,8 @@ mod tests {
         assert_eq!(window["minWidth"], 760);
         assert_eq!(window["minHeight"], 480);
         assert_eq!(window["dragDropEnabled"], false);
+        // Shown by the page once it has painted, so there is no white flash.
+        assert_eq!(window["visible"], false);
     }
 
     /// Windows adds a transparent window (for Mica and Acrylic) through its own

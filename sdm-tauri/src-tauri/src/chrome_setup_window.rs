@@ -35,10 +35,11 @@ pub fn open(app: &AppHandle) -> Result<(), AppError> {
     .inner_size(WIDTH, INITIAL_HEIGHT)
     .resizable(false)
     .maximizable(false)
+    .visible(false)
     .always_on_top(true)
     .center()
     .build()
-    .map(|_| ())
+    .map(|_| crate::window_ready::show_if_stuck(app, LABEL))
     .map_err(|e| AppError::failed(format!("could not open the setup window: {e}")))
 }
 

@@ -15,6 +15,8 @@ pub const LABEL: &str = "main";
 pub struct Navigation {
     page_ready: bool,
     pending: Option<String>,
+    /// A request to show the window arrived before the page did.
+    show_requested: bool,
 }
 
 impl Navigation {
@@ -26,6 +28,23 @@ impl Navigation {
             self.pending = Some(route.to_owned());
             None
         }
+    }
+
+    /// A request to show the main window: `true` when it must wait for the
+    /// page (the window is created hidden and a page that has not painted
+    /// would show white), in which case the page's `window_ready` shows it.
+    pub fn defer_show(&mut self) -> bool {
+        if self.page_ready {
+            false
+        } else {
+            self.show_requested = true;
+            true
+        }
+    }
+
+    /// Whether a show request is waiting for the page; cleared by asking.
+    pub fn take_show_requested(&mut self) -> bool {
+        std::mem::take(&mut self.show_requested)
     }
 
     /// The page is listening: returns what was parked for it, once.
@@ -46,12 +65,24 @@ pub fn show(app: &AppHandle, route: Option<&str>) -> Result<(), AppError> {
         .ok_or_else(|| AppError::failed("the main window is gone"))?;
     #[cfg(target_os = "macos")]
     crate::activation::apply(app, true);
-    window
-        .set_skip_taskbar(false)
-        .and_then(|()| window.show())
-        .and_then(|()| window.unminimize())
-        .and_then(|()| window.set_focus())
-        .map_err(|e| AppError::failed(format!("could not show the main window: {e}")))?;
+    let deferred = app.try_state::<NavigationState>().is_some_and(|state| {
+        state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .defer_show()
+    });
+    if deferred {
+        window
+            .set_skip_taskbar(false)
+            .map_err(|e| AppError::failed(format!("could not show the main window: {e}")))?;
+    } else {
+        window
+            .set_skip_taskbar(false)
+            .and_then(|()| window.show())
+            .and_then(|()| window.unminimize())
+            .and_then(|()| window.set_focus())
+            .map_err(|e| AppError::failed(format!("could not show the main window: {e}")))?;
+    }
     if let Some(route) = route {
         let now = match app.try_state::<NavigationState>() {
             Some(state) => state
@@ -78,6 +109,22 @@ mod tests {
         assert_eq!(navigation.request("linkgrabber"), None);
         assert_eq!(navigation.page_ready().as_deref(), Some("linkgrabber"));
         assert_eq!(navigation.page_ready(), None);
+    }
+
+    #[test]
+    fn a_show_request_before_the_page_waits_for_it_once() {
+        let mut navigation = Navigation::default();
+        assert!(navigation.defer_show());
+        assert!(navigation.take_show_requested());
+        assert!(!navigation.take_show_requested());
+    }
+
+    #[test]
+    fn a_show_request_after_the_page_is_ready_is_not_deferred() {
+        let mut navigation = Navigation::default();
+        navigation.page_ready();
+        assert!(!navigation.defer_show());
+        assert!(!navigation.take_show_requested());
     }
 
     #[test]

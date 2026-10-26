@@ -3,6 +3,8 @@
   import type { ChromeExtensionDto } from "../bindings";
   import { statusLine } from "../lib/chromeSetup";
   import { errorMessage, useBridge } from "../lib/context";
+  import { afterPaint } from "../lib/paint";
+  import { firstThemePaint } from "../lib/theme";
   import { detectPlatform, type Platform } from "../lib/platform";
   import { closeWindow, fitWindow } from "../lib/windowControl";
 
@@ -11,10 +13,13 @@
     onClose = closeWindow,
     clipboard = navigator.clipboard,
     platform = detectPlatform(),
+    themeReady = firstThemePaint,
   }: {
     onClose?: () => void | Promise<void>;
     clipboard?: Pick<Clipboard, "writeText">;
     platform?: Platform;
+    /** Settles when the theme is painted; the window is shown after it. */
+    themeReady?: Promise<void>;
   } = $props();
 
   const EXTENSIONS_ADDRESS = "chrome://extensions";
@@ -61,6 +66,21 @@
 
   $effect(() => {
     if (height > 0) void fitWindow(WIDTH, height);
+  });
+
+  // The window starts hidden: shown once, with its status in, the theme
+  // painted and the window sized.
+  let revealed = false;
+  $effect(() => {
+    if (revealed || !status) return;
+    revealed = true;
+    void (async () => {
+      await themeReady;
+      await afterPaint();
+      await fitWindow(WIDTH, height);
+      await afterPaint();
+      await bridge.windowReady();
+    })().catch(() => {});
   });
 </script>
 

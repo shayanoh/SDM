@@ -916,6 +916,13 @@ export class MockBridge implements Bridge {
     return route;
   }
 
+  /** How often a page said its window can be shown. */
+  windowReadyCalls = 0;
+
+  async windowReady() {
+    this.windowReadyCalls += 1;
+  }
+
   async showMain(route?: string) {
     if (route !== undefined) this.emitNavigate(route);
   }

@@ -6,6 +6,8 @@
     ThemeInfo,
   } from "../../bindings";
   import { errorMessage, useBridge } from "../../lib/context";
+  import { afterPaint } from "../../lib/paint";
+  import { firstThemePaint } from "../../lib/theme";
   import { detectPlatform, type Platform } from "../../lib/platform";
   import { SettingsDraft } from "../../lib/settingsDraft.svelte";
   import {
@@ -23,7 +25,13 @@
   let {
     platform = detectPlatform(),
     onClose = closeWindow,
-  }: { platform?: Platform; onClose?: () => void | Promise<void> } = $props();
+    themeReady = firstThemePaint,
+  }: {
+    platform?: Platform;
+    onClose?: () => void | Promise<void>;
+    /** Settles when the theme is painted; the window is shown after it. */
+    themeReady?: Promise<void>;
+  } = $props();
 
   const WIDTH = 560;
   const TABS = [
@@ -96,6 +104,22 @@
   // The window is as tall as the tab it shows.
   $effect(() => {
     if (contentHeight > 0) void fitWindow(WIDTH, contentHeight);
+  });
+
+  // The window starts hidden: it is shown once, when the settings are in, the
+  // theme is painted and the window is sized to its first tab.
+  let revealed = false;
+  $effect(() => {
+    if (revealed || !draft) return;
+    revealed = true;
+    void (async () => {
+      await themeReady;
+      // One paint lets the page lay out, which sets `contentHeight`.
+      await afterPaint();
+      await fitWindow(WIDTH, contentHeight);
+      await afterPaint();
+      await bridge.windowReady();
+    })().catch(() => {});
   });
 
   function previewTheme(id: string) {

@@ -16,7 +16,10 @@ async function open(platform: Platform = "windows") {
     new DownloadStore(() => {}),
     new UiState(),
   );
-  render(SettingsWindow, { context: context, props: { platform, onClose } });
+  render(SettingsWindow, {
+    context: context,
+    props: { platform, onClose, themeReady: Promise.resolve() },
+  });
   // The stored settings arrive asynchronously.
   await screen.findByRole("tab", { name: "Appearance" });
   await waitFor(() =>
@@ -302,5 +305,13 @@ describe("the Settings window", () => {
     await open();
     await fireEvent.click(tab("Downloads"));
     expect(await screen.findByText("Extension not connected.")).toBeTruthy();
+  });
+
+  it("shows its window once, after the settings are loaded and the size fitted", async () => {
+    const { bridge } = await open();
+    await waitFor(() => expect(bridge.windowReadyCalls).toBe(1));
+    await fireEvent.click(tab("Downloads"));
+    await fireEvent.click(tab("Media Sites"));
+    expect(bridge.windowReadyCalls).toBe(1);
   });
 });

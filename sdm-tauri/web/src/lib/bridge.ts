@@ -66,6 +66,8 @@ export interface Bridge {
   onTrayStatus(handler: (status: TrayStatus) => void): () => void;
   /** Quits, after the backend asks about running downloads. */
   requestQuit(): Promise<void>;
+  /** Tells the backend this window's page is painted and sized, so it can show the window (created hidden). */
+  windowReady(): Promise<void>;
   /** Shows the main window, on the tab `route` names (`downloads`, `completed`, `linkgrabber`). */
   showMain(route?: string): Promise<void>;
   /** The tab asked for while the page was still loading, if any; the first call tells the backend the page is listening. */

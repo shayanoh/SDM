@@ -147,6 +147,9 @@ export class TauriBridge implements Bridge {
   requestQuit() {
     return unwrapVoid(commands.quitRequested());
   }
+  windowReady() {
+    return unwrapVoid(commands.windowReady());
+  }
   showMain(route?: string) {
     return unwrapVoid(commands.showMain(route ?? null));
   }

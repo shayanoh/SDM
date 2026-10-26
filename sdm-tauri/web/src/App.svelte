@@ -3,6 +3,7 @@
   import Shell from "./components/Shell.svelte";
   import { errorMessage, useBridge, useStore, useUi } from "./lib/context";
   import { wireNavigation } from "./lib/navigation";
+  import { afterPaint } from "./lib/paint";
   import { startTheming } from "./lib/theme";
   import { syncVibrancy } from "./lib/vibrancy";
 
@@ -34,6 +35,9 @@
       );
       await bridge.attach(store.apply.bind(store));
       await syncVibrancy(bridge);
+      // The window is created hidden: shown once styled and filled.
+      await afterPaint();
+      await bridge.windowReady();
     });
 
     return () => {
