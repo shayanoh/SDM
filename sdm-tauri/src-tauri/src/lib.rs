@@ -3,6 +3,7 @@ mod activation;
 mod autostart;
 mod clipboard;
 mod commands;
+mod handoff;
 mod host;
 mod lifecycle;
 mod linux_tray;
@@ -157,6 +158,16 @@ fn build_app(handle: &tauri::AppHandle) -> Result<Built, Box<dyn std::error::Err
     Ok((App::production(host)?, None))
 }
 
+/// Chrome started this binary as the extension's native-messaging host: one
+/// message in, one reply out, no window. Called by `main` before Tauri starts.
+pub fn is_native_host_launch(args: &[String]) -> bool {
+    handoff::is_native_host_launch(args)
+}
+
+pub fn run_native_host() -> i32 {
+    handoff::run_native_host()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt::init();
@@ -166,7 +177,15 @@ pub fn run() {
 
     tauri::Builder::default()
         // First, so a second launch hands over before anything else starts.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // A captured download from the Chrome extension: the host starts
+            // this binary with `--add-url`.
+            if let Some(url) = handoff::add_url_from_args(&args)
+                && let Some(core) = app.try_state::<Arc<App>>()
+            {
+                handoff::deliver(app, Arc::clone(&core), url);
+                return;
+            }
             if let Err(error) = main_window::show(app, None) {
                 tracing::warn!("could not show the running instance: {error}");
             }
@@ -222,6 +241,10 @@ pub fn run() {
             let (app, simulation) = build_app(tauri_app.handle())?;
             tauri_app.manage(Arc::clone(&app));
             clipboard::spawn(tauri_app.handle().clone(), Arc::clone(&app));
+            // Started by the Chrome extension's host to add a download.
+            if let Some(url) = handoff::add_url_from_args(&std::env::args().collect::<Vec<_>>()) {
+                handoff::deliver(tauri_app.handle(), Arc::clone(&app), url);
+            }
             #[cfg(any(windows, target_os = "macos"))]
             popover::init(tauri_app.handle());
             tray::install(tauri_app.handle())?;

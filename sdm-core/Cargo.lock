@@ -4175,7 +4175,9 @@ dependencies = [
 name = "sdm-tauri"
 version = "0.1.0"
 dependencies = [
+ "dirs 6.0.0",
  "sdm-app",
+ "sdm-browser",
  "sdm-core",
  "serde",
  "serde_json",
