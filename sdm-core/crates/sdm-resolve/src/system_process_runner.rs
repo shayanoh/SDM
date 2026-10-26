@@ -179,6 +179,21 @@ impl ProcessRunner for SystemProcessRunner {
     }
 }
 
+/// The `CreateProcess` flag that stops a console program from opening its own
+/// console window. Without it every yt-dlp / ffmpeg run flashes a command
+/// prompt when the app is a GUI program.
+#[cfg_attr(not(windows), allow(dead_code))]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// Keeps a child from opening a console window on Windows; does nothing
+/// elsewhere.
+fn hide_console(command: &mut Command) {
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+    #[cfg(not(windows))]
+    let _ = command;
+}
+
 /// Spawns the child, pumps both pipes into the sinks, and races its exit
 /// against `timeout` and `cancel`. Cancellation sends SIGTERM, gives the
 /// child a bounded window to exit, and returns `Cancelled`.
@@ -196,6 +211,7 @@ async fn execute(
         .envs(SystemProcessRunner::child_environment(executable))
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    hide_console(&mut command);
     let mut child = command
         .spawn()
         .map_err(|e| ProcessRunError::LaunchFailed(e.to_string()))?;
@@ -435,6 +451,12 @@ impl LineStreamer {
 mod portability_tests {
     use super::*;
     use std::ffi::OsString;
+
+    #[test]
+    fn create_no_window_flag_value() {
+        // `CREATE_NO_WINDOW` from the Windows `CreateProcess` documentation.
+        assert_eq!(CREATE_NO_WINDOW, 0x0800_0000);
+    }
 
     #[test]
     fn child_path_keeps_the_executable_directory_first_and_has_no_duplicates() {
