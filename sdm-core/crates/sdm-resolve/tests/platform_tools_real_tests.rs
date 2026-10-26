@@ -1,8 +1,11 @@
 //! Downloads the real pinned artifacts. Network and about 350 MB: run by hand
 //! with `cargo test -p sdm-resolve --test platform_tools_real_tests -- --ignored`.
-#![cfg(all(
-    any(target_os = "windows", target_os = "linux"),
-    target_arch = "x86_64"
+#![cfg(any(
+    all(
+        any(target_os = "windows", target_os = "linux"),
+        target_arch = "x86_64"
+    ),
+    target_os = "macos"
 ))]
 
 use std::process::Command;
@@ -20,7 +23,6 @@ async fn real_latest_tools_download_install_and_run() {
         bin.clone(),
         Arc::new(ReqwestBinaryFetcher::new()),
         Arc::new(FakeProcessRunner::new()),
-        Vec::new,
         || YtDlpChannel::Stable,
     );
     mb.check_now(CheckReason::Manual).await;

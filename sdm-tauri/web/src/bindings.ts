@@ -114,8 +114,6 @@ export type AssemblyDto = "none" | "mux";
 export type AutoClearInterval = "fifteenMinutes" | "thirtyMinutes" | "oneHour" | "oneDay" | "never";
 
 export type BinariesStatusDto = {
-	/**  The tools ship inside the app (macOS) rather than being downloaded. */
-	bundled: boolean,
 	/**  A tool is being downloaded right now. */
 	downloading: boolean,
 	ytDlpVersion: string | null,

@@ -9,7 +9,6 @@ use tauri::{AppHandle, Manager};
 pub struct TauriHost {
     data_dir: PathBuf,
     download_dir: PathBuf,
-    bundled_tools_dir: Option<PathBuf>,
     app: AppHandle,
 }
 
@@ -22,16 +21,9 @@ impl TauriHost {
         let data_dir = paths.data_dir().map_err(|e| e.to_string())?.join("SDM");
         // The user's Downloads folder itself, as in the SwiftUI app.
         let download_dir = paths.download_dir().map_err(|e| e.to_string())?;
-        // Only the macOS bundle ships tools (see `tauri.macos.conf.json`).
-        let bundled_tools_dir = if cfg!(target_os = "macos") {
-            paths.resource_dir().ok().map(|dir| dir.join("vendor"))
-        } else {
-            None
-        };
         Ok(Self {
             data_dir,
             download_dir,
-            bundled_tools_dir,
             app: app.clone(),
         })
     }
@@ -44,10 +36,6 @@ impl Host for TauriHost {
 
     fn default_download_dir(&self) -> PathBuf {
         self.download_dir.clone()
-    }
-
-    fn bundled_tools_dir(&self) -> Option<PathBuf> {
-        self.bundled_tools_dir.clone()
     }
 
     fn reveal_in_file_manager(&self, path: &Path) -> Result<(), HostError> {

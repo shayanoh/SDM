@@ -34,7 +34,7 @@ SDM is a Rust core (`sdm-core/`) under a Tauri v2 + Svelte 5 interface (`sdm-tau
 - About fifty sites (YouTube, Vimeo, Twitch, TikTok, SoundCloud, Reddit and more) through yt-dlp, which only extracts metadata: SDM downloads the direct URLs itself, through the same segmented engine
 - HLS/DASH-only videos are downloaded by yt-dlp itself, resumably
 - Quality, resolution, and codec preference list, applied automatically at grab time, with a per-link override
-- `yt-dlp`, `ffmpeg`, and a JavaScript runtime are **provisioned automatically** — nothing to install (see [Vendored binaries](#vendored-binaries))
+- `yt-dlp`, `ffmpeg`, and a JavaScript runtime are **provisioned automatically** — nothing to install (see [Helper binaries](#helper-binaries))
 
 **Chrome extension**
 
@@ -61,7 +61,6 @@ Prerequisites:
 
 - Rust through [rustup](https://rustup.rs). The scripts put `~/.cargo/bin` first on `PATH`, so a Homebrew `cargo` (which cannot cross-compile) is not used. For the macOS universal build also `rustup target add x86_64-apple-darwin aarch64-apple-darwin`.
 - Node and [pnpm](https://pnpm.io) for the Svelte frontend.
-- Git LFS, for the vendored blobs below: run `git lfs install` before cloning, or `git lfs pull` after.
 - Windows builds are cross-built from a Mac with `cargo-xwin`; Linux builds run in Docker (`sdm-tauri/docker/`).
 
 Run the app while developing:
@@ -98,24 +97,26 @@ cd sdm-core && cargo test --workspace --exclude sdm-tauri   # Rust core
 cd sdm-core && cargo test -p sdm-tauri                      # the Tauri shell
 (cd sdm-tauri/web && pnpm test)                             # Svelte
 node --test SDMChromeExtension/cookies.test.js              # extension
-python3 -m unittest scripts/test_version.py                 # version script
+python3 -m unittest scripts/test_version.py scripts/test_bundle_resources.py   # version script, bundle contents
 ```
 
 `./lint.sh` runs `cargo clippy --workspace --all-targets -- -D warnings` and the Svelte type check. `./format.sh` runs `cargo fmt --all` and `prettier`.
 
-## Vendored binaries
+## Helper binaries
 
-SDM does not ask you to install anything. Its three helper binaries live in the `bin/` folder of SDM's data directory (`~/Library/Application Support/SDM/bin/` on macOS, `%APPDATA%\SDM\bin\` on Windows, `~/.local/share/SDM/bin/` on Linux):
+SDM does not ask you to install anything, and does not ship the helpers either. They are downloaded on first launch, on every platform, into the `bin/` folder of SDM's data directory (`~/Library/Application Support/SDM/bin/` on macOS, `%APPDATA%\SDM\bin\` on Windows, `~/.local/share/SDM/bin/` on Linux), each checked against a published SHA-256 before it is installed:
 
-| Binary | How it gets there | Updates |
-|---|---|---|
-| `ffmpeg`, `ffprobe` | macOS: bundled in the app as a per-arch LZFSE blob, inflated on first launch. Windows and Linux: downloaded on first launch, checked against the release's published digest | macOS: only when a new SDM build ships a newer pinned build. Windows and Linux: when missing |
-| `qjs` (QuickJS-ng) | The JavaScript runtime yt-dlp needs for full YouTube support. Bundled on macOS, downloaded elsewhere | macOS: with the app. Elsewhere: when the release tag changes |
-| `yt-dlp` | **Downloaded** from GitHub releases on first launch, SHA-256 verified | Self-checks every 6 h (15 min while missing); auto-updates. Stable or nightly channel, chosen in **Settings → Media Sites → Components**. Never uses `yt-dlp -U`. |
+| Binary              | Where from                                                                                                                                                                                                                        | Updates                                                                                                                                                           |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ffmpeg`, `ffprobe` | Windows and Linux: the BtbN FFmpeg-Builds `latest` release, checked against the digest GitHub publishes. macOS: the static builds of ffmpeg.martin-riedl.de for the machine's CPU, checked against the `.sha256` beside the build | Only when missing                                                                                                                                                 |
+| `qjs` (QuickJS-ng)  | The JavaScript runtime yt-dlp needs for full YouTube support, from the quickjs-ng GitHub release                                                                                                                                  | When the release tag changes                                                                                                                                      |
+| `yt-dlp`            | GitHub releases                                                                                                                                                                                                                   | Self-checks every 6 h (15 min while missing); auto-updates. Stable or nightly channel, chosen in **Settings → Media Sites → Components**. Never uses `yt-dlp -U`. |
 
-All of this is implemented in `sdm-core/crates/sdm-resolve/src/managed_binaries.rs`.
+All of this is implemented in `sdm-core/crates/sdm-resolve/src/managed_binaries.rs`; the table of sources is `platform_tools.rs`. Their licenses are in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
-To refresh the pinned `ffmpeg` / `qjs` versions that ship in the macOS bundle, edit the version pins at the top of `scripts/vendor-binaries.sh`, run it, and commit the regenerated blobs (`sdm-tauri/vendor/`, Git LFS) and `vendor-manifest.json`. A fresh clone that has not run the script carries a placeholder `vendor-manifest.json` (`"0"` versions); the app treats absent blobs as "nothing to inflate" and yt-dlp still self-downloads.
+## License
+
+SDM is open source under the [MIT License](LICENSE). Copyright © 2026 Shayan Ostadhassan.
 
 ## Documentation
 

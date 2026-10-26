@@ -393,8 +393,10 @@ async fn a_failed_tool_download_shows_an_error_notice_in_the_view() {
 
     let tool = PlatformTool {
         name: "qjs".into(),
-        release_api: "https://api.example/qjs/releases/latest".into(),
-        asset_name: "qjs-linux".into(),
+        source: sdm_resolve::ToolSource::GitHub {
+            release_api: "https://api.example/qjs/releases/latest".into(),
+            asset_name: "qjs-linux".into(),
+        },
         archive: ArchiveKind::Raw,
         members: vec![ToolMember::new("", "qjs")],
         policy: UpdatePolicy::WhenVersionChanges,
@@ -419,7 +421,6 @@ async fn a_failed_tool_download_shows_an_error_notice_in_the_view() {
         bin.path().join("bin"),
         fetcher,
         std::sync::Arc::new(FakeProcessRunner::new()),
-        Vec::new,
         || YtDlpChannel::Stable,
     )
     .with_platform_tools(vec![tool]);

@@ -26,7 +26,6 @@ export function stubBridge(): StubBridge {
     describeDeletion: { title: "Remove From List?", totalBytes: 0, names: [] },
     getSettings: { downloadFolder: "/dl" },
     binariesStatus: {
-      bundled: false,
       downloading: false,
       ytDlpVersion: null,
       latestKnown: null,

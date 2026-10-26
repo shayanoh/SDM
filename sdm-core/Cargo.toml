@@ -6,6 +6,10 @@ members = ["crates/*", "../sdm-tauri/src-tauri"]
 edition = "2024"
 version = "4.0.0"
 publish = false
+license = "MIT"
+authors = ["Shayan Ostadhassan"]
+homepage = "https://github.com/shayanoh/SDM"
+repository = "https://github.com/shayanoh/SDM"
 
 [workspace.lints.clippy]
 await_holding_lock = "deny"

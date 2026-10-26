@@ -28,9 +28,17 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis", "app", "dmg", "deb", "appimage"],
+    "targets": ["nsis", "app", "dmg", "deb", "rpm", "appimage"],
     "resources": {
-      "../../SDMChromeExtension": "chrome-extension"
+      "../../SDMChromeExtension/manifest.json": "chrome-extension/manifest.json",
+      "../../SDMChromeExtension/background.js": "chrome-extension/background.js",
+      "../../SDMChromeExtension/cookies.js": "chrome-extension/cookies.js",
+      "../../SDMChromeExtension/cookie-domains.json": "chrome-extension/cookie-domains.json",
+      "../../SDMChromeExtension/options.html": "chrome-extension/options.html",
+      "../../SDMChromeExtension/options.js": "chrome-extension/options.js",
+      "../../SDMChromeExtension/images/*.png": "chrome-extension/images/",
+      "../../LICENSE": "LICENSE",
+      "../../THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.md"
     },
     "icon": [
       "icons/32x32.png",
@@ -38,6 +46,22 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "publisher": "Shayan Ostadhassan",
+    "homepage": "https://github.com/shayanoh/SDM",
+    "copyright": "Copyright © 2026 Shayan Ostadhassan",
+    "license": "MIT",
+    "licenseFile": "../../LICENSE",
+    "category": "Utility",
+    "shortDescription": "Fast, resumable download manager",
+    "longDescription": "SDM (Shayan's Download Manager) downloads files over several connections at once and resumes them reliably after interruptions or crashes. It grabs links from the clipboard, captures downloads from Chrome through a companion extension, and handles media sites through yt-dlp.",
+    "linux": {
+      "deb": {
+        "desktopTemplate": "linux/sdm.desktop"
+      },
+      "rpm": {
+        "desktopTemplate": "linux/sdm.desktop"
+      }
+    }
   }
 }

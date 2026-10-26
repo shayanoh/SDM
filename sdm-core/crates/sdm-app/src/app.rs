@@ -847,7 +847,6 @@ impl App {
             Some(binaries) => {
                 let status = binaries.status();
                 BinariesStatusDto {
-                    bundled: self.host.bundled_tools_dir().is_some(),
                     downloading: matches!(binaries.tools_activity(), ToolsActivity::Fetching(_)),
                     yt_dlp_version: status.yt_dlp_version,
                     latest_known: status.latest_known,
@@ -857,7 +856,6 @@ impl App {
                 }
             }
             None => BinariesStatusDto {
-                bundled: self.host.bundled_tools_dir().is_some(),
                 downloading: false,
                 yt_dlp_version: None,
                 latest_known: None,
@@ -1170,11 +1168,10 @@ impl App {
         self.publish(false).await
     }
 
-    /// The managed-binaries provisioning step for launch: inflate bundled
-    /// blobs (macOS) and check for a newer yt-dlp. Meant for a background task.
+    /// The managed-binaries provisioning step for launch: download any missing
+    /// tool and check for a newer yt-dlp. Meant for a background task.
     pub async fn provision_binaries(&self) {
         if let Some(binaries) = &self.binaries {
-            binaries.provision_bundled_if_needed().await;
             let _ = binaries.check_now(sdm_resolve::CheckReason::Launch).await;
         }
     }

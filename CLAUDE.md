@@ -13,10 +13,10 @@ A download manager for macOS, Windows and Linux: segmented transfers, resume, cl
 | Path | What it is |
 |---|---|
 | `sdm-core/` | Cargo workspace. `sdm-core` domain models and `RangeSet`; `sdm-engine` engine, scheduler, transport, persistence; `sdm-grabber` extraction, probing, verdict rules, clustering, the session; `sdm-resolve` yt-dlp, format selection, site registry, managed binaries; `sdm-app` the controller layer (settings, patch stream, notifications, tray, clipboard, grabber view); `sdm-browser` the Chrome extension's native host, cookie file and install helpers; `sdm-bench` a benchmark tool |
-| `sdm-tauri/` | The app: `src-tauri/` (Tauri shell: windows, tray, commands), `web/` (Svelte 5 frontend, one `Bridge` interface with a real and a mock implementation), `vendor/` (the macOS bundle's LZFSE blobs, Git LFS), `docker/` (the Linux build image) |
+| `sdm-tauri/` | The app: `src-tauri/` (Tauri shell: windows, tray, commands), `web/` (Svelte 5 frontend, one `Bridge` interface with a real and a mock implementation), `docker/` (the Linux build image) |
 | `SDMChromeExtension/` | The Chrome extension (MV3, loaded unpacked). Its `manifest.json` version is independent of the app's |
 | `Assets/` | Logo and icon sources |
-| `scripts/` | `build-tauri.sh` (build and publish to `Releases/`), `version.py` (the one version for every crate and package), `vendor-binaries.sh`, `check-windows.sh`, `check-linux.sh` |
+| `scripts/` | `build-tauri.sh` (build and publish to `Releases/`), `version.py` (the one version for every crate and package), `check-windows.sh`, `check-linux.sh` |
 
 ## Fixed decisions
 
@@ -47,7 +47,7 @@ Everything else falls out of this: changing the segment count mid-flight, resumi
 
 ## Testing
 
-Rust: `cargo test` in `sdm-core/` (per crate, or `--workspace --exclude sdm-tauri`; the whole workspace is slow). Frontend: `pnpm test` (vitest) and `pnpm check` (the real type check), run inside `sdm-tauri/web/` (pnpm only switches to the project's pinned version from inside the project). Extension: `node --test SDMChromeExtension/cookies.test.js`. Version script: `python3 -m unittest scripts/test_version.py`. `./test.sh` runs all of it plus the Windows and Linux compile checks.
+Rust: `cargo test` in `sdm-core/` (per crate, or `--workspace --exclude sdm-tauri`; the whole workspace is slow). Frontend: `pnpm test` (vitest) and `pnpm check` (the real type check), run inside `sdm-tauri/web/` (pnpm only switches to the project's pinned version from inside the project). Extension: `node --test SDMChromeExtension/cookies.test.js`. Version script and bundle contents: `python3 -m unittest scripts/test_version.py scripts/test_bundle_resources.py`. `./test.sh` runs all of it plus the Windows and Linux compile checks.
 
 The engine takes `HTTPTransport` as an injected trait — tests run against `FakeOrigin`, an in-process fake server programmable to misbehave (ignores `Range`, lies about `Content-Length`, drops or truncates the body, changes its `ETag`). **No test may touch the network or sleep on a real clock.**
 
@@ -63,7 +63,8 @@ The two properties that must never regress:
 - Format Rust with `cargo fmt`, TypeScript and Svelte with `prettier` (`./format.sh`); `./lint.sh` runs clippy and the Svelte check.
 - Add packages with the package manager (`cargo add`, `pnpm add`), never by hand-editing manifests or lockfiles. Versions only through `scripts/version.py`.
 - A change to the Chrome extension that is incompatible with older copies gets a major version bump in its `manifest.json` (2.0.0 was the cookie sync); the app's launch prompt compares it with the version the extension reports.
-- Vendored `ffmpeg`/`ffprobe`/`qjs` blobs (`sdm-tauri/vendor/*.lzfse`) are Git LFS; regenerate with `scripts/vendor-binaries.sh` and commit the results.
+- `ffmpeg`/`ffprobe`/`qjs` are downloaded at run time on every platform and never bundled (`platform_tools.rs`); a Chrome extension file that is not listed in `bundle.resources` of `tauri.conf.json` is not shipped (`scripts/test_bundle_resources.py` checks).
+- The project is MIT-licensed; keep `LICENSE`, `THIRD-PARTY-NOTICES.md` and the metadata in `tauri.conf.json` in step when anything about the licence or the downloaded tools changes.
 - Verify library APIs against current documentation (Context7) rather than from memory.
 
 ## Git

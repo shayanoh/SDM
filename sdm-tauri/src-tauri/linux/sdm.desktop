@@ -1,0 +1,13 @@
+[Desktop Entry]
+# Network (with FileTransfer) is what puts the app under "Internet" in GNOME's
+# app menu and its equivalents; Tauri's own category list has no such entry.
+Categories=Network;FileTransfer;
+{{#if comment}}
+Comment={{comment}}
+{{/if}}
+Exec={{exec}}
+Icon={{icon}}
+Name={{name}}
+Keywords=download;downloader;manager;torrent;video;
+Terminal=false
+Type=Application

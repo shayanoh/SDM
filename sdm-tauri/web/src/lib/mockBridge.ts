@@ -502,7 +502,6 @@ export class MockBridge implements Bridge {
   chromeSetupOpens = 0;
   /** What `binariesStatus` reports; tests and the browser preview change it. */
   binaries: BinariesStatusDto = {
-    bundled: false,
     downloading: false,
     ytDlpVersion: "2026.10.21",
     latestKnown: null,

@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use sdm_resolve::testing::{FakeBinaryFetcher, FakeProcessRunner};
 use sdm_resolve::{
     ArchiveKind, BinariesChangedFuture, BinaryFetchError, CheckReason, ManagedBinaries,
-    PlatformTool, ToolMember, ToolsActivity, UpdatePolicy, VersionSource, YtDlpChannel,
+    PlatformTool, ToolMember, ToolSource, ToolsActivity, UpdatePolicy, VersionSource, YtDlpChannel,
 };
 use support::sha256_hex;
 use url::Url;
@@ -41,8 +41,10 @@ const QJS_API: &str = "https://api.example/qjs/releases/latest";
 fn ffmpeg_tool() -> PlatformTool {
     PlatformTool {
         name: "ffmpeg".into(),
-        release_api: FFMPEG_API.into(),
-        asset_name: "ffmpeg-latest.zip".into(),
+        source: ToolSource::GitHub {
+            release_api: FFMPEG_API.into(),
+            asset_name: "ffmpeg-latest.zip".into(),
+        },
         archive: ArchiveKind::Zip,
         members: vec![
             ToolMember::new("bin/ffmpeg", "ffmpeg"),
@@ -56,8 +58,10 @@ fn ffmpeg_tool() -> PlatformTool {
 fn qjs_tool() -> PlatformTool {
     PlatformTool {
         name: "qjs".into(),
-        release_api: QJS_API.into(),
-        asset_name: "qjs-linux".into(),
+        source: ToolSource::GitHub {
+            release_api: QJS_API.into(),
+            asset_name: "qjs-linux".into(),
+        },
         archive: ArchiveKind::Raw,
         members: vec![ToolMember::new("", "qjs")],
         policy: UpdatePolicy::WhenVersionChanges,
@@ -116,7 +120,6 @@ fn managed(
         bin.to_path_buf(),
         fetcher.clone(),
         Arc::new(FakeProcessRunner::new()),
-        Vec::new,
         || YtDlpChannel::Stable,
     )
     .with_platform_tools(tools)
@@ -396,4 +399,109 @@ async fn an_empty_table_does_nothing() {
     mb.check_now(CheckReason::Launch).await;
     assert_eq!(mb.tools_activity(), ToolsActivity::Idle);
     assert_eq!(requests(&fetcher, "example"), 0);
+}
+
+const SITE_LATEST: &str = "https://site.example/redirect/latest/macos/arm64/release";
+const SITE_BUILD: &str = "https://site.example/download/macos/arm64/1792_N-127";
+
+/// The macOS shape: ffmpeg and ffprobe are separate one-file zips, found
+/// behind a `latest` address that redirects to a build.
+fn site_tool(file: &str) -> PlatformTool {
+    PlatformTool {
+        name: "ffmpeg".into(),
+        source: ToolSource::Redirect {
+            latest_url: format!("{SITE_LATEST}/{file}.zip"),
+        },
+        archive: ArchiveKind::Zip,
+        members: vec![ToolMember::new(file, file)],
+        policy: UpdatePolicy::IfMissing,
+        version_source: VersionSource::BuildId,
+    }
+}
+
+fn publish_site_build(fetcher: &FakeBinaryFetcher, file: &str, body: &[u8], sums: Option<&str>) {
+    let zip = zip_of(&[(file, body)]);
+    let latest = Url::parse(&format!("{SITE_LATEST}/{file}.zip")).unwrap();
+    let build = Url::parse(&format!("{SITE_BUILD}/{file}.zip")).unwrap();
+    fetcher.set_redirect(&latest, &build);
+    let sums = sums.map_or_else(
+        || format!("{}  {file}.zip\n", sha256_hex(&zip)),
+        str::to_owned,
+    );
+    fetcher.set_response(
+        Ok(sums.into_bytes()),
+        &Url::parse(&format!("{SITE_BUILD}/{file}.zip.sha256")).unwrap(),
+    );
+    fetcher.set_response(Ok(zip), &build);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_build_behind_a_latest_address_is_checked_against_the_checksum_beside_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let bin = tmp.path().join("bin");
+    let fetcher = Arc::new(FakeBinaryFetcher::new());
+    publish_site_build(&fetcher, "ffmpeg", b"FFMPEG", None);
+    publish_site_build(&fetcher, "ffprobe", b"FFPROBE", None);
+    let mb = managed(
+        &bin,
+        &fetcher,
+        vec![site_tool("ffmpeg"), site_tool("ffprobe")],
+    );
+    mb.check_now(CheckReason::Launch).await;
+
+    assert_eq!(std::fs::read(bin.join("ffmpeg")).unwrap(), b"FFMPEG");
+    assert_eq!(std::fs::read(bin.join("ffprobe")).unwrap(), b"FFPROBE");
+    assert_eq!(
+        mb.manifest_for_testing().ffmpeg_version.as_deref(),
+        Some("1792_N-127")
+    );
+    assert_eq!(mb.tools_activity(), ToolsActivity::Idle);
+    // Installed and never replaced: the next check asks nothing.
+    let asked = fetcher.request_count();
+    mb.check_now(CheckReason::Timer).await;
+    assert_eq!(
+        fetcher
+            .requested_urls()
+            .iter()
+            .skip(asked)
+            .filter(|u| u.contains("site.example"))
+            .count(),
+        0
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_build_whose_checksum_does_not_match_installs_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let bin = tmp.path().join("bin");
+    let fetcher = Arc::new(FakeBinaryFetcher::new());
+    publish_site_build(
+        &fetcher,
+        "ffmpeg",
+        b"FFMPEG",
+        Some(&format!("{}  x\n", "0".repeat(64))),
+    );
+    let mb = managed(&bin, &fetcher, vec![site_tool("ffmpeg")]);
+    mb.check_now(CheckReason::Launch).await;
+
+    assert!(!bin.join("ffmpeg").exists());
+    assert!(matches!(mb.tools_activity(), ToolsActivity::Failed(_)));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_checksum_file_without_a_checksum_installs_nothing() {
+    let tmp = tempfile::tempdir().unwrap();
+    let bin = tmp.path().join("bin");
+    let fetcher = Arc::new(FakeBinaryFetcher::new());
+    publish_site_build(
+        &fetcher,
+        "ffmpeg",
+        b"FFMPEG",
+        Some("<html>not found</html>"),
+    );
+    let mb = managed(&bin, &fetcher, vec![site_tool("ffmpeg")]);
+    mb.check_now(CheckReason::Launch).await;
+
+    assert!(!bin.join("ffmpeg").exists());
+    assert!(matches!(mb.tools_activity(), ToolsActivity::Failed(_)));
 }

@@ -5,7 +5,6 @@ mod binary_locator;
 mod cookie_lease;
 mod cookie_source;
 mod format_selector;
-pub mod lzfse;
 mod managed_binaries;
 mod managed_binaries_types;
 mod platform_tools;
@@ -13,7 +12,6 @@ mod process_runner;
 mod site_registry;
 mod system_process_runner;
 mod tool_install;
-mod vendor_assets;
 mod wholesale_progress_parser;
 mod yt_dlp_json;
 mod yt_dlp_resolver;
@@ -29,17 +27,16 @@ pub use cookie_source::CookieSource;
 pub use format_selector::FormatSelector;
 pub use managed_binaries::{BinariesChangedFuture, ManagedBinaries, ManagedBinariesError};
 pub use managed_binaries_types::{
-    BinariesManifest, CheckOutcome, CheckReason, ManagedBinariesStatus, ToolsActivity, VendorAsset,
+    BinariesManifest, CheckOutcome, CheckReason, ManagedBinariesStatus, ToolsActivity,
     YtDlpChannel, YtDlpVersion, yt_dlp_asset_name,
 };
 pub use platform_tools::{
-    ArchiveKind, PlatformTool, ToolMember, UpdatePolicy, VersionSource, platform_tools,
+    ArchiveKind, PlatformTool, ToolMember, ToolSource, UpdatePolicy, VersionSource, platform_tools,
 };
 pub use process_runner::{ProcessOutput, ProcessRunError, ProcessRunner};
 pub use site_registry::{HostMatch, SitePattern, SiteRegistry};
 pub use system_process_runner::SystemProcessRunner;
 pub use tool_install::{ToolInstallError, install_tool};
-pub use vendor_assets::{host_vendor_arch, vendor_assets};
 pub use wholesale_progress_parser::WholesaleProgressParser;
 pub use yt_dlp_json::{YtDlpDump, YtDlpEntry, YtDlpFormat, YtDlpParser};
 pub use yt_dlp_resolver::{Classifier, YtDlpResolver};

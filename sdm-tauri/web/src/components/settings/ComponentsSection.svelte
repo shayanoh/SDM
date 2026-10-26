@@ -21,9 +21,8 @@
     { value: "nightly", label: "Nightly" },
   ];
 
-  /** The text after a tool's name: the version and where it came from. */
+  /** The text after a tool's name: its version, or what is happening instead. */
   function toolText(version: string | null | undefined, prefix = ""): string {
-    if (status?.bundled) return `${prefix}${version ?? "—"}  (bundled)`;
     if (version) return `${prefix}${version}`;
     return status?.downloading ? "downloading…" : "not installed";
   }

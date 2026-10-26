@@ -147,32 +147,10 @@ describe("the Settings window", () => {
     }
   });
 
-  it("says (bundled) for the tools when the app ships them", async () => {
+  it("shows a download status while the tools are downloading", async () => {
     const bridge = new MockBridge();
     bridge.binaries = {
       ...bridge.binaries,
-      bundled: true,
-      ffmpegVersion: "N-1",
-    };
-    render(SettingsWindow, {
-      context: createContext(
-        bridge,
-        new DownloadStore(() => {}),
-        new UiState(),
-      ),
-      props: { platform: "mac", onClose: () => {} },
-    });
-    await fireEvent.click(
-      await screen.findByRole("tab", { name: "Media Sites" }),
-    );
-    expect((await screen.findAllByText(/\(bundled\)/)).length).toBe(3);
-  });
-
-  it("shows a download status instead when the tools are downloaded", async () => {
-    const bridge = new MockBridge();
-    bridge.binaries = {
-      ...bridge.binaries,
-      bundled: false,
       downloading: true,
       ffmpegVersion: null,
     };
@@ -188,7 +166,6 @@ describe("the Settings window", () => {
       await screen.findByRole("tab", { name: "Media Sites" }),
     );
     expect((await screen.findAllByText("downloading…")).length).toBe(3);
-    expect(screen.queryByText(/\(bundled\)/)).toBeNull();
   });
 
   it("runs a check and saves the channel at once, without sending other edits", async () => {

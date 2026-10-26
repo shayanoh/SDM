@@ -17,7 +17,6 @@ fn managed(bin: std::path::PathBuf, fetcher: &Arc<FakeBinaryFetcher>) -> Managed
         bin,
         fetcher.clone(),
         Arc::new(FakeProcessRunner::new()),
-        Vec::new,
         || YtDlpChannel::Stable,
     )
 }

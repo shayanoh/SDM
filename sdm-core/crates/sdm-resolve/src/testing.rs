@@ -111,6 +111,7 @@ pub struct FakeBinaryFetcher {
 #[derive(Default)]
 struct FetcherState {
     responses: HashMap<String, Result<Vec<u8>, BinaryFetchError>>,
+    redirects: HashMap<String, String>,
     request_count: usize,
     requested_urls: Vec<String>,
 }
@@ -128,6 +129,15 @@ impl FakeBinaryFetcher {
             .unwrap()
             .responses
             .insert(url.as_str().to_owned(), result);
+    }
+
+    /// Makes `resolve(from)` answer `to`.
+    pub fn set_redirect(&self, from: &Url, to: &Url) {
+        self.state
+            .lock()
+            .unwrap()
+            .redirects
+            .insert(from.as_str().to_owned(), to.as_str().to_owned());
     }
 
     pub fn responses(&self) -> HashMap<String, Result<Vec<u8>, BinaryFetchError>> {
@@ -155,6 +165,16 @@ impl Default for FakeBinaryFetcher {
 
 #[async_trait]
 impl BinaryFetching for FakeBinaryFetcher {
+    async fn resolve(&self, url: &Url) -> Result<Url, BinaryFetchError> {
+        let mut state = self.state.lock().unwrap();
+        state.request_count += 1;
+        state.requested_urls.push(url.as_str().to_owned());
+        match state.redirects.get(url.as_str()) {
+            Some(target) => Ok(Url::parse(target).expect("a valid redirect target")),
+            None => Ok(url.clone()),
+        }
+    }
+
     async fn data(&self, url: &Url) -> Result<Vec<u8>, BinaryFetchError> {
         let mut state = self.state.lock().unwrap();
         state.request_count += 1;

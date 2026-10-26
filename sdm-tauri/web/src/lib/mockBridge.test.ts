@@ -399,6 +399,5 @@ describe("the settings in the mock", () => {
     await bridge.checkBinariesNow();
     expect(bridge.settingsOpens).toBe(1);
     expect(bridge.binaryChecks).toBe(1);
-    expect((await bridge.binariesStatus()).bundled).toBe(false);
   });
 });

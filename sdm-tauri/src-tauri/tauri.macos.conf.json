@@ -3,9 +3,6 @@
   "bundle": {
     "macOS": {
       "signingIdentity": "-"
-    },
-    "resources": {
-      "../vendor/*": "vendor/"
     }
   }
 }

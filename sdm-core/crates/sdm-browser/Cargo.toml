@@ -3,6 +3,10 @@ name = "sdm-browser"
 edition.workspace = true
 version.workspace = true
 publish.workspace = true
+license.workspace = true
+authors.workspace = true
+homepage.workspace = true
+repository.workspace = true
 
 [dependencies]
 sdm-resolve = { version = "4.0.0", path = "../sdm-resolve" }

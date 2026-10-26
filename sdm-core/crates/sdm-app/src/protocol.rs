@@ -254,8 +254,6 @@ impl Default for SettingsDto {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Type)]
 #[serde(rename_all = "camelCase")]
 pub struct BinariesStatusDto {
-    /// The tools ship inside the app (macOS) rather than being downloaded.
-    pub bundled: bool,
     /// A tool is being downloaded right now.
     pub downloading: bool,
     pub yt_dlp_version: Option<String>,

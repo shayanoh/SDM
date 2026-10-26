@@ -22,6 +22,12 @@ pub trait BinaryFetching: Send + Sync {
     /// `BinaryFetchError::Http` on a non-2xx status and
     /// `BinaryFetchError::Transport` on a connection failure.
     async fn data(&self, url: &Url) -> Result<Vec<u8>, BinaryFetchError>;
+
+    /// Where `url` redirects to (following every hop), without downloading
+    /// the body. An address that does not redirect resolves to itself.
+    async fn resolve(&self, url: &Url) -> Result<Url, BinaryFetchError> {
+        Ok(url.clone())
+    }
 }
 
 /// `URLRequest.timeoutInterval` in Swift: 60 s.
@@ -39,6 +45,8 @@ pub struct ReqwestBinaryFetcher {
     /// `data` call as a transport error, as `URLSession` would fail the
     /// request, instead of panicking at construction.
     client: Result<reqwest::Client, String>,
+    /// A client that follows no redirect, for reading where one leads.
+    resolver: Result<reqwest::Client, String>,
 }
 
 impl ReqwestBinaryFetcher {
@@ -49,13 +57,27 @@ impl ReqwestBinaryFetcher {
     /// Applies the `SDM` user agent and the 60 s connect and idle timeouts to `builder`.
     /// Lets tests supply, for example, a builder with proxies disabled.
     pub fn with_builder(builder: reqwest::ClientBuilder) -> Self {
-        let client = builder
-            .user_agent("SDM")
-            .connect_timeout(IDLE_TIMEOUT)
-            .read_timeout(IDLE_TIMEOUT)
-            .build()
-            .map_err(|e| e.to_string());
-        Self { client }
+        Self::with_builders(builder, reqwest::Client::builder())
+    }
+
+    /// `with_builder`, with the builder of the client that reads redirects too
+    /// (it is given no redirect policy of its own: this sets one).
+    pub fn with_builders(
+        builder: reqwest::ClientBuilder,
+        resolver_builder: reqwest::ClientBuilder,
+    ) -> Self {
+        let build = |builder: reqwest::ClientBuilder| {
+            builder
+                .user_agent("SDM")
+                .connect_timeout(IDLE_TIMEOUT)
+                .read_timeout(IDLE_TIMEOUT)
+                .build()
+                .map_err(|e| e.to_string())
+        };
+        Self {
+            client: build(builder),
+            resolver: build(resolver_builder.redirect(reqwest::redirect::Policy::none())),
+        }
     }
 }
 
@@ -65,8 +87,43 @@ impl Default for ReqwestBinaryFetcher {
     }
 }
 
+/// The most hops `resolve` follows.
+const MAX_REDIRECTS: usize = 5;
+
 #[async_trait]
 impl BinaryFetching for ReqwestBinaryFetcher {
+    async fn resolve(&self, url: &Url) -> Result<Url, BinaryFetchError> {
+        let client = self
+            .resolver
+            .as_ref()
+            .map_err(|e| BinaryFetchError::Transport(e.clone()))?;
+        let mut current = url.clone();
+        for _ in 0..=MAX_REDIRECTS {
+            let response = client
+                .get(current.clone())
+                .send()
+                .await
+                .map_err(|e| BinaryFetchError::Transport(e.to_string()))?;
+            let status = response.status();
+            if !status.is_redirection() {
+                if !status.is_success() {
+                    return Err(BinaryFetchError::Http(i64::from(status.as_u16())));
+                }
+                return Ok(current);
+            }
+            let location = response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|value| value.to_str().ok())
+                .ok_or_else(|| BinaryFetchError::Transport("redirect without a location".into()))?;
+            // The response is dropped here without its body being read.
+            current = current
+                .join(location)
+                .map_err(|e| BinaryFetchError::Transport(e.to_string()))?;
+        }
+        Err(BinaryFetchError::Transport("too many redirects".into()))
+    }
+
     async fn data(&self, url: &Url) -> Result<Vec<u8>, BinaryFetchError> {
         let client = self
             .client

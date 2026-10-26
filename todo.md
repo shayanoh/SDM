@@ -1,44 +1,27 @@
 # SDM — Todo
 
 What is still open. The status of everything built, and a dated log, is in
-[docs/tauri-roadmap.md](docs/tauri-roadmap.md); its "small ones" list (spec 5
-leftovers: the tray icon on a second monitor with another DPI, a vertical
-taskbar edge, `Info` banners such as "yt-dlp updated to …" that are never
-posted, a stored theme id that no longer exists, hand-edited out-of-range
-numbers that reset instead of clamping) is open too.
+[docs/tauri-roadmap.md](docs/tauri-roadmap.md).
 
 The items below came from the Swift app's backlog (read and reviewed
-2026-09-02) and were carried over when the Rust version replaced it. Items
-that only made sense for the Swift code (`URLSessionTransport`, AppKit hooks)
-were dropped; the rest were **not re-checked against the Rust port**, so look
-at the Rust code before treating one as a confirmed bug.
+2026-09-02) and were carried over when the Rust version replaced it. They were
+**not all re-checked against the Rust port**, so look at the Rust code before
+treating one as a confirmed bug.
 
 ## Todo
 
-- [ ] **Per-component details breakout.** Report per-component url / part-file
-  path / size / progress / error in the engine snapshot, and render the details
-  panel of a muxed item as two rows (video, audio) instead of the single "Video
-  + audio, muxed with ffmpeg" line. *(Spec §5.3 / §9.3.)*
+- [ ] **Engine bookkeeping** (waiting for Shayan to pick which to do):
+  per-item counters are never pruned when an item is removed; the debounced
+  state flush clears its tick counter before the write, so a failed write is
+  not retried until an unrelated change re-arms it; `SparseFile::write` does
+  not check that the file is open.
 
-- [ ] **Proactive URL refresh.** `googlevideo` URLs expire after a few hours.
-  Refresh-on-403 already works. Add: when resuming a resolved item whose stored
-  URL is older than about 5 h, refresh it *before* spawning workers rather than
-  eating one wasted `403`. *(Spec §2 / §7.3(c).)*
+## Parked
 
-- [ ] **Retry policy** (`sdm-engine/src/retry_policy.rs`):
-  - An error type the classifier does not know falls through to "transient"
-    with no reason, so an unrecognized *permanent* failure retries to the
-    attempt cap. Decide the classification and the reason text.
-  - Retry backoff "jitter" was not jitter in the Swift code: the delay was
-    deterministic per attempt number, so concurrent retries stayed in lockstep
-    (the thundering herd spec §6.4 asks jitter to prevent). Check the Rust
-    port; the likely fix is per-client seeded randomness with a test-injected
-    seed.
-- [ ] **Engine bookkeeping:** per-item counters (failed attempts, retry hold
-  ticks, attempt start bytes, checkpoint failures) were never pruned when an
-  item is removed; the debounced state flush clears its tick counter before the
-  write, so a failed write is not retried until an unrelated change re-arms it;
-  `SparseFile::write` does not check that the file is open.
+- **Retry classifier** (`sdm-engine/src/retry_policy.rs`): an error type it
+  does not know falls through to "transient" with no reason, so an unrecognized
+  *permanent* failure retries to the attempt cap. Not seen in daily use; fix
+  when one shows up (Shayan, 2026-10-27).
 
 ## Decided — no change needed
 
@@ -50,6 +33,15 @@ at the Rust code before treating one as a confirmed bug.
   connection demand (host from component 0), so it counts as one download
   against the per-host cap. The cap is politeness, not correctness. Approved
   as is.
+- **Per-component details breakout** (video and audio as two rows in the
+  details panel): not needed (Shayan, 2026-10-27).
+- **Proactive URL refresh** of an old `googlevideo` URL before resuming: extra
+  code and tests to save one `403`, which refresh-on-403 already handles
+  (Shayan, 2026-10-27).
+- **Spec 5 leftovers** in the roadmap (second-monitor DPI, vertical taskbar,
+  `Info` banners, a vanished theme id, out-of-range numbers): ignored and
+  closed (Shayan, 2026-10-27). The by-hand checks of spec 5 on all three
+  systems pass.
 
 ## Wishlist (not planned)
 

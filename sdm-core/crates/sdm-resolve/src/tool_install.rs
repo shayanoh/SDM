@@ -217,8 +217,10 @@ mod tests {
     fn tool(archive: ArchiveKind, _bytes: &[u8], members: &[(&str, &str)]) -> PlatformTool {
         PlatformTool {
             name: "ffmpeg".into(),
-            release_api: "https://api.github.com/repos/o/r/releases/latest".into(),
-            asset_name: "asset".into(),
+            source: crate::platform_tools::ToolSource::GitHub {
+                release_api: "https://api.github.com/repos/o/r/releases/latest".into(),
+                asset_name: "asset".into(),
+            },
             archive,
             members: members
                 .iter()

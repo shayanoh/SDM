@@ -77,7 +77,10 @@ fn http(status: &str, extra: &str, body: &[u8]) -> Vec<u8> {
 
 /// A fetcher that never consults the machine's proxy settings.
 fn loopback_fetcher() -> ReqwestBinaryFetcher {
-    ReqwestBinaryFetcher::with_builder(reqwest::Client::builder().no_proxy())
+    ReqwestBinaryFetcher::with_builders(
+        reqwest::Client::builder().no_proxy(),
+        reqwest::Client::builder().no_proxy(),
+    )
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -111,6 +114,37 @@ async fn reqwest_fetcher_follows_redirects() {
     assert_eq!(
         loopback_fetcher().data(&base).await.unwrap(),
         b"landed".to_vec()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn resolve_names_where_redirects_land_without_downloading_the_body() {
+    let (base, heads) = serve(|head| {
+        if head.starts_with("GET /final") {
+            http("200 OK", "", b"a very large body")
+        } else if head.starts_with("GET /middle") {
+            http("307 Temporary Redirect", "Location: /final\r\n", b"")
+        } else {
+            http("307 Temporary Redirect", "Location: /middle\r\n", b"")
+        }
+    })
+    .await;
+    let landed = loopback_fetcher().resolve(&base).await.unwrap();
+    assert_eq!(landed.path(), "/final");
+    assert_eq!(heads.lock().unwrap().len(), 3);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn resolve_gives_up_on_a_redirect_loop_and_reports_a_missing_page() {
+    let (looping, _) = serve(|_| http("302 Found", "Location: /\r\n", b"")).await;
+    assert!(matches!(
+        loopback_fetcher().resolve(&looping).await,
+        Err(BinaryFetchError::Transport(_))
+    ));
+    let (missing, _) = serve(|_| http("404 Not Found", "", b"")).await;
+    assert_eq!(
+        loopback_fetcher().resolve(&missing).await,
+        Err(BinaryFetchError::Http(404))
     );
 }
 

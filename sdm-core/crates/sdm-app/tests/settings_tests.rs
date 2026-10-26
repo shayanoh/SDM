@@ -228,47 +228,11 @@ async fn auto_resume_leaves_a_disabled_item_alone() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn binaries_status_reports_bundled_from_the_host() {
+async fn binaries_status_without_an_owner_is_idle() {
     let h = harness(FakeOrigin::new(payload(10))).await;
-    // No binaries owner: nothing is bundled or downloading.
-    let status = h.app.binaries_status();
-    assert!(!status.bundled && !status.downloading);
+    // No binaries owner: nothing is downloading.
+    assert!(!h.app.binaries_status().downloading);
     assert!(h.app.check_binaries_now().await.is_err());
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn the_bundled_flag_follows_the_hosts_tool_folder() {
-    let downloads = tempfile::tempdir().unwrap();
-    let data = tempfile::tempdir().unwrap();
-    let host = Arc::new(
-        FakeHost::new(data.path().to_path_buf(), downloads.path().to_path_buf())
-            .with_bundled_tools_dir(data.path().join("vendor")),
-    );
-    let binaries = sdm_resolve::ManagedBinaries::new(
-        data.path().join("bin"),
-        Arc::new(sdm_resolve::testing::FakeBinaryFetcher::new()),
-        Arc::new(sdm_resolve::testing::FakeProcessRunner::new()),
-        Vec::new,
-        || sdm_resolve::YtDlpChannel::Stable,
-    );
-    let store = Arc::new(InMemoryStateStore::new());
-    let app = App::new(
-        host,
-        Dependencies {
-            transport: Arc::new(FakeOrigin::new(payload(10))),
-            state_store: store,
-            trash: Arc::new(NoTrash),
-            resolver: None,
-            muxer: None,
-            wholesale_downloader: None,
-            retry_policy: RetryPolicy::new(),
-            binaries: Some(binaries),
-            grabber: None,
-            settings: None,
-        },
-    )
-    .unwrap();
-    assert!(app.binaries_status().bundled);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

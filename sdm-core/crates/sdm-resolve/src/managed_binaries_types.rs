@@ -1,6 +1,5 @@
 use std::cmp::Ordering;
 use std::fmt;
-use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -224,15 +223,6 @@ fn write_escaped(out: &mut String, text: &str) {
         }
     }
     out.push('"');
-}
-
-/// A binary shipped compressed inside the `.app` bundle, to be inflated into
-/// the managed `bin/` directory. `name` is `"ffmpeg"`, `"ffprobe"` or `"qjs"`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct VendorAsset {
-    pub name: String,
-    pub compressed_path: PathBuf,
-    pub version: String,
 }
 
 /// What the platform-tool step (ffmpeg, ffprobe, qjs on Windows and Linux)

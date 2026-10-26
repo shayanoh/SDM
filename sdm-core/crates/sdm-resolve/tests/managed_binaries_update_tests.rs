@@ -33,7 +33,6 @@ fn make_managed(bin: &Path, fetcher: &Arc<FakeBinaryFetcher>) -> ManagedBinaries
         bin.to_path_buf(),
         fetcher.clone(),
         Arc::new(FakeProcessRunner::new()),
-        Vec::new,
         || YtDlpChannel::Stable,
     )
 }

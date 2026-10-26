@@ -17,25 +17,25 @@ use tokio_util::sync::CancellationToken;
 
 use crate::binary_fetching::{BinaryFetchError, BinaryFetching};
 use crate::binary_locator::is_executable_file;
-use crate::lzfse;
 use crate::managed_binaries_types::{
-    BinariesManifest, CheckOutcome, CheckReason, ManagedBinariesStatus, ToolsActivity, VendorAsset,
+    BinariesManifest, CheckOutcome, CheckReason, ManagedBinariesStatus, ToolsActivity,
     YtDlpChannel, YtDlpVersion, yt_dlp_asset_name,
 };
-use crate::platform_tools::{PlatformTool, UpdatePolicy, VersionSource, platform_tools};
+use crate::platform_tools::{
+    PlatformTool, ToolSource, UpdatePolicy, VersionSource, platform_tools,
+};
 use crate::process_runner::ProcessRunner;
 use crate::tool_install::install_tool;
 
 /// The future `on_binaries_changed` returns (Swift's `async` closure).
 pub type BinariesChangedFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
 
-type VendorAssets = Arc<dyn Fn() -> Vec<VendorAsset> + Send + Sync>;
 type ChannelSource = Arc<dyn Fn() -> YtDlpChannel + Send + Sync>;
 type OnBinariesChanged = Arc<dyn Fn() -> BinariesChangedFuture + Send + Sync>;
 type Notify = Arc<dyn Fn(String) + Send + Sync>;
 
-/// Owns `~/Library/Application Support/SDM/bin/`: inflates the bundled
-/// `ffmpeg` / `qjs` blobs, downloads and self-updates `yt-dlp`. Time is a
+/// Owns `~/Library/Application Support/SDM/bin/`: downloads `ffmpeg`,
+/// `ffprobe` and `qjs`, and downloads and self-updates `yt-dlp`. Time is a
 /// tick counter advanced ~1 Hz by the app -- never a wall clock -- so tests
 /// drive cadence by calling `tick()` directly. See
 /// `docs/superpowers/specs/2026-09-03-managed-binaries-design.md`.
@@ -54,7 +54,6 @@ struct Inner {
     /// Only the macOS ad-hoc re-signing step runs a process.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     runner: Arc<dyn ProcessRunner>,
-    vendor_assets: VendorAssets,
     channel: ChannelSource,
     on_binaries_changed: OnBinariesChanged,
     notify: Notify,
@@ -108,6 +107,22 @@ struct ToolRelease {
     assets: Vec<ToolAsset>,
 }
 
+/// A build of a tool found at its source: where to download it and what its
+/// SHA-256 must be.
+struct ToolBuild {
+    version: String,
+    url: url::Url,
+    sha256: String,
+}
+
+/// The build id in a `…/<platform>/<arch>/<build id>/<file>` address: the
+/// second-to-last path segment.
+fn build_id(url: &url::Url) -> Option<&str> {
+    let mut segments = url.path_segments()?.rev();
+    segments.next()?;
+    segments.next().filter(|segment| !segment.is_empty())
+}
+
 #[derive(Deserialize)]
 struct ToolAsset {
     name: String,
@@ -126,7 +141,6 @@ impl ManagedBinaries {
         bin_directory: PathBuf,
         fetcher: Arc<dyn BinaryFetching>,
         runner: Arc<dyn ProcessRunner>,
-        vendor_assets: impl Fn() -> Vec<VendorAsset> + Send + Sync + 'static,
         channel: impl Fn() -> YtDlpChannel + Send + Sync + 'static,
     ) -> Self {
         Self {
@@ -134,7 +148,6 @@ impl ManagedBinaries {
                 bin_directory,
                 fetcher,
                 runner,
-                vendor_assets: Arc::new(vendor_assets),
                 channel: Arc::new(channel),
                 on_binaries_changed: Arc::new(|| Box::pin(async {})),
                 notify: Arc::new(|_| {}),
@@ -178,24 +191,6 @@ impl ManagedBinaries {
     /// What the platform-tool step is doing right now.
     pub fn tools_activity(&self) -> ToolsActivity {
         self.inner.state.lock().unwrap().tools_activity.clone()
-    }
-
-    // MARK: - Bundled inflation
-
-    /// Decode any bundled blob whose version differs from what the manifest
-    /// records as installed. Cheap, safe to call on every launch.
-    ///
-    /// Blocking file reads, LZFSE decoding of tens of megabytes and `fsync`
-    /// run on tokio's blocking pool, not on an async worker. The caller still
-    /// resumes only once every blob has been handled, as in Swift.
-    pub async fn provision_bundled_if_needed(&self) {
-        let inner = Arc::clone(&self.inner);
-        let joined = tokio::task::spawn_blocking(move || inner.provision_bundled_if_needed()).await;
-        if let Err(error) = joined
-            && error.is_panic()
-        {
-            std::panic::resume_unwind(error.into_panic());
-        }
     }
 
     // MARK: - Cadence
@@ -299,37 +294,6 @@ impl Inner {
         self.bin_directory.join("manifest.json")
     }
 
-    fn provision_bundled_if_needed(&self) {
-        let mut manifest = self.load_manifest();
-        for asset in (self.vendor_assets)() {
-            if !asset.compressed_path.exists() {
-                continue;
-            }
-            let target = self.bin_directory.join(&asset.name);
-            let installed = manifest.version_for(&asset.name).map(str::to_owned);
-            let present = is_executable_file(&target);
-            if present && installed.as_deref() == Some(asset.version.as_str()) {
-                continue;
-            }
-            let result = (|| -> Result<(), String> {
-                let blob = fs::read(&asset.compressed_path).map_err(|e| e.to_string())?;
-                let binary = lzfse::decode(&blob).map_err(|e| e.to_string())?;
-                self.write_executable(&binary, &target)
-                    .map_err(|e| e.to_string())?;
-                match asset.name.as_str() {
-                    "ffmpeg" | "ffprobe" => manifest.ffmpeg_version = Some(asset.version.clone()),
-                    "qjs" => manifest.qjs_version = Some(asset.version.clone()),
-                    _ => {}
-                }
-                self.save_manifest(&manifest).map_err(|e| e.to_string())
-            })();
-            if let Err(error) = result {
-                manifest.last_error = Some(format!("inflate {}: {error}", asset.name));
-                let _ = self.save_manifest(&manifest);
-            }
-        }
-    }
-
     /// The yt-dlp check, then the platform tools (a yt-dlp failure must not
     /// skip them, and a tool failure must not hide yt-dlp's outcome).
     async fn perform_check(&self, reason: CheckReason) -> CheckOutcome {
@@ -387,43 +351,31 @@ impl Inner {
         }
     }
 
-    /// Reads the release, and installs its asset unless the tool is present at
-    /// that version. Returns the installed version, or `None` if already current.
+    /// Finds the newest build of the tool, and installs it unless the tool is
+    /// present at that version. Returns the installed version, or `None` if
+    /// already current.
     async fn fetch_and_install(
         &self,
         tool: &PlatformTool,
         present: bool,
         recorded: Option<String>,
     ) -> Result<Option<String>, String> {
-        let api = url::Url::parse(&tool.release_api).map_err(|e| e.to_string())?;
-        let info = self.fetcher.data(&api).await.map_err(|e| e.to_string())?;
-        let release: ToolRelease =
-            serde_json::from_slice(&info).map_err(|e| format!("release info: {e}"))?;
-        let version = match tool.version_source {
-            VersionSource::Tag => release.tag_name.clone(),
-            VersionSource::PublishedDate => release
-                .published_at
-                .as_deref()
-                .and_then(|at| at.get(..10))
-                .unwrap_or(&release.tag_name)
-                .to_owned(),
+        let build = match &tool.source {
+            ToolSource::GitHub {
+                release_api,
+                asset_name,
+            } => self.find_in_release(tool, release_api, asset_name).await?,
+            ToolSource::Redirect { latest_url } => self.find_behind_redirect(latest_url).await?,
         };
-        if present && recorded.as_deref() == Some(version.as_str()) {
+        if present && recorded.as_deref() == Some(build.version.as_str()) {
             return Ok(None);
         }
-        let asset = release
-            .assets
-            .iter()
-            .find(|a| a.name == tool.asset_name)
-            .ok_or_else(|| format!("the release has no {}", tool.asset_name))?;
-        let sha256 = asset
-            .digest
-            .as_deref()
-            .and_then(|d| d.strip_prefix("sha256:"))
-            .ok_or_else(|| format!("the release has no checksum for {}", tool.asset_name))?
-            .to_owned();
-        let url = url::Url::parse(&asset.browser_download_url).map_err(|e| e.to_string())?;
-        let bytes = self.fetcher.data(&url).await.map_err(|e| e.to_string())?;
+        let bytes = self
+            .fetcher
+            .data(&build.url)
+            .await
+            .map_err(|e| e.to_string())?;
+        let sha256 = build.sha256;
         let tool = tool.clone();
         let bin = self.bin_directory.clone();
         // Hashing and unpacking a 200 MB archive must not block an async worker.
@@ -431,7 +383,79 @@ impl Inner {
             .await
             .map_err(|e| e.to_string())?
             .map_err(|e| e.to_string())?;
-        Ok(Some(version))
+        Ok(Some(build.version))
+    }
+
+    /// The asset of a GitHub release, with the digest GitHub publishes for it.
+    async fn find_in_release(
+        &self,
+        tool: &PlatformTool,
+        release_api: &str,
+        asset_name: &str,
+    ) -> Result<ToolBuild, String> {
+        let api = url::Url::parse(release_api).map_err(|e| e.to_string())?;
+        let info = self.fetcher.data(&api).await.map_err(|e| e.to_string())?;
+        let release: ToolRelease =
+            serde_json::from_slice(&info).map_err(|e| format!("release info: {e}"))?;
+        let version = match tool.version_source {
+            VersionSource::PublishedDate => release
+                .published_at
+                .as_deref()
+                .and_then(|at| at.get(..10))
+                .unwrap_or(&release.tag_name)
+                .to_owned(),
+            VersionSource::Tag | VersionSource::BuildId => release.tag_name.clone(),
+        };
+        let asset = release
+            .assets
+            .iter()
+            .find(|a| a.name == asset_name)
+            .ok_or_else(|| format!("the release has no {asset_name}"))?;
+        let sha256 = asset
+            .digest
+            .as_deref()
+            .and_then(|d| d.strip_prefix("sha256:"))
+            .ok_or_else(|| format!("the release has no checksum for {asset_name}"))?
+            .to_owned();
+        let url = url::Url::parse(&asset.browser_download_url).map_err(|e| e.to_string())?;
+        Ok(ToolBuild {
+            version,
+            url,
+            sha256,
+        })
+    }
+
+    /// The build a `latest` address redirects to. Its address names the build
+    /// (`…/macos/arm64/<build id>/ffmpeg.zip`) and `<address>.sha256` holds the
+    /// checksum, so both come from the address the redirect lands on.
+    async fn find_behind_redirect(&self, latest_url: &str) -> Result<ToolBuild, String> {
+        let latest = url::Url::parse(latest_url).map_err(|e| e.to_string())?;
+        let url = self
+            .fetcher
+            .resolve(&latest)
+            .await
+            .map_err(|e| e.to_string())?;
+        let version = build_id(&url)
+            .ok_or_else(|| format!("{url} does not name a build"))?
+            .to_owned();
+        let sums_url = url::Url::parse(&format!("{url}.sha256")).map_err(|e| e.to_string())?;
+        let sums = self
+            .fetcher
+            .data(&sums_url)
+            .await
+            .map_err(|e| e.to_string())?;
+        // `<hex>  <file name>`, like `shasum` writes it.
+        let sha256 = String::from_utf8_lossy(&sums)
+            .split_whitespace()
+            .next()
+            .filter(|word| word.len() == 64 && word.bytes().all(|b| b.is_ascii_hexdigit()))
+            .ok_or_else(|| format!("{sums_url} holds no checksum"))?
+            .to_owned();
+        Ok(ToolBuild {
+            version,
+            url,
+            sha256,
+        })
     }
 
     async fn perform_yt_dlp_check(&self, reason: CheckReason) -> CheckOutcome {
