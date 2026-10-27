@@ -6,6 +6,7 @@ import {
   pickSiteList,
 } from "./cookies.js";
 import { downloadUrl, shouldCapture } from "./downloads.js";
+import { EXTENSION_VERSION } from "./version.js";
 
 const NATIVE_HOST = "com.shayanoh.sdm.chrome_extension";
 const DUPLICATE_MS = 60000;
@@ -65,11 +66,11 @@ chrome.downloads.onCreated.addListener(async (download) => {
 
 async function reportStatus() {
   try {
-    const manifest = chrome.runtime.getManifest();
-
+    // Not the manifest's version: after an update Chrome runs the old script
+    // under the new manifest until the extension is reloaded.
     await chrome.runtime.sendNativeMessage(NATIVE_HOST, {
       type: "extensionStatus",
-      version: manifest.version,
+      version: EXTENSION_VERSION,
     });
   } catch (error) {
     console.error("Failed to report extension status:", error);

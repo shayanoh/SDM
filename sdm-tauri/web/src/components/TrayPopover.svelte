@@ -81,10 +81,9 @@
       </div>
     {/if}
     <hr />
-    <div class="row">
+    <div class="actions">
       <button onclick={() => guarded(() => bridge.pauseAll())}>Pause all</button
       >
-      <span class="spacer"></span>
       <button onclick={() => guarded(() => bridge.openAbout())}>About</button>
       <button onclick={() => guarded(() => bridge.showMain())}>Open SDM</button>
       <button onclick={() => guarded(() => bridge.requestQuit())}>Quit</button>
@@ -121,6 +120,15 @@
   }
   .spacer {
     flex: 1;
+  }
+  /* Two rows of two, equal width; labels stay on one line. */
+  .actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .actions button {
+    white-space: nowrap;
   }
   .muted {
     color: var(--text-secondary);

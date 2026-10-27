@@ -7,8 +7,9 @@ use std::time::Duration;
 use sdm_app::AppError;
 use tauri::{AppHandle, Manager, WebviewWindow};
 
-/// If a page never reports in (a script error), show its window anyway.
-const FALLBACK: Duration = Duration::from_secs(6);
+/// If a page never reports in (a script error), show its window anyway. A
+/// healthy page reports well inside this; reaching it is logged as a warning.
+const FALLBACK: Duration = Duration::from_secs(2);
 
 /// Whether the page's "ready" shows its window. The tray popover shows itself
 /// on a click, and a main window started hidden in the tray stays hidden
@@ -56,9 +57,11 @@ pub fn show_if_stuck(app: &AppHandle, label: &'static str) {
         if let Some(window) = app.get_webview_window(label)
             && !window.is_visible().unwrap_or(true)
             && should_reveal(label, hidden_launch(), false)
-            && let Err(error) = window.show()
         {
-            tracing::warn!("could not show {label}: {error}");
+            tracing::warn!("{label} never reported ready; showing it anyway");
+            if let Err(error) = window.show() {
+                tracing::warn!("could not show {label}: {error}");
+            }
         }
     });
 }

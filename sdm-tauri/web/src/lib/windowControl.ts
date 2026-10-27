@@ -1,4 +1,5 @@
 import { cappedHeight } from "./fitting";
+import { nextFrame } from "./paint";
 
 /** What the page asks of its own native window. Every call is a no-op in a plain browser. */
 
@@ -12,9 +13,6 @@ export async function closeWindow(): Promise<void> {
 }
 
 let fitting: Promise<void> = Promise.resolve();
-
-const nextFrame = () =>
-  new Promise<void>((done) => requestAnimationFrame(() => done()));
 
 /**
  * Resizes the window so the page has `width` x `height` points to itself.

@@ -34,6 +34,7 @@
       "../../SDMChromeExtension/background.js": "chrome-extension/background.js",
       "../../SDMChromeExtension/cookies.js": "chrome-extension/cookies.js",
       "../../SDMChromeExtension/downloads.js": "chrome-extension/downloads.js",
+      "../../SDMChromeExtension/version.js": "chrome-extension/version.js",
       "../../SDMChromeExtension/cookie-domains.json": "chrome-extension/cookie-domains.json",
       "../../SDMChromeExtension/options.html": "chrome-extension/options.html",
       "../../SDMChromeExtension/options.js": "chrome-extension/options.js",
