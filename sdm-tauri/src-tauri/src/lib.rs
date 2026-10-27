@@ -1,5 +1,5 @@
-#[cfg(target_os = "macos")]
 mod about_window;
+#[cfg(target_os = "macos")]
 mod activation;
 mod autostart;
 mod chrome_setup;
